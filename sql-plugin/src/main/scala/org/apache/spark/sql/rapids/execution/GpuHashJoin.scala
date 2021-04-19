@@ -15,7 +15,7 @@
  */
 package org.apache.spark.sql.rapids.execution
 
-import ai.rapids.cudf.{NvtxColor, Table}
+import ai.rapids.cudf.{GatherMap, NvtxColor, Table}
 import com.nvidia.spark.rapids._
 
 import org.apache.spark.TaskContext
@@ -62,6 +62,88 @@ trait GpuHashJoin extends GpuExec {
   def leftKeys: Seq[Expression]
   def rightKeys: Seq[Expression]
   def buildSide: GpuBuildSide
+
+  // OK so what we want to do is to have several different levels of abstractions.
+  // The first level is going to be I have the build table vs I want to stream the build table
+  // This is to allow for us to fall back to a sort merge join in the future if we see that the
+  // build table is too big.
+
+  // I have the entire built table (broadcast use cases)
+  // def doJoin(builtTable: Table,
+  //      stream: Iterator[ColumnarBatch],
+  //      boundCondition: Option[Expression], ...): Iterator[ColumnarBatch]
+
+  // I need to stream the build table (I know this is a little odd. The terminology
+  // was set up for a hash join, so we might want to rename things???
+  // def doJoin(buildStream: Iterator[ColumnarBatch],
+  //      stream: Iterator[ColumnarBatch],
+  //      boundCondition: Option[Expression], ...): Iterator[ColumnarBatch] = {
+  //    ConcatAndConsumeAll.getSingleBatchWithVerification...
+  //  doJoin(builtTable, stream, ...)
+  // In the future we can have a size cutoff for the build side and switch to a sort merge join
+  // if we go over that limit
+  // }
+
+  // We might also want some kind of a catch/recover like issue if we run out of memory just
+  // trying to make the gather map. In that case we would want to fall back to the sort merge join
+  // again, but even then we might be in a situation where there is a lot of skewed key data
+  // and depending on the type of join we might need to either fail or try to break it up even
+  // further.
+
+  // The next level of abstraction we need is in the iterator.  Right now the iterator assumes
+  // that a join will produce a single output batch. This needs to change. What we want is
+  // for the iterator to get back one or two gather maps along with the data to gather. Perhaps
+  // something like the following
+
+  class Gatherer(val gatherMap: GatherMap, val dataTable: Table) extends AutoCloseable {
+    // How much of the gather map we have output so far
+    private var gatheredUpTo: Long = 0
+
+    def gatherNext(n: Integer): Table = {
+      // TODO
+      val start = gatheredUpTo
+      val end = start + n
+      assert(end <= gatherMap.getRowCount)
+      // TODO do the gather
+      gatheredUpTo += n
+      null
+    }
+
+    def isDone: Boolean = {
+      gatheredUpTo >= gatherMap.getRowCount
+    }
+
+    override def close(): Unit = {
+      gatherMap.close()
+      dataTable.close()
+    }
+  }
+
+  object Gatherer {
+    // We can then have some methods that will look at the gather maps and apply
+    // heuristics to determine what to do.
+    // We can probably also make this spillable at some point by hiding dataTable and gatherMap
+
+    def canGatherWithoutChunking(left: Option[Gatherer], right: Option[Gatherer]): Boolean = {
+      // TODO
+      false
+    }
+
+    def getGatherRowEstimate(left: Option[Gatherer], right: Option[Gatherer],
+        tagetSize: Long): Int = {
+      // TODO
+      100
+    }
+  }
+
+  // Ideally we will also want some customization on a per join type level. This could let us do
+  // something like deduplicate columns generically, but also deduplicte the join keys. If it is
+  // an inner join then we know there will be duplicate data
+  // Once we have created teh gather map we will need a good way to clean up the data passed to the
+  // Gatherer so we don't have duplication, but then we will need another step after to clean it up
+  // again (insert back in the columns that we dropped before)
+
+  // There is also work coming that might filter out nulls ahead of the join.
 
   protected lazy val (buildPlan, streamedPlan) = buildSide match {
     case GpuBuildLeft => (left, right)
