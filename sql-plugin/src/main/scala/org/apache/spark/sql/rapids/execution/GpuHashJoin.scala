@@ -15,7 +15,7 @@
  */
 package org.apache.spark.sql.rapids.execution
 
-import ai.rapids.cudf.{GatherMap, NvtxColor, Table}
+import ai.rapids.cudf.{ColumnView, GatherMap, NvtxColor, Table}
 import com.nvidia.spark.rapids._
 
 import org.apache.spark.TaskContext
@@ -55,74 +55,219 @@ object GpuHashJoin {
 }
 
 /**
- * A class that holds a large gather map and the data it needs to gather. This takes
- * ownership of both the input table and the gatherMap.
- * This class is spillable and tracks if the input/gatherMap are in use or not.
- * To say that you will not need either part actively for a while call allowSpilling
- * If the data is needed again it will be unspilled as it is used
+ * Generic trait for all join gather instances.
+ * All instances should be spillable.
+ * The life cycle of this assumes that when it is created that the data and
+ * gather maps will be used shortly.
+ * If you are not going to use these for a while, like when returning from an iterator,
+ * then allowSpilling should be called so that the cached data is released and spilling
+ * can be allowed.  If you need/want to use the data again, just start using it, and it
+ * will be cached yet again until allowSpilling is called.
+ * When you are completely done with this object call close on it.
  */
-class JoinGatherer(
+trait JoinGatherer extends AutoCloseable with Arm {
+  /**
+   * Gather the next n rows from the join gather maps.
+   * @param n how many rows to gather
+   * @return the gathered data as a ColumnarBatch
+   */
+  def gatherNext(n: Int): ColumnarBatch
+
+  /**
+   * Is all of the data gathered so far.
+   */
+  def isDone: Boolean
+
+  /**
+   * Number of rows left to gather
+   */
+  def numRowsLeft: Long
+
+  /**
+   * Indicate that we are done messing with the data for now and it can be spilled.
+   */
+  def allowSpilling(): Unit
+
+  /**
+   * A really fast and dirty way to estimate the size of each row in the join output
+   */
+  def realCheapPerRowSizeEstimate: Double
+
+  /**
+   * Get the bit count size map for the next n rows to be gathered.
+   */
+  def getBitSizeMap(n: Int): ColumnView
+
+  /**
+   * Do a complete/expensive job to get the number of rows that can be gathered to get close
+   * to the targetSize for the final output.
+   */
+//  def gatherRowEstimate(targetSize: Long): Int = {
+//    val estimatedRows = Math.min(
+//      ((targetSize / realCheapPerRowSizeEstimate) * 2).toLong,
+//      numRowsLeft)
+//    val numRowsToProbe = Math.min(estimatedRows, Integer.MAX_VALUE).toInt
+//    withResource(getBitSizeMap(numRowsToProbe)) { bitSizes =>
+//      // TODO need a rolling SUM without grouping
+//    }
+//  }
+}
+
+/**
+ * JoinGatherer for a single map/table
+ */
+class JoinGathererImpl(
+    // TODO need a way to spill/cache the GatherMap
     private val gatherMap: GatherMap,
     inputData: ColumnarBatch,
-    spillCallback: RapidsBuffer.SpillCallback) extends AutoCloseable with Arm {
+    spillCallback: RapidsBuffer.SpillCallback) extends JoinGatherer {
   // The cached data table
-  private var cachedData: Option[ColumnarBatch] = None
-  private val spillData: SpillableColumnarBatch = SpillableColumnarBatch(inputData,
-    SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
-    spillCallback)
+  private var cachedData: Option[ColumnarBatch] = Some(inputData)
+  private var spillData: Option[SpillableColumnarBatch] = None
+
   // How much of the gather map we have output so far
   private var gatheredUpTo: Long = 0
+  private val totalRows: Long = gatherMap.getRowCount
+  private val totalInputRows: Int = inputData.numRows()
+  private val totalInputSize: Long = GpuColumnVector.getTotalDeviceMemoryUsed(inputData)
 
-  def gatherNext(n: Integer): ColumnarBatch = synchronized {
+  override def realCheapPerRowSizeEstimate: Double = totalInputSize.toDouble / totalInputRows
+
+  override def gatherNext(n: Int): ColumnarBatch = synchronized {
     val start = gatheredUpTo
-    assert((start + n) <= gatherMap.getRowCount)
-    val data = withResource(gatherMap.toColumnView(start, n)) { gatherView =>
+    assert((start + n) <= totalRows)
+    val ret = withResource(gatherMap.toColumnView(start, n)) { gatherView =>
       val batch = getDataBatch
-      withResource(GpuColumnVector.from(batch)) { table =>
-        table.gather(getherView)
+      val gatheredTab = withResource(GpuColumnVector.from(batch)) { table =>
+        // TODO need to update gather to take a view not a vector
+        withResource(gatherView.copyToColumnVector()) { gatherVec =>
+          table.gather(gatherVec)
+        }
+      }
+      withResource(gatheredTab) { gt =>
+        GpuColumnVector.from(gt, GpuColumnVector.extractTypes(batch))
       }
     }
-    // TODO do the gather
     gatheredUpTo += n
+    ret
   }
 
-  def isDone: Boolean = {
-    gatheredUpTo >= gatherMap.getRowCount
+  override def isDone: Boolean = synchronized {
+    gatheredUpTo >= totalRows
   }
+
+  override def numRowsLeft: Long = totalRows - gatheredUpTo
 
   private def getDataBatch: ColumnarBatch = synchronized {
     if (cachedData.isEmpty) {
-      cachedData = Some(spillData.getColumnarBatch())
+      cachedData = Some(spillData.get.getColumnarBatch())
     }
     cachedData.get
   }
 
-  def allowSpilling(): Unit = synchronized {
+  override def allowSpilling(): Unit = synchronized {
+    if (spillData.isEmpty && cachedData.isDefined) {
+      // First time we need to allow for spilling
+      spillData = Some(SpillableColumnarBatch(inputData,
+        SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+        spillCallback))
+    }
     cachedData.foreach(_.close())
     cachedData = None
+  }
+
+  override def getBitSizeMap(n: Int): ColumnView = synchronized {
+    // For now we will calculate the bit counts for the input rows each time. But it would be
+    // nice to have something that lets us keep it cached, unless we run out of memory and then
+    // throw it away to recalculate it again.
+    val data = getDataBatch
+    val inputBitCounts = withResource(GpuColumnVector.from(data)) { table =>
+      table.rowBitCount()
+    }
+    withResource(inputBitCounts) { inputBitCounts =>
+      withResource(gatherMap.toColumnView(gatheredUpTo, n)) { gatherView =>
+        // Gather only works on a table so wrap the single column
+        val gatheredTab = withResource(new Table(inputBitCounts)) { table =>
+          // TODO need to update gather to take a view not a vector
+          withResource(gatherView.copyToColumnVector()) { gatherVec =>
+            table.gather(gatherVec)
+          }
+        }
+        withResource(gatheredTab) { gatheredTab =>
+          gatheredTab.getColumn(0).incRefCount()
+        }
+      }
+    }
   }
 
   override def close(): Unit = synchronized {
     gatherMap.close()
     cachedData.foreach(_.close())
-    spillData.close()
+    cachedData = None
+    spillData.foreach(_.close())
+    spillData = None
   }
 }
 
-object JoinGatherer {
-  // We can then have some methods that will look at the gather maps and apply
-  // heuristics to determine what to do.
-  // We can probably also make this spillable at some point by hiding dataTable and gatherMap
+/**
+ * Join Gatherer for a left table and a right table
+ */
+case class MultiJoinGather(left: JoinGatherer, right: JoinGatherer) extends JoinGatherer {
+  assert(left.numRowsLeft == right.numRowsLeft,
+    "all gatherers much have the same number of rows to gather")
 
-  def canGatherWithoutChunking(left: Option[JoinGatherer], right: Option[JoinGatherer]): Boolean = {
-    // TODO
-    false
+  override def gatherNext(n: Int): ColumnarBatch = {
+    withResource(left.gatherNext(n)) { leftGathered =>
+      withResource(right.gatherNext(n)) { rightGathered =>
+        val vectors = Seq(leftGathered, rightGathered).flatMap { batch =>
+          (0 until batch.numCols()).map { i =>
+            val col = batch.column(i)
+            col.asInstanceOf[GpuColumnVector].incRefCount()
+            col
+          }
+        }.toArray
+        new ColumnarBatch(vectors, n)
+      }
+    }
   }
 
-  def getGatherRowEstimate(left: Option[JoinGatherer], right: Option[JoinGatherer],
-      tagetSize: Long): Int = {
-    // TODO
-    100
+  override def isDone: Boolean = left.isDone
+
+  override def numRowsLeft: Long = left.numRowsLeft
+
+  override def allowSpilling(): Unit = {
+    left.allowSpilling()
+    right.allowSpilling()
+  }
+
+  override def realCheapPerRowSizeEstimate: Double =
+    left.realCheapPerRowSizeEstimate + right.realCheapPerRowSizeEstimate
+
+  override def getBitSizeMap(n: Int): ColumnView = {
+    withResource(left.getBitSizeMap(n)) { leftBits =>
+      withResource(right.getBitSizeMap(n)) { rightBits =>
+        leftBits.add(rightBits)
+      }
+    }
+  }
+
+  override def close(): Unit = {
+    left.close()
+    right.close()
+  }
+}
+
+object JoinGatherer extends Arm {
+
+  def canLikelyGatherWithoutChunking(gatherer: JoinGatherer, targetSize: Long): Boolean = {
+    val rowsLeft = gatherer.numRowsLeft
+    if (rowsLeft >= Integer.MAX_VALUE) {
+      // Too many rows guaranteed no need to check further
+      false
+    } else {
+      // Close enough it will probably work so just try it
+      (rowsLeft * gatherer.realCheapPerRowSizeEstimate) <= (targetSize * 0.75)
+    }
   }
 }
 
@@ -138,7 +283,8 @@ trait GpuHashJoin extends GpuExec {
   // OK so what we want to do is to have several different levels of abstractions.
   // The first level is going to be I have the build table vs I want to stream the build table
   // This is to allow for us to fall back to a sort merge join in the future if we see that the
-  // build table is too big.
+  // build table is too big.  For now we are not going to do that, because all of the
+  // implementations assume a single batch for the build side
 
   // I have the entire built table (broadcast use cases)
   // def doJoin(builtTable: Table,
@@ -287,6 +433,7 @@ trait GpuHashJoin extends GpuExec {
       joinTime: GpuMetric,
       filterTime: GpuMetric,
       totalTime: GpuMetric): Iterator[ColumnarBatch] = {
+    // TODO need to be able to chunk the output
     new Iterator[ColumnarBatch] {
       import scala.collection.JavaConverters._
       var nextCb: Option[ColumnarBatch] = None
