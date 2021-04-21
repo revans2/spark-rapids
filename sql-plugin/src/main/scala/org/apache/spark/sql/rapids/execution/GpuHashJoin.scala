@@ -54,6 +54,78 @@ object GpuHashJoin {
   }
 }
 
+/**
+ * A class that holds a large gather map and the data it needs to gather. This takes
+ * ownership of both the input table and the gatherMap.
+ * This class is spillable and tracks if the input/gatherMap are in use or not.
+ * To say that you will not need either part actively for a while call allowSpilling
+ * If the data is needed again it will be unspilled as it is used
+ */
+class JoinGatherer(
+    private val gatherMap: GatherMap,
+    inputData: ColumnarBatch,
+    spillCallback: RapidsBuffer.SpillCallback) extends AutoCloseable with Arm {
+  // The cached data table
+  private var cachedData: Option[ColumnarBatch] = None
+  private val spillData: SpillableColumnarBatch = SpillableColumnarBatch(inputData,
+    SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+    spillCallback)
+  // How much of the gather map we have output so far
+  private var gatheredUpTo: Long = 0
+
+  def gatherNext(n: Integer): ColumnarBatch = synchronized {
+    val start = gatheredUpTo
+    assert((start + n) <= gatherMap.getRowCount)
+    val data = withResource(gatherMap.toColumnView(start, n)) { gatherView =>
+      val batch = getDataBatch
+      withResource(GpuColumnVector.from(batch)) { table =>
+        table.gather(getherView)
+      }
+    }
+    // TODO do the gather
+    gatheredUpTo += n
+  }
+
+  def isDone: Boolean = {
+    gatheredUpTo >= gatherMap.getRowCount
+  }
+
+  private def getDataBatch: ColumnarBatch = synchronized {
+    if (cachedData.isEmpty) {
+      cachedData = Some(spillData.getColumnarBatch())
+    }
+    cachedData.get
+  }
+
+  def allowSpilling(): Unit = synchronized {
+    cachedData.foreach(_.close())
+    cachedData = None
+  }
+
+  override def close(): Unit = synchronized {
+    gatherMap.close()
+    cachedData.foreach(_.close())
+    spillData.close()
+  }
+}
+
+object JoinGatherer {
+  // We can then have some methods that will look at the gather maps and apply
+  // heuristics to determine what to do.
+  // We can probably also make this spillable at some point by hiding dataTable and gatherMap
+
+  def canGatherWithoutChunking(left: Option[JoinGatherer], right: Option[JoinGatherer]): Boolean = {
+    // TODO
+    false
+  }
+
+  def getGatherRowEstimate(left: Option[JoinGatherer], right: Option[JoinGatherer],
+      tagetSize: Long): Int = {
+    // TODO
+    100
+  }
+}
+
 trait GpuHashJoin extends GpuExec {
   def left: SparkPlan
   def right: SparkPlan
@@ -95,46 +167,7 @@ trait GpuHashJoin extends GpuExec {
   // for the iterator to get back one or two gather maps along with the data to gather. Perhaps
   // something like the following
 
-  class Gatherer(val gatherMap: GatherMap, val dataTable: Table) extends AutoCloseable {
-    // How much of the gather map we have output so far
-    private var gatheredUpTo: Long = 0
 
-    def gatherNext(n: Integer): Table = {
-      // TODO
-      val start = gatheredUpTo
-      val end = start + n
-      assert(end <= gatherMap.getRowCount)
-      // TODO do the gather
-      gatheredUpTo += n
-      null
-    }
-
-    def isDone: Boolean = {
-      gatheredUpTo >= gatherMap.getRowCount
-    }
-
-    override def close(): Unit = {
-      gatherMap.close()
-      dataTable.close()
-    }
-  }
-
-  object Gatherer {
-    // We can then have some methods that will look at the gather maps and apply
-    // heuristics to determine what to do.
-    // We can probably also make this spillable at some point by hiding dataTable and gatherMap
-
-    def canGatherWithoutChunking(left: Option[Gatherer], right: Option[Gatherer]): Boolean = {
-      // TODO
-      false
-    }
-
-    def getGatherRowEstimate(left: Option[Gatherer], right: Option[Gatherer],
-        tagetSize: Long): Int = {
-      // TODO
-      100
-    }
-  }
 
   // Ideally we will also want some customization on a per join type level. This could let us do
   // something like deduplicate columns generically, but also deduplicte the join keys. If it is
