@@ -71,9 +71,9 @@ object GpuSemaphore {
    * NOTE: A task completion listener will automatically be installed to ensure
    *       the semaphore is always released by the time the task completes.
    */
-  def acquireIfNecessary(context: TaskContext): Unit = {
+  def acquireIfNecessary(context: TaskContext, semTime: GpuMetric): Unit = {
     if (enabled && context != null) {
-      getInstance.acquireIfNecessary(context)
+      getInstance.acquireIfNecessary(context, semTime)
     }
   }
 
@@ -98,14 +98,13 @@ object GpuSemaphore {
   }
 }
 
-private final class GpuSemaphore(tasksPerGpu: Int) extends Logging {
+private final class GpuSemaphore(tasksPerGpu: Int) extends Arm with Logging {
   private val semaphore = new Semaphore(tasksPerGpu)
   // Map to track which tasks have acquired the semaphore.
   private val activeTasks = new ConcurrentHashMap[Long, MutableInt]
 
-  def acquireIfNecessary(context: TaskContext): Unit = {
-    val nvtxRange = new NvtxRange("Acquire GPU", NvtxColor.RED)
-    try {
+  def acquireIfNecessary(context: TaskContext, semTime: GpuMetric): Unit = {
+    withResource(new NvtxWithMetrics("Acquire GPU", NvtxColor.RED, semTime)) { _ =>
       val taskAttemptId = context.taskAttemptId()
       val refs = activeTasks.get(taskAttemptId)
       if (refs == null || refs.getValue == 0) {
@@ -120,14 +119,11 @@ private final class GpuSemaphore(tasksPerGpu: Int) extends Logging {
         }
         GpuDeviceManager.initializeFromTask()
       }
-    } finally {
-      nvtxRange.close()
     }
   }
 
   def releaseIfNecessary(context: TaskContext): Unit = {
-    val nvtxRange = new NvtxRange("Release GPU", NvtxColor.RED)
-    try {
+    withResource(new NvtxRange("Release GPU", NvtxColor.RED)) {  _ =>
       val taskAttemptId = context.taskAttemptId()
       val refs = activeTasks.get(taskAttemptId)
       if (refs != null && refs.getValue > 0) {
@@ -136,8 +132,6 @@ private final class GpuSemaphore(tasksPerGpu: Int) extends Logging {
           semaphore.release()
         }
       }
-    } finally {
-      nvtxRange.close()
     }
   }
 

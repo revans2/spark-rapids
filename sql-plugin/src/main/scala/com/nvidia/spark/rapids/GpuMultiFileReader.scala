@@ -23,7 +23,7 @@ import scala.collection.mutable.Queue
 
 import ai.rapids.cudf.{HostMemoryBuffer, NvtxColor, NvtxRange}
 import com.google.common.util.concurrent.ThreadFactoryBuilder
-import com.nvidia.spark.rapids.GpuMetric.PEAK_DEVICE_MEMORY
+import com.nvidia.spark.rapids.GpuMetric.{PEAK_DEVICE_MEMORY, SEM_TIME}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.FileSystem
 
@@ -128,6 +128,7 @@ abstract class MultiFileCloudPartitionReaderBase(
   with ScanWithMetrics with Arm {
 
   metrics = execMetrics
+  private val semTime = execMetrics(SEM_TIME)
 
   protected var maxDeviceMemory: Long = 0
 
@@ -250,7 +251,7 @@ abstract class MultiFileCloudPartitionReaderBase(
 
     // This is odd, but some operators return data even when there is no input so we need to
     // be sure that we grab the GPU
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
     batch.isDefined
   }
 

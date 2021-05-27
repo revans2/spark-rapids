@@ -138,6 +138,7 @@ case class GpuBroadcastHashJoinExec(
     val joinTime = gpuLongMetric(JOIN_TIME)
     val filterTime = gpuLongMetric(FILTER_TIME)
     val joinOutputRows = gpuLongMetric(JOIN_OUTPUT_ROWS)
+    val semTime = gpuLongMetric(SEM_TIME)
 
     val spillCallback = GpuMetric.makeSpillCallback(allMetrics)
 
@@ -152,7 +153,7 @@ case class GpuBroadcastHashJoinExec(
       GpuColumnVector.extractBases(builtBatch).foreach(_.noWarnLeakExpected())
       doJoin(builtBatch, it, targetSize, spillCallback,
         numOutputRows, joinOutputRows, numOutputBatches, streamTime, joinTime,
-        filterTime, totalTime)
+        filterTime, totalTime, semTime)
     }
   }
 }

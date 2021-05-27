@@ -108,6 +108,7 @@ case class GpuSortExec(
     val totalTime = gpuLongMetric(TOTAL_TIME)
     val outputBatch = gpuLongMetric(NUM_OUTPUT_BATCHES)
     val outputRows = gpuLongMetric(NUM_OUTPUT_ROWS)
+    val semTime = gpuLongMetric(SEM_TIME)
     val outOfCore = sortType == OutOfCoreSort
     child.executeColumnar().mapPartitions { cbIter =>
       if (outOfCore) {
@@ -117,7 +118,7 @@ case class GpuSortExec(
           // To avoid divide by zero errors, underflow and overflow issues in tests
           // that want the targetSize to be 0, we set it to something more reasonable
           math.max(16 * 1024, targetSize), totalTime, sortTime, outputBatch, outputRows,
-          peakDevMemory, spillCallback)
+          peakDevMemory, semTime, spillCallback)
         TaskContext.get().addTaskCompletionListener(_ -> iter.close())
         iter
       } else {
@@ -220,6 +221,7 @@ case class GpuOutOfCoreSortIterator(
     outputBatches: GpuMetric,
     outputRows: GpuMetric,
     peakDevMemory: GpuMetric,
+    semTime: GpuMetric,
     spillCallback: RapidsBuffer.SpillCallback) extends Iterator[ColumnarBatch]
     with Arm with AutoCloseable {
 
@@ -291,7 +293,7 @@ case class GpuOutOfCoreSortIterator(
         val ct = splits.head
         memUsed += ct.getBuffer.getLength
         val sp = SpillableColumnarBatch(ct, sorter.projectedBatchTypes,
-          SpillPriorities.ACTIVE_ON_DECK_PRIORITY, spillCallback)
+          SpillPriorities.ACTIVE_ON_DECK_PRIORITY, semTime, spillCallback)
         sortedSize += sp.sizeInBytes
         sorted.add(sp)
       }
@@ -326,7 +328,7 @@ case class GpuOutOfCoreSortIterator(
         memUsed += splits.map(_.getBuffer.getLength).sum
         val stillPending = if (hasFullySortedData) {
           val sp = SpillableColumnarBatch(splits.head, sorter.projectedBatchTypes,
-            SpillPriorities.ACTIVE_ON_DECK_PRIORITY, spillCallback)
+            SpillPriorities.ACTIVE_ON_DECK_PRIORITY, semTime, spillCallback)
           sortedSize += sp.sizeInBytes
           sorted.add(sp)
           splits.slice(1, splits.length)
@@ -339,7 +341,7 @@ case class GpuOutOfCoreSortIterator(
           case (ct: ContiguousTable, lower: UnsafeRow) =>
             if (ct.getRowCount > 0) {
               val sp = SpillableColumnarBatch(ct, sorter.projectedBatchTypes,
-                SpillPriorities.ACTIVE_ON_DECK_PRIORITY, spillCallback)
+                SpillPriorities.ACTIVE_ON_DECK_PRIORITY, semTime, spillCallback)
               pending.add(sp, lower)
             } else {
               ct.close()

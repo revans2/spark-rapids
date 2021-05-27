@@ -82,6 +82,7 @@ object SamplingUtils extends Arm {
       fraction: Double,
       sorter: GpuSorter,
       converter: Iterator[ColumnarBatch] => Iterator[InternalRow],
+      semTime: GpuMetric,
       seed: Long = Random.nextLong()): Array[InternalRow] = {
     val jRand = new XORShiftRandom(seed)
     val rand = new Random(jRand)
@@ -102,6 +103,7 @@ object SamplingUtils extends Arm {
             runningCb = SpillableColumnarBatch(
               GpuColumnVector.from(selected, GpuColumnVector.extractTypes(cb)),
               SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+              semTime,
               RapidsBuffer.defaultSpillCallback)
           } else {
             val concat = withResource(runningCb) { spb =>
@@ -116,6 +118,7 @@ object SamplingUtils extends Arm {
               runningCb = SpillableColumnarBatch(
                 GpuColumnVector.from(concat, GpuColumnVector.extractTypes(cb)),
                 SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+                semTime,
                 RapidsBuffer.defaultSpillCallback)
             }
           }
@@ -166,6 +169,7 @@ object SamplingUtils extends Arm {
       k: Int,
       sorter: GpuSorter,
       converter: Iterator[ColumnarBatch] => Iterator[InternalRow],
+      semTime: GpuMetric,
       seed: Long = Random.nextLong()) : (Array[InternalRow], Long) = {
     val jRand = new XORShiftRandom(seed)
     val rand = new Random(jRand)
@@ -192,6 +196,7 @@ object SamplingUtils extends Arm {
             runningCb = SpillableColumnarBatch(
               GpuColumnVector.from(selected, GpuColumnVector.extractTypes(cb)),
               SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+              semTime,
               RapidsBuffer.defaultSpillCallback)
           } else {
             withResource(runningCb) { spb =>
@@ -210,6 +215,7 @@ object SamplingUtils extends Arm {
                   runningCb = SpillableColumnarBatch(
                     GpuColumnVector.from(concat, GpuColumnVector.extractTypes(cb)),
                     SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+                    semTime,
                     RapidsBuffer.defaultSpillCallback)
                 }
               }

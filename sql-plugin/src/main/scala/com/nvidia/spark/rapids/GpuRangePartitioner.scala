@@ -38,14 +38,15 @@ object GpuRangePartitioner {
   private[this] def sketch(
       rdd: RDD[ColumnarBatch],
       sampleSizePerPartition: Int,
-      sorter: GpuSorter): (Long, Array[(Int, Long, Array[InternalRow])]) = {
+      sorter: GpuSorter,
+      semTime: GpuMetric): (Long, Array[(Int, Long, Array[InternalRow])]) = {
     val shift = rdd.id
     val toRowConverter = GpuColumnarToRowExecParent.makeIteratorFunc(sorter.projectedBatchSchema,
       NoopMetric, NoopMetric, NoopMetric, NoopMetric)
     val sketched = rdd.mapPartitionsWithIndex { (idx, iter) =>
       val seed = byteswap32(idx ^ (shift << 16))
       val (sample, n) = SamplingUtils.reservoirSampleAndCount(
-        iter, sampleSizePerPartition, sorter, toRowConverter, seed)
+        iter, sampleSizePerPartition, sorter, toRowConverter, semTime, seed)
       Iterator((idx, n, sample))
     }.collect()
     val numItems = sketched.map(_._2).sum
@@ -56,12 +57,13 @@ object GpuRangePartitioner {
       rdd: RDD[ColumnarBatch],
       fraction: Double,
       seed: Int,
-      sorter: GpuSorter): Array[InternalRow] = {
+      sorter: GpuSorter,
+      semTime: GpuMetric): Array[InternalRow] = {
     val toRowConverter = GpuColumnarToRowExecParent.makeIteratorFunc(sorter.projectedBatchSchema,
       NoopMetric, NoopMetric, NoopMetric, NoopMetric)
     rdd.mapPartitions { iter =>
       val sample = SamplingUtils.randomResample(
-        iter, fraction, sorter, toRowConverter, seed)
+        iter, fraction, sorter, toRowConverter, semTime, seed)
       Iterator(sample)
     }.collect().flatten
   }
@@ -108,7 +110,8 @@ object GpuRangePartitioner {
   def createRangeBounds(partitions: Int,
       sorter: GpuSorter,
       rdd: RDD[ColumnarBatch],
-      samplePointsPerPartitionHint: Int): Array[InternalRow] = {
+      samplePointsPerPartitionHint: Int,
+      semTime: GpuMetric): Array[InternalRow] = {
     // We allow partitions = 0, which happens when sorting an empty RDD under the default settings.
     require(partitions >= 0,
       s"Number of partitions cannot be negative but found $partitions.")
@@ -127,7 +130,7 @@ object GpuRangePartitioner {
         val sampleSize = math.min(samplePointsPerPartitionHint.toDouble * partitions, 1e6)
         // Assume the input partitions are roughly balanced and over-sample a little bit.
         val sampleSizePerPartition = math.ceil(3.0 * sampleSize / rdd.partitions.length).toInt
-        val (numItems, sketched) = sketch(rdd, sampleSizePerPartition, sorter)
+        val (numItems, sketched) = sketch(rdd, sampleSizePerPartition, sorter, semTime)
         if (numItems == 0L) {
           Array.empty
         } else {
@@ -152,7 +155,7 @@ object GpuRangePartitioner {
             // Re-sample imbalanced partitions with the desired sampling probability.
             val imbalanced = new PartitionPruningRDD(rdd, imbalancedPartitions.contains)
             val seed = byteswap32(-rdd.id - 1)
-            val reSampled = randomResample(imbalanced, fraction, seed, sorter)
+            val reSampled = randomResample(imbalanced, fraction, seed, sorter, semTime)
             val weight = (1.0 / fraction).toFloat
             candidates ++= reSampled.map(x => (x, weight))
           }

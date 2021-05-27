@@ -19,7 +19,7 @@ package org.apache.spark.sql.rapids
 import java.util.UUID
 
 import ai.rapids.cudf.{Cuda, DeviceMemoryBuffer, MemoryBuffer}
-import com.nvidia.spark.rapids.{Arm, RapidsBuffer, RapidsBufferCatalog, RapidsBufferId, SpillableColumnarBatchImpl, StorageTier}
+import com.nvidia.spark.rapids.{Arm, NoopMetric, RapidsBuffer, RapidsBufferCatalog, RapidsBufferId, SpillableColumnarBatchImpl, StorageTier}
 import com.nvidia.spark.rapids.StorageTier.StorageTier
 import com.nvidia.spark.rapids.format.TableMeta
 import org.scalatest.FunSuite
@@ -36,7 +36,8 @@ class SpillableColumnarBatchSuite extends FunSuite with Arm {
     val oldBufferCount = catalog.numBuffers
     catalog.registerNewBuffer(mockBuffer)
     assertResult(oldBufferCount + 1)(catalog.numBuffers)
-    val spillableBatch = new SpillableColumnarBatchImpl(id, 5, Array[DataType](IntegerType))
+    val spillableBatch = new SpillableColumnarBatchImpl(id, 5,
+      Array[DataType](IntegerType), NoopMetric)
     spillableBatch.close()
     assertResult(oldBufferCount)(catalog.numBuffers)
   }

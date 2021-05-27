@@ -288,6 +288,7 @@ case class GpuRangeExec(range: org.apache.spark.sql.catalyst.plans.logical.Range
     val numOutputRows = gpuLongMetric(NUM_OUTPUT_ROWS)
     val numOutputBatches = gpuLongMetric(NUM_OUTPUT_BATCHES)
     val totalTime = gpuLongMetric(TOTAL_TIME)
+    val semTime = gpuLongMetric(SEM_TIME)
     val maxRowCountPerBatch = Math.min(targetSizeBytes/8, Int.MaxValue)
 
     if (isEmptyRange) {
@@ -330,7 +331,7 @@ case class GpuRangeExec(range: org.apache.spark.sql.catalyst.plans.logical.Range
               override def next(): ColumnarBatch =
                 withResource(new NvtxWithMetrics("GpuRange", NvtxColor.DARK_GREEN, totalTime)) {
                   _ =>
-                    GpuSemaphore.acquireIfNecessary(taskContext)
+                    GpuSemaphore.acquireIfNecessary(taskContext, semTime)
                     val start = number
                     val remainingSteps = (safePartitionEnd - start) / step
                     // Start is inclusive so we need to produce at least one row

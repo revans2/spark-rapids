@@ -200,6 +200,7 @@ object GpuTopN extends Arm {
       inputRows: GpuMetric,
       outputBatches: GpuMetric,
       outputRows: GpuMetric,
+      semTime: GpuMetric,
       spillCallback: RapidsBuffer.SpillCallback): Iterator[ColumnarBatch] =
     new Iterator[ColumnarBatch]() {
       override def hasNext: Boolean = iter.hasNext
@@ -237,7 +238,7 @@ object GpuTopN extends Arm {
             }
             pending =
                 Some(SpillableColumnarBatch(runningResult, SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
-                  spillCallback))
+                  semTime, spillCallback))
           }
         }
         val ret = pending.get.getColumnarBatch()
@@ -287,10 +288,11 @@ case class GpuTopN(
     val outputRows = gpuLongMetric(NUM_OUTPUT_ROWS)
     val sortTime = gpuLongMetric(SORT_TIME)
     val concatTime = gpuLongMetric(CONCAT_TIME)
+    val semTime = gpuLongMetric(SEM_TIME)
     val callback = GpuMetric.makeSpillCallback(allMetrics)
     child.executeColumnar().mapPartitions { iter =>
       val topN = GpuTopN(limit, sorter, iter, totalTime, sortTime, concatTime,
-        inputBatches, inputRows, outputBatches, outputRows, callback)
+        inputBatches, inputRows, outputBatches, outputRows, semTime, callback)
       if (projectList != child.output) {
         topN.map { batch =>
           GpuProjectExec.projectAndClose(batch, boundProjectExprs, totalTime)

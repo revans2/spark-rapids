@@ -101,6 +101,7 @@ abstract class GpuShuffleExchangeExecBase(
     NUM_PARTITIONS -> createMetric(ESSENTIAL_LEVEL, DESCRIPTION_NUM_PARTITIONS),
     NUM_OUTPUT_ROWS -> createMetric(ESSENTIAL_LEVEL, DESCRIPTION_NUM_OUTPUT_ROWS),
     NUM_OUTPUT_BATCHES -> createMetric(MODERATE_LEVEL, DESCRIPTION_NUM_OUTPUT_BATCHES)
+    // TODO SEM_TIME???
   ) ++ additionalMetrics
 
   override def nodeName: String = "GpuColumnarExchange"
@@ -283,7 +284,7 @@ object GpuShuffleExchangeExec {
       case r: GpuRangePartitioning =>
         val sorter = new GpuSorter(r.gpuOrdering, outputAttributes)
         val bounds = GpuRangePartitioner.createRangeBounds(r.numPartitions, sorter,
-          rdd, SQLConf.get.rangeExchangeSampleSizePerPartition)
+          rdd, SQLConf.get.rangeExchangeSampleSizePerPartition, NoopMetric)
         // No need to bind arguments for the GpuRangePartitioner. The Sorter has already done it
         new GpuRangePartitioner(bounds, sorter)
       case GpuSinglePartitioning =>

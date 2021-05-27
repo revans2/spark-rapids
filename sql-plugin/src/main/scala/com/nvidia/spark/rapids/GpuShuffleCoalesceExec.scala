@@ -88,6 +88,7 @@ class GpuShuffleCoalesceIterator(
   private[this] val inputRowsMetric = metricsMap(GpuMetric.NUM_INPUT_ROWS)
   private[this] val outputBatchesMetric = metricsMap(GpuMetric.NUM_OUTPUT_BATCHES)
   private[this] val outputRowsMetric = metricsMap(GpuMetric.NUM_OUTPUT_ROWS)
+  private[this] val semTime = metricsMap(GpuMetric.SEM_TIME)
   private[this] val collectTimeMetric = metricsMap("collectTime")
   private[this] val concatTimeMetric = metricsMap("concatTime")
   private[this] val serializedTables = new util.ArrayDeque[SerializedTableColumn]
@@ -168,7 +169,7 @@ class GpuShuffleCoalesceIterator(
 
   private def concatenateBatch(): ColumnarBatch = {
     // about to start using the GPU in this task
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
     val firstHeader = serializedTables.peekFirst().header
     val batch = withResource(new MetricRange(concatTimeMetric)) { _ =>

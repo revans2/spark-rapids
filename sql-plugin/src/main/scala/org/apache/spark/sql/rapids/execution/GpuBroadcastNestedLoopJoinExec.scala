@@ -368,6 +368,7 @@ abstract class GpuBroadcastNestedLoopJoinExecBase(
     val joinTime = gpuLongMetric(JOIN_TIME)
     val filterTime = gpuLongMetric(FILTER_TIME)
     val joinOutputRows = gpuLongMetric(JOIN_OUTPUT_ROWS)
+    val semTime = gpuLongMetric(SEM_TIME)
 
     val boundCondition = condition.map(GpuBindReferences.bindGpuReference(_, output))
 
@@ -408,11 +409,11 @@ abstract class GpuBroadcastNestedLoopJoinExecBase(
       streamed.executeColumnar().mapPartitions { streamedIter =>
         val lazyStream = streamedIter.map { cb =>
           withResource(cb) { cb =>
-            LazySpillableColumnarBatch(cb, spillCallback, "stream_batch")
+            LazySpillableColumnarBatch(cb, semTime, spillCallback, "stream_batch")
           }
         }
         GpuBroadcastNestedLoopJoinExecBase.innerLikeJoin(
-          LazySpillableColumnarBatch(builtBatch, spillCallback, "built_batch"),
+          LazySpillableColumnarBatch(builtBatch, semTime, spillCallback, "built_batch"),
           lazyStream, targetSizeBytes, getGpuBuildSide, boundCondition,
           numOutputRows, joinOutputRows, numOutputBatches,
           joinTime, filterTime, totalTime)

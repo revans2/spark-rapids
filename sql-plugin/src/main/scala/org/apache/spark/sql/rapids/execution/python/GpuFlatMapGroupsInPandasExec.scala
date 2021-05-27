@@ -106,7 +106,7 @@ case class GpuFlatMapGroupsInPandasExec(
   override def coalesceAfter: Boolean = true
 
   override def doExecuteColumnar(): RDD[ColumnarBatch] = {
-    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches,
+    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches, semTime,
          spillCallback) = commonGpuMetrics()
 
     lazy val isPythonOnGpuEnabled = GpuPythonHelper.isPythonOnGpuEnabled(conf)
@@ -133,7 +133,7 @@ case class GpuFlatMapGroupsInPandasExec(
       // Projects each input batch into the deduplicated schema, and splits
       // into separate group batches to sends them to Python group by group later.
       val pyInputIter = projectAndGroup(inputIter, localChildOutput, dedupAttrs, groupingOffsets,
-          mNumInputRows, mNumInputBatches, spillCallback)
+          mNumInputRows, mNumInputBatches, semTime, spillCallback)
 
       if (pyInputIter.hasNext) {
         // Launch Python workers only when the data is not empty.
@@ -148,6 +148,7 @@ case class GpuFlatMapGroupsInPandasExec(
           Int.MaxValue,
           onDataWriteFinished = null,
           pythonOutputSchema,
+          semTime,
           // We can not assert the result batch from Python has the same row number with the
           // input batch. Because Grouped Map UDF allows the output of arbitrary length.
           // So try to read as many as possible by specifying `minReadTargetBatchSize` as

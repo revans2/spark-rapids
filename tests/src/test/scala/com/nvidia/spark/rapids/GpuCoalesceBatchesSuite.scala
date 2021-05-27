@@ -215,6 +215,7 @@ class GpuCoalesceBatchesSuite extends SparkQueryCompareTestSuite {
       WrappedGpuMetric(new SQLMetric("t6", 0)),
       WrappedGpuMetric(new SQLMetric("t7", 0)),
       WrappedGpuMetric(new SQLMetric("t8", 0)),
+      NoopMetric,
       "testcoalesce",
       useArrowCopyOpt = true)
 
@@ -238,6 +239,7 @@ class GpuCoalesceBatchesSuite extends SparkQueryCompareTestSuite {
       WrappedGpuMetric(new SQLMetric("t6", 0)),
       WrappedGpuMetric(new SQLMetric("t7", 0)),
       WrappedGpuMetric(new SQLMetric("t8", 0)),
+      NoopMetric,
       "testcoalesce",
       useArrowCopyOpt = true)
 
@@ -276,6 +278,7 @@ class GpuCoalesceBatchesSuite extends SparkQueryCompareTestSuite {
       WrappedGpuMetric(new SQLMetric("t6", 0)),
       WrappedGpuMetric(new SQLMetric("t7", 0)),
       WrappedGpuMetric(new SQLMetric("t8", 0)),
+      NoopMetric,
       "testcoalesce",
       useArrowCopyOpt = true)
 
@@ -310,6 +313,7 @@ class GpuCoalesceBatchesSuite extends SparkQueryCompareTestSuite {
       WrappedGpuMetric(new SQLMetric("t6", 0)),
       WrappedGpuMetric(new SQLMetric("t7", 0)),
       WrappedGpuMetric(new SQLMetric("t8", 0)),
+      NoopMetric,
       "testcoalesce",
       useArrowCopyOpt = false)
 
@@ -452,6 +456,7 @@ class GpuCoalesceBatchesSuite extends SparkQueryCompareTestSuite {
       dummyMetric,
       dummyMetric,
       dummyMetric,
+      dummyMetric,
       RapidsBuffer.defaultSpillCallback,
       "test concat")
 
@@ -526,6 +531,7 @@ class GpuCoalesceBatchesSuite extends SparkQueryCompareTestSuite {
       schema,
       TargetSize(coalesceTargetBytes),
       maxCompressedBatchMemoryLimit,
+      dummyMetric,
       dummyMetric,
       dummyMetric,
       dummyMetric,

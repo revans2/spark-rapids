@@ -129,7 +129,7 @@ case class GpuAggregateInPandasExec(
   override def coalesceAfter: Boolean = groupingExpressions.nonEmpty
 
   override def doExecuteColumnar(): RDD[ColumnarBatch] = {
-    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches,
+    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches, semTime,
       spillCallback) = commonGpuMetrics()
 
     lazy val isPythonOnGpuEnabled = GpuPythonHelper.isPythonOnGpuEnabled(conf)

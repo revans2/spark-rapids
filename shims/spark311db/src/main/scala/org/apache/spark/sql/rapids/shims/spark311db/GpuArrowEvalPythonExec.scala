@@ -62,6 +62,7 @@ class RebatchingRoundoffIterator(
     targetRoundoff: Int,
     inputRows: GpuMetric,
     inputBatches: GpuMetric,
+    semTime: GpuMetric,
     spillCallback: RapidsBuffer.SpillCallback)
     extends Iterator[ColumnarBatch] with Arm {
   var pending: Option[SpillableColumnarBatch] = None
@@ -105,7 +106,7 @@ class RebatchingRoundoffIterator(
   }
 
   override def next(): ColumnarBatch = {
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
     val combined : ColumnarBatch = if (pending.isDefined) {
       if (!wrapped.hasNext) {

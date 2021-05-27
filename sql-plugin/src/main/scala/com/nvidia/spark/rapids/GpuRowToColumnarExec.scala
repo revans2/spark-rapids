@@ -551,6 +551,7 @@ class RowToColumnarIterator(
     localSchema: StructType,
     localGoal: CoalesceGoal,
     converters: GpuRowToColumnConverter,
+    semTime: GpuMetric = NoopMetric,
     totalTime: GpuMetric = NoopMetric,
     numInputRows: GpuMetric = NoopMetric,
     numOutputRows: GpuMetric = NoopMetric,
@@ -607,7 +608,7 @@ class RowToColumnarIterator(
       // About to place data back on the GPU
       // note that TaskContext.get() can return null during unit testing so we wrap it in an
       // option here
-      Option(TaskContext.get()).foreach(GpuSemaphore.acquireIfNecessary)
+      Option(TaskContext.get()).foreach(f => GpuSemaphore.acquireIfNecessary(f, semTime))
 
       val ret = withResource(new NvtxWithMetrics("RowToColumnar", NvtxColor.GREEN, totalTime)) { _=>
         builders.build(rowCount)
@@ -639,7 +640,8 @@ object GeneratedUnsafeRowToCudfRowIterator extends Logging {
       totalTime: GpuMetric,
       numInputRows: GpuMetric,
       numOutputRows: GpuMetric,
-      numOutputBatches: GpuMetric): UnsafeRowToColumnarBatchIterator = {
+      numOutputBatches: GpuMetric,
+      semTime: GpuMetric): UnsafeRowToColumnarBatchIterator = {
     val ctx = new CodegenContext
 
     ctx.addReferenceObj("iter", input, classOf[Iterator[UnsafeRow]].getName)
@@ -649,6 +651,7 @@ object GeneratedUnsafeRowToCudfRowIterator extends Logging {
     ctx.addReferenceObj("numInputRows", numInputRows, classOf[GpuMetric].getName)
     ctx.addReferenceObj("numOutputRows", numOutputRows, classOf[GpuMetric].getName)
     ctx.addReferenceObj("numOutputBatches", numOutputBatches, classOf[GpuMetric].getName)
+    ctx.addReferenceObj("semTime", semTime, classOf[GpuMetric].getName)
 
     val rowBaseObj = ctx.freshName("rowBaseObj")
     val rowBaseOffset = ctx.freshName("rowBaseOffset")
@@ -715,7 +718,8 @@ object GeneratedUnsafeRowToCudfRowIterator extends Logging {
          |      (com.nvidia.spark.rapids.GpuMetric)references[3],
          |      (com.nvidia.spark.rapids.GpuMetric)references[4],
          |      (com.nvidia.spark.rapids.GpuMetric)references[5],
-         |      (com.nvidia.spark.rapids.GpuMetric)references[6]);
+         |      (com.nvidia.spark.rapids.GpuMetric)references[6],
+         |      (com.nvidia.spark.rapids.GpuMetric)references[7]);
          |    ${ctx.initMutableStates()}
          |  }
          |
@@ -817,6 +821,7 @@ case class GpuRowToColumnarExec(child: SparkPlan, goal: CoalesceGoal)
     val numOutputBatches = gpuLongMetric(NUM_OUTPUT_BATCHES)
     val numOutputRows = gpuLongMetric(NUM_OUTPUT_ROWS)
     val totalTime = gpuLongMetric(TOTAL_TIME)
+    val semTime = gpuLongMetric(SEM_TIME)
     val localGoal = goal
     val rowBased = child.execute()
 
@@ -832,12 +837,12 @@ case class GpuRowToColumnarExec(child: SparkPlan, goal: CoalesceGoal)
       rowBased.mapPartitions(rowIter => GeneratedUnsafeRowToCudfRowIterator(
         rowIter.asInstanceOf[Iterator[UnsafeRow]],
         localOutput.toArray, localGoal, totalTime, numInputRows, numOutputRows,
-        numOutputBatches))
+        numOutputBatches, semTime))
     } else {
       val converters = new GpuRowToColumnConverter(localSchema)
       rowBased.mapPartitions(rowIter => new RowToColumnarIterator(rowIter,
         localSchema, localGoal, converters,
-        totalTime, numInputRows, numOutputRows, numOutputBatches))
+        semTime, totalTime, numInputRows, numOutputRows, numOutputBatches))
     }
   }
 }

@@ -85,7 +85,7 @@ case class GpuMapInPandasExec(
   override def outputPartitioning: Partitioning = child.outputPartitioning
 
   override def doExecuteColumnar(): RDD[ColumnarBatch] = {
-    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches,
+    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches, semTime,
          spillCallback) = commonGpuMetrics()
 
     lazy val isPythonOnGpuEnabled = GpuPythonHelper.isPythonOnGpuEnabled(conf)

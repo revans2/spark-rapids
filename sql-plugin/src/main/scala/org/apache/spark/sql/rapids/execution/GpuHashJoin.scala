@@ -192,7 +192,8 @@ class HashJoinIterator(
     private val spillCallback: SpillCallback,
     private val streamTime: GpuMetric,
     private val joinTime: GpuMetric,
-    private val totalTime: GpuMetric) extends Iterator[ColumnarBatch] with Arm with Logging {
+    private val totalTime: GpuMetric,
+    private val semTime: GpuMetric) extends Iterator[ColumnarBatch] with Arm with Logging {
   import scala.collection.JavaConverters._
 
   // For some join types even if there is no stream data we might output something
@@ -204,7 +205,7 @@ class HashJoinIterator(
   private var gathererStore: Option[JoinGatherer] = None
   // Close the input data, the lazy spillable batch now owns it.
   private val built = withResource(builtInput) { builtInput =>
-    LazySpillableColumnarBatch(builtInput, spillCallback, "built")
+    LazySpillableColumnarBatch(builtInput, semTime, spillCallback, "built")
   }
 
   // We can cache this because the build side is not changing
@@ -272,13 +273,13 @@ class HashJoinIterator(
         None
       }
 
-      val lazyLeftMap = LazySpillableGatherMap(leftMap, spillCallback, "left_map")
+      val lazyLeftMap = LazySpillableGatherMap(leftMap, semTime, spillCallback, "left_map")
       val gatherer = rightMap match {
         case None =>
           rightData.close()
           JoinGatherer(lazyLeftMap, leftData)
         case Some(right) =>
-          val lazyRightMap = LazySpillableGatherMap(right, spillCallback, "right_map")
+          val lazyRightMap = LazySpillableGatherMap(right, semTime, spillCallback, "right_map")
           JoinGatherer(lazyLeftMap, leftData, lazyRightMap, rightData)
       }
       if (gatherer.isDone) {
@@ -347,7 +348,8 @@ class HashJoinIterator(
       buildData: LazySpillableColumnarBatch,
       streamCb: ColumnarBatch): Option[JoinGatherer] = {
     withResource(GpuProjectExec.project(streamCb, boundStreamKeys)) { streamKeys =>
-      closeOnExcept(LazySpillableColumnarBatch(streamCb, spillCallback, "stream_data")) { sd =>
+      closeOnExcept(
+        LazySpillableColumnarBatch(streamCb, semTime, spillCallback, "stream_data")) { sd =>
         joinGatherer(buildKeys, LazySpillableColumnarBatch.spillOnly(buildData), streamKeys, sd)
       }
     }
@@ -413,7 +415,7 @@ class HashJoinIterator(
       val schema = GpuColumnVector.extractTypes(cb)
       pendingSplits ++= splits.map { ct =>
         SpillableColumnarBatch(ct, schema,
-          SpillPriorities.ACTIVE_ON_DECK_PRIORITY, spillCallback)
+          SpillPriorities.ACTIVE_ON_DECK_PRIORITY, semTime, spillCallback)
       }
     }
   }
@@ -619,7 +621,8 @@ trait GpuHashJoin extends GpuExec {
       streamTime: GpuMetric,
       joinTime: GpuMetric,
       filterTime: GpuMetric,
-      totalTime: GpuMetric): Iterator[ColumnarBatch] = {
+      totalTime: GpuMetric,
+      semTime: GpuMetric): Iterator[ColumnarBatch] = {
     // The 10k is mostly for tests, hopefully no one is setting anything that low in production.
     val realTarget = Math.max(targetSize, 10 * 1024)
 
@@ -638,7 +641,7 @@ trait GpuHashJoin extends GpuExec {
     val joinIterator =
       new HashJoinIterator(nullFiltered, boundBuildKeys, stream, boundStreamKeys,
         streamedPlan.output, realTarget, joinType, buildSide, compareNullsEqual, spillCallback,
-        streamTime, joinTime, totalTime)
+        streamTime, joinTime, totalTime, semTime)
     if (boundCondition.isDefined) {
       val condition = boundCondition.get
       joinIterator.flatMap { cb =>

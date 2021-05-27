@@ -51,12 +51,13 @@ trait GpuPythonExecBase extends GpuExec {
    *   SpillCallback
    * as a tuple.
    */
-  protected def commonGpuMetrics(): (GpuMetric, GpuMetric, GpuMetric, GpuMetric,
+  protected def commonGpuMetrics(): (GpuMetric, GpuMetric, GpuMetric, GpuMetric, GpuMetric,
       SpillCallback) = (
     gpuLongMetric(NUM_INPUT_ROWS),
     gpuLongMetric(NUM_INPUT_BATCHES),
     gpuLongMetric(NUM_OUTPUT_ROWS),
     gpuLongMetric(NUM_OUTPUT_BATCHES),
+    gpuLongMetric(SEM_TIME),
     GpuMetric.makeSpillCallback(allMetrics)
   )
 

@@ -59,6 +59,7 @@ class RebatchingRoundoffIterator(
     targetRoundoff: Int,
     inputRows: GpuMetric,
     inputBatches: GpuMetric,
+    semTime: GpuMetric,
     spillCallback: RapidsBuffer.SpillCallback)
     extends Iterator[ColumnarBatch] with Arm {
   var pending: Option[SpillableColumnarBatch] = None
@@ -95,14 +96,14 @@ class RebatchingRoundoffIterator(
       inputRows += got.numRows()
       rowsSoFar += got.numRows()
       batches.append(SpillableColumnarBatch(got, SpillPriorities.ACTIVE_BATCHING_PRIORITY,
-        spillCallback))
+        semTime, spillCallback))
     }
     val toConcat = batches.safeMap(_.getColumnarBatch()).toArray
     ConcatAndConsumeAll.buildNonEmptyBatch(toConcat, schema)
   }
 
   override def next(): ColumnarBatch = {
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
     val combined : ColumnarBatch = if (pending.isDefined) {
       if (!wrapped.hasNext) {
@@ -131,7 +132,7 @@ class RebatchingRoundoffIterator(
             batches.append(localPending)
             pending = None
             batches.append(SpillableColumnarBatch(cb, SpillPriorities.ACTIVE_BATCHING_PRIORITY,
-              spillCallback))
+              semTime, spillCallback))
             fillAndConcat(batches)
           } finally {
             batches.safeClose()
@@ -148,7 +149,7 @@ class RebatchingRoundoffIterator(
         val batches: ArrayBuffer[SpillableColumnarBatch] = ArrayBuffer.empty
         try {
           batches.append(SpillableColumnarBatch(cb, SpillPriorities.ACTIVE_BATCHING_PRIORITY,
-            spillCallback))
+            semTime, spillCallback))
           fillAndConcat(batches)
         } finally {
           batches.safeClose()
@@ -174,6 +175,7 @@ class RebatchingRoundoffIterator(
           Some(SpillableColumnarBatch(GpuColumnVectorFromBuffer.from(split.last,
             GpuColumnVector.extractTypes(schema)),
             SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+            semTime,
             spillCallback))
       GpuColumnVectorFromBuffer.from(split.head, GpuColumnVector.extractTypes(schema))
     }
@@ -189,9 +191,11 @@ class BatchQueue extends AutoCloseable with Arm {
     mutable.Queue[SpillableColumnarBatch]()
   private var isSet = false
 
-  def add(batch: ColumnarBatch, spillCallback: RapidsBuffer.SpillCallback): Unit = synchronized {
+  def add(batch: ColumnarBatch,
+      semTime: GpuMetric,
+      spillCallback: RapidsBuffer.SpillCallback): Unit = synchronized {
     queue.enqueue(SpillableColumnarBatch(batch, SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
-      spillCallback))
+      semTime, spillCallback))
     if (!isSet) {
       // Wake up anyone waiting for the first batch.
       isSet = true
@@ -255,6 +259,8 @@ trait GpuPythonArrowOutput extends Arm { self: GpuArrowPythonRunner =>
     self.minReadTargetBatchSize = size
   }
 
+  def semTime: GpuMetric
+
   protected def newReaderIterator(
       stream: DataInputStream,
       writerThread: WriterThread,
@@ -309,7 +315,8 @@ trait GpuPythonArrowOutput extends Arm { self: GpuArrowPythonRunner =>
             stream.readInt() match {
               case SpecialLengths.START_ARROW_STREAM =>
                 val builder = ArrowIPCOptions.builder()
-                builder.withCallback(() => GpuSemaphore.acquireIfNecessary(TaskContext.get()))
+                builder.withCallback(
+                  () => GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime))
                 arrowReader = Table.readArrowIPCChunked(builder.build(),
                   new StreamToBufferProvider(stream))
                 read()
@@ -343,6 +350,7 @@ class GpuArrowPythonRunner(
     batchSize: Long,
     onDataWriteFinished: () => Unit,
     val pythonOutSchema: StructType,
+    override val semTime: GpuMetric,
     var minReadTargetBatchSize: Int = 1)
     extends BasePythonRunner[ColumnarBatch, ColumnarBatch](funcs, evalType, argOffsets)
         with GpuPythonArrowOutput {
@@ -512,6 +520,7 @@ case class GpuArrowEvalPythonExec(
     val numOutputBatches = gpuLongMetric(NUM_OUTPUT_BATCHES)
     val numInputRows = gpuLongMetric(NUM_INPUT_ROWS)
     val numInputBatches = gpuLongMetric(NUM_INPUT_BATCHES)
+    val semTime = gpuLongMetric(SEM_TIME)
     val spillCallback = GpuMetric.makeSpillCallback(allMetrics)
 
     lazy val isPythonOnGpuEnabled = GpuPythonHelper.isPythonOnGpuEnabled(conf)
@@ -566,12 +575,12 @@ case class GpuArrowEvalPythonExec(
 
       val boundReferences = GpuBindReferences.bindReferences(allInputs, childOutput)
       val batchedIterator = new RebatchingRoundoffIterator(iter, inputSchema, targetBatchSize,
-        numInputRows, numInputBatches, spillCallback)
+        numInputRows, numInputBatches, semTime, spillCallback)
       val pyInputIterator = batchedIterator.map { batch =>
         // We have to do the project before we add the batch because the batch might be closed
         // when it is added
         val ret = GpuProjectExec.project(batch, boundReferences)
-        queue.add(batch, spillCallback)
+        queue.add(batch, semTime, spillCallback)
         ret
       }
 
@@ -590,7 +599,8 @@ case class GpuArrowEvalPythonExec(
           runnerConf,
           targetBatchSize,
           () => queue.finish(),
-          pythonOutputSchema)
+          pythonOutputSchema,
+          semTime)
 
         val outputBatchIterator = pyRunner.compute(pyInputIterator, context.partitionId(), context)
 

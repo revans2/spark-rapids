@@ -390,6 +390,7 @@ class GpuOrcPartitionReader(
   private var maxDeviceMemory: Long = 0
 
   metrics = execMetrics
+  private val semTime = execMetrics(SEM_TIME)
 
   private val ctx = closeOnExcept(orcReader) { _ =>
     val updatedReadSchema = checkSchemaCompatibility(orcReader.getSchema, readerOpts.getSchema,
@@ -415,7 +416,7 @@ class GpuOrcPartitionReader(
     }
     // This is odd, but some operators return data even when there is no input so we need to
     // be sure that we grab the GPU
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
     batch.isDefined
   }
 
@@ -846,7 +847,7 @@ class GpuOrcPartitionReader(
           .build()
 
         // about to start using the GPU
-        GpuSemaphore.acquireIfNecessary(TaskContext.get())
+        GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
         val table = withResource(new NvtxWithMetrics("ORC decode", NvtxColor.DARK_GREEN,
             metrics(GPU_DECODE_TIME))) { _ =>

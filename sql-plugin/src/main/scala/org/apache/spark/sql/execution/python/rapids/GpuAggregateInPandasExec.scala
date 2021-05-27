@@ -128,7 +128,7 @@ case class GpuAggregateInPandasExec(
   override def coalesceAfter: Boolean = groupingExpressions.nonEmpty
 
   override def doExecuteColumnar(): RDD[ColumnarBatch] = {
-    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches,
+    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches, semTime,
       spillCallback) = commonGpuMetrics()
 
     lazy val isPythonOnGpuEnabled = GpuPythonHelper.isPythonOnGpuEnabled(conf)
@@ -189,7 +189,7 @@ case class GpuAggregateInPandasExec(
       // Second splits into separate group batches.
       val miniAttrs = groupingExpressions ++ allInputs
       val pyInputIter = BatchGroupedIterator(miniIter, miniAttrs.asInstanceOf[Seq[Attribute]],
-          groupingRefs.indices, spillCallback)
+          groupingRefs.indices, semTime, spillCallback)
         .map { groupedBatch =>
           // Resolves the group key and the python input from a grouped batch. Then
           //  - Caches the key to be combined with the Python output later. And
@@ -224,7 +224,7 @@ case class GpuAggregateInPandasExec(
                 }
               }
             }
-            queue.add(keyBatch, spillCallback)
+            queue.add(keyBatch, semTime, spillCallback)
 
             // Python input batch
             val pyInputColumns = pyInputRefs.indices.safeMap { idx =>
@@ -247,7 +247,8 @@ case class GpuAggregateInPandasExec(
           // The whole group data should be written in a single call, so here is unlimited
           Int.MaxValue,
           () => queue.finish(),
-          StructType.fromAttributes(pyOutAttributes))
+          StructType.fromAttributes(pyOutAttributes),
+          semTime)
 
         val pyOutputIterator = pyRunner.compute(pyInputIter, context.partitionId(), context)
 

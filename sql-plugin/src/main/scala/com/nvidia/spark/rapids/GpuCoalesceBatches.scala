@@ -349,6 +349,7 @@ class GpuCoalesceIterator(iter: Iterator[ColumnarBatch],
     concatTime: GpuMetric,
     totalTime: GpuMetric,
     peakDevMemory: GpuMetric,
+    semTime: GpuMetric,
     spillCallback: RapidsBuffer.SpillCallback,
     opName: String)
   extends AbstractGpuCoalesceIterator(iter,
@@ -373,7 +374,7 @@ class GpuCoalesceIterator(iter: Iterator[ColumnarBatch],
 
   override def addBatchToConcat(batch: ColumnarBatch): Unit =
     batches.append(SpillableColumnarBatch(batch, SpillPriorities.ACTIVE_BATCHING_PRIORITY,
-      spillCallback))
+      semTime, spillCallback))
 
   private[this] var codec: TableCompressionCodec = _
 
@@ -437,7 +438,7 @@ class GpuCoalesceIterator(iter: Iterator[ColumnarBatch],
   override protected def saveOnDeck(batch: ColumnarBatch): Unit = {
     assert(onDeck.isEmpty)
     onDeck = Some(SpillableColumnarBatch(batch, SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
-      spillCallback))
+      semTime, spillCallback))
   }
 
   override protected def clearOnDeck(): Unit = {
@@ -489,6 +490,7 @@ case class GpuCoalesceBatches(child: SparkPlan, goal: CoalesceGoal)
     val concatTime = gpuLongMetric(CONCAT_TIME)
     val totalTime = gpuLongMetric(TOTAL_TIME)
     val peakDevMemory = gpuLongMetric(PEAK_DEVICE_MEMORY)
+    val semTime = gpuLongMetric(SEM_TIME)
 
     // cache in local vars to avoid serializing the plan
     val outputSchema = schema
@@ -504,7 +506,7 @@ case class GpuCoalesceBatches(child: SparkPlan, goal: CoalesceGoal)
         val callback = GpuMetric.makeSpillCallback(allMetrics)
         new GpuCoalesceIterator(iter, outputSchema, goal, decompressMemoryTarget,
           numInputRows, numInputBatches, numOutputRows, numOutputBatches, collectTime,
-          concatTime, totalTime, peakDevMemory, callback, "GpuCoalesceBatches")
+          concatTime, totalTime, peakDevMemory, semTime, callback, "GpuCoalesceBatches")
       }
     }
   }

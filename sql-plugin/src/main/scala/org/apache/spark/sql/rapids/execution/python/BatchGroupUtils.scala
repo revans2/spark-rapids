@@ -163,6 +163,7 @@ private[python] object BatchGroupUtils extends Arm {
       groupingOffsetsInDedup: Seq[Int],
       inputRows: GpuMetric,
       inputBatches: GpuMetric,
+      semTime: GpuMetric,
       spillCallback: RapidsBuffer.SpillCallback): Iterator[ColumnarBatch] = {
     val dedupRefs = GpuBindReferences.bindReferences(dedupAttrs, inputAttrs)
     val dedupIter = inputIter.map { batch =>
@@ -174,7 +175,7 @@ private[python] object BatchGroupUtils extends Arm {
       }
     }
     // Groups rows on the batches being projected
-    BatchGroupedIterator(dedupIter, dedupAttrs, groupingOffsetsInDedup, spillCallback)
+    BatchGroupedIterator(dedupIter, dedupAttrs, groupingOffsetsInDedup, semTime, spillCallback)
   }
 
   /**
@@ -261,6 +262,7 @@ private[python] class BatchGroupedIterator private(
     input: Iterator[ColumnarBatch],
     inputAttributes: Seq[Attribute],
     groupingIndices: Seq[Int],
+    semTime: GpuMetric,
     spillCallback: RapidsBuffer.SpillCallback) extends Iterator[ColumnarBatch] with Arm {
 
   private val batchesQueue: mutable.Queue[SpillableColumnarBatch] = mutable.Queue.empty
@@ -309,6 +311,7 @@ private[python] class BatchGroupedIterator private(
             SpillableColumnarBatch(
               GpuColumnVectorFromBuffer.from(t, inputTypes),
               SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+              semTime,
               spillCallback)
           )
         }
@@ -329,9 +332,10 @@ private[python] object BatchGroupedIterator extends Arm {
   def apply(wrapped: Iterator[ColumnarBatch],
             inputAttributes: Seq[Attribute],
             groupingIndices: Seq[Int],
+            semTime: GpuMetric,
             spillCallback: RapidsBuffer.SpillCallback): Iterator[ColumnarBatch] = {
     if (wrapped.hasNext) {
-      new BatchGroupedIterator(wrapped, inputAttributes, groupingIndices, spillCallback)
+      new BatchGroupedIterator(wrapped, inputAttributes, groupingIndices, semTime, spillCallback)
     } else {
       Iterator.empty
     }

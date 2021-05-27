@@ -53,6 +53,7 @@ public abstract class UnsafeRowToColumnarBatchIterator implements Iterator<Colum
   protected final GpuMetric numInputRows;
   protected final GpuMetric numOutputRows;
   protected final GpuMetric numOutputBatches;
+  protected final GpuMetric semTime;
 
   protected UnsafeRowToColumnarBatchIterator(
       Iterator<UnsafeRow> input,
@@ -61,7 +62,8 @@ public abstract class UnsafeRowToColumnarBatchIterator implements Iterator<Colum
       GpuMetric totalTime,
       GpuMetric numInputRows,
       GpuMetric numOutputRows,
-      GpuMetric numOutputBatches) {
+      GpuMetric numOutputBatches,
+      GpuMetric semTime) {
     this.input = input;
     int sizePerRowEstimate = CudfUnsafeRow.getRowSizeEstimate(schema);
     numRowsEstimate = (int)Math.max(1,
@@ -78,6 +80,7 @@ public abstract class UnsafeRowToColumnarBatchIterator implements Iterator<Colum
     this.numInputRows = numInputRows;
     this.numOutputRows = numOutputRows;
     this.numOutputBatches = numOutputBatches;
+    this.semTime = semTime;
   }
 
   @Override
@@ -135,7 +138,7 @@ public abstract class UnsafeRowToColumnarBatchIterator implements Iterator<Colum
         // Grab the semaphore because we are about to put data onto the GPU.
         TaskContext tc = TaskContext.get();
         if (tc != null) {
-          GpuSemaphore$.MODULE$.acquireIfNecessary(tc);
+          GpuSemaphore$.MODULE$.acquireIfNecessary(tc, semTime);
         }
         if (totalTime != null) {
           buildRange = new NvtxWithMetrics("RowToColumnar", NvtxColor.GREEN, totalTime);

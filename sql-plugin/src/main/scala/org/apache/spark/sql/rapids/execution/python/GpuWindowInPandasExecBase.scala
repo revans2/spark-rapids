@@ -89,6 +89,7 @@ class GroupingIterator(
     partitionSpec: Seq[Expression],
     inputRows: GpuMetric,
     inputBatches: GpuMetric,
+    semTime: GpuMetric,
     spillCallback: RapidsBuffer.SpillCallback) extends Iterator[ColumnarBatch] with Arm {
 
   // Currently do it in a somewhat ugly way. In the future cuDF will provide a dedicated API.
@@ -149,7 +150,7 @@ class GroupingIterator(
                   GpuColumnVectorFromBuffer.from(table, GpuColumnVector.extractTypes(batch)))
                 groupBatches.enqueue(splitBatches.tail.map(sb =>
                   SpillableColumnarBatch(sb, SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
-                    spillCallback)): _*)
+                    semTime, spillCallback)): _*)
                 splitBatches.head
               }
             }
@@ -404,6 +405,7 @@ trait GpuWindowInPandasExecBase extends UnaryExecNode with GpuExec {
     val numInputBatches = gpuLongMetric(NUM_INPUT_BATCHES)
     val numOutputRows = gpuLongMetric(NUM_OUTPUT_ROWS)
     val numOutputBatches = gpuLongMetric(NUM_OUTPUT_BATCHES)
+    val semTime = gpuLongMetric(SEM_TIME)
     val spillCallback = GpuMetric.makeSpillCallback(allMetrics)
     val sessionLocalTimeZone = conf.sessionLocalTimeZone
 
@@ -513,7 +515,7 @@ trait GpuWindowInPandasExecBase extends UnaryExecNode with GpuExec {
       // Re-batching the input data by GroupingIterator
       val boundPartitionRefs = GpuBindReferences.bindGpuReferences(partitionSpec, childOutput)
       val groupedIterator = new GroupingIterator(inputIter, boundPartitionRefs,
-        numInputRows, numInputBatches, spillCallback)
+        numInputRows, numInputBatches, semTime, spillCallback)
       val pyInputIterator = groupedIterator.map { batch =>
         // We have to do the project before we add the batch because the batch might be closed
         // when it is added
@@ -522,7 +524,7 @@ trait GpuWindowInPandasExecBase extends UnaryExecNode with GpuExec {
         val inputBatch = withResource(projectedBatch) { projectedCb =>
           insertWindowBounds(projectedCb)
         }
-        queue.add(batch, spillCallback)
+        queue.add(batch, semTime, spillCallback)
         inputBatch
       }
 
@@ -542,7 +544,8 @@ trait GpuWindowInPandasExecBase extends UnaryExecNode with GpuExec {
           /* The whole group data should be written in a single call, so here is unlimited */
           Int.MaxValue,
           () => queue.finish(),
-          pythonOutputSchema)
+          pythonOutputSchema,
+          semTime)
 
         val outputBatchIterator = pyRunner.compute(pyInputIterator, context.partitionId(), context)
         new Iterator[ColumnarBatch] {

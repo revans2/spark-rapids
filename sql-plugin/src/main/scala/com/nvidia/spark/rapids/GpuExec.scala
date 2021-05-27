@@ -64,6 +64,7 @@ object GpuMetric extends Logging {
   val SPILL_AMOUNT = "spillData"
   val SPILL_AMOUNT_DISK = "spillDisk"
   val SPILL_AMOUNT_HOST = "spillHost"
+  val SEM_TIME = "semTime"
 
   // Metric Descriptions.
   val DESCRIPTION_BUFFER_TIME = "buffer time"
@@ -91,9 +92,10 @@ object GpuMetric extends Logging {
   val DESCRIPTION_SPILL_AMOUNT = "bytes spilled from GPU"
   val DESCRIPTION_SPILL_AMOUNT_DISK = "bytes spilled to disk"
   val DESCRIPTION_SPILL_AMOUNT_HOST = "bytes spilled to host"
+  val DESCRIPTION_SEM_TIME = "wait for semaphore time"
 
   def unwrap(input: GpuMetric): SQLMetric = input match {
-    case w :WrappedGpuMetric => w.sqlMetric
+    case w: WrappedGpuMetric => w.sqlMetric
     case i => throw new IllegalArgumentException(s"found unsupported GpuMetric ${i.getClass}")
   }
 
@@ -220,11 +222,15 @@ trait GpuExec extends SparkPlan with Arm {
 
   protected val outputRowsLevel: MetricsLevel = DEBUG_LEVEL
   protected val outputBatchesLevel: MetricsLevel = DEBUG_LEVEL
+  protected val semTimeLevel: MetricsLevel = DEBUG_LEVEL
 
-  lazy val allMetrics: Map[String, GpuMetric] = Map(
-    NUM_OUTPUT_ROWS -> createMetric(outputRowsLevel, DESCRIPTION_NUM_OUTPUT_ROWS),
-    NUM_OUTPUT_BATCHES -> createMetric(outputBatchesLevel, DESCRIPTION_NUM_OUTPUT_BATCHES)) ++
-      additionalMetrics
+  lazy val allMetrics: Map[String, GpuMetric] = {
+    Map(
+      SEM_TIME -> createNanoTimingMetric(semTimeLevel, DESCRIPTION_SEM_TIME),
+      NUM_OUTPUT_ROWS -> createMetric(outputRowsLevel, DESCRIPTION_NUM_OUTPUT_ROWS),
+      NUM_OUTPUT_BATCHES -> createMetric(outputBatchesLevel, DESCRIPTION_NUM_OUTPUT_BATCHES)) ++
+        additionalMetrics
+  }
 
   def gpuLongMetric(name: String): GpuMetric = allMetrics(name)
 
@@ -233,9 +239,9 @@ trait GpuExec extends SparkPlan with Arm {
   lazy val additionalMetrics: Map[String, GpuMetric] = Map.empty
 
   protected def spillMetrics: Map[String, GpuMetric] = Map(
-    SPILL_AMOUNT -> createSizeMetric(ESSENTIAL_LEVEL, DESCRIPTION_SPILL_AMOUNT),
-    SPILL_AMOUNT_DISK -> createSizeMetric(MODERATE_LEVEL, DESCRIPTION_SPILL_AMOUNT_DISK),
-    SPILL_AMOUNT_HOST -> createSizeMetric(MODERATE_LEVEL, DESCRIPTION_SPILL_AMOUNT_HOST)
+    SPILL_AMOUNT -> createSizeMetric(MODERATE_LEVEL, DESCRIPTION_SPILL_AMOUNT),
+    SPILL_AMOUNT_DISK -> createSizeMetric(DEBUG_LEVEL, DESCRIPTION_SPILL_AMOUNT_DISK),
+    SPILL_AMOUNT_HOST -> createSizeMetric(DEBUG_LEVEL, DESCRIPTION_SPILL_AMOUNT_HOST)
   )
 
   /**

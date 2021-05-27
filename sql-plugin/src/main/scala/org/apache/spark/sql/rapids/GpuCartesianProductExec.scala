@@ -19,9 +19,10 @@ package org.apache.spark.sql.rapids
 import java.io.{IOException, ObjectInputStream, ObjectOutputStream}
 
 import scala.collection.mutable
+import scala.util.DynamicVariable
 
 import ai.rapids.cudf.{JCudfSerialization, NvtxColor, NvtxRange}
-import com.nvidia.spark.rapids.{Arm, GpuBindReferences, GpuBuildLeft, GpuColumnVector, GpuExec, GpuMetric, GpuSemaphore, LazySpillableColumnarBatch, MetricsLevel}
+import com.nvidia.spark.rapids.{Arm, GpuBindReferences, GpuBuildLeft, GpuColumnVector, GpuExec, GpuMetric, GpuSemaphore, LazySpillableColumnarBatch, MetricsLevel, NoopMetric}
 import com.nvidia.spark.rapids.RapidsBuffer.SpillCallback
 import com.nvidia.spark.rapids.RapidsPluginImplicits._
 
@@ -35,9 +36,18 @@ import org.apache.spark.sql.types.DataType
 import org.apache.spark.sql.vectorized.ColumnarBatch
 import org.apache.spark.util.Utils
 
+object GpuCartesianProductSerializableBatch {
+  private val semTime = new DynamicVariable[GpuMetric](NoopMetric)
+
+  def setSemTime(st: GpuMetric): Unit = {
+    semTime.value = st
+  }
+}
+
 @SerialVersionUID(100L)
-class GpuSerializableBatch(batch: ColumnarBatch)
+class GpuCartesianProductSerializableBatch(batch: ColumnarBatch)
     extends Serializable with AutoCloseable with Arm {
+  import GpuCartesianProductSerializableBatch._
 
   assert(batch != null)
   @transient private var internalBatch: ColumnarBatch = batch
@@ -69,7 +79,7 @@ class GpuSerializableBatch(batch: ColumnarBatch)
   }
 
   private def readObject(in: ObjectInputStream): Unit = {
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime.value)
     withResource(new NvtxRange("DeserializeBatch", NvtxColor.PURPLE)) { _ =>
       val schemaArray = in.readObject().asInstanceOf[Array[DataType]]
       withResource(JCudfSerialization.readTableFrom(in)) { tableInfo =>
@@ -120,8 +130,9 @@ class GpuCartesianRDD(
     numOutputBatches: GpuMetric,
     filterTime: GpuMetric,
     totalTime: GpuMetric,
-    var rdd1: RDD[GpuSerializableBatch],
-    var rdd2: RDD[GpuSerializableBatch])
+    semTime: GpuMetric,
+    var rdd1: RDD[GpuCartesianProductSerializableBatch],
+    var rdd2: RDD[GpuCartesianProductSerializableBatch])
     extends RDD[ColumnarBatch](sc, Nil)
         with Serializable with Arm {
 
@@ -144,6 +155,7 @@ class GpuCartesianRDD(
 
   override def compute(split: Partition, context: TaskContext): Iterator[ColumnarBatch] = {
     val currSplit = split.asInstanceOf[GpuCartesianPartition]
+    GpuCartesianProductSerializableBatch.setSemTime(semTime)
 
     // create a buffer to cache stream-side data in a spillable manner
     val spillBatchBuffer = mutable.ArrayBuffer[LazySpillableColumnarBatch]()
@@ -162,7 +174,7 @@ class GpuCartesianRDD(
 
     rdd1.iterator(currSplit.s1, context).flatMap { lhs =>
       val batch = withResource(lhs.getBatch) { lhsBatch =>
-        LazySpillableColumnarBatch(lhsBatch, spillCallback, "cross_lhs")
+        LazySpillableColumnarBatch(lhsBatch, semTime, spillCallback, "cross_lhs")
       }
       // Introduce sentinel `streamSideCached` to record whether stream-side data is cached or
       // not, because predicate `spillBatchBuffer.isEmpty` will always be true if
@@ -172,7 +184,7 @@ class GpuCartesianRDD(
         // lazily compute and cache stream-side data
         rdd2.iterator(currSplit.s2, context).map { serializableBatch =>
           withResource(serializableBatch.getBatch) { batch =>
-            val lzyBatch = LazySpillableColumnarBatch(batch, spillCallback, "cross_rhs")
+            val lzyBatch = LazySpillableColumnarBatch(batch, semTime, spillCallback, "cross_rhs")
             spillBatchBuffer += lzyBatch
             // return a spill only version so we don't close it until the end
             LazySpillableColumnarBatch.spillOnly(lzyBatch)
@@ -242,6 +254,7 @@ case class GpuCartesianProductExec(
     val joinOutputRows = gpuLongMetric(JOIN_OUTPUT_ROWS)
     val filterTime = gpuLongMetric(FILTER_TIME)
     val totalTime = gpuLongMetric(TOTAL_TIME)
+    val semTime = gpuLongMetric(SEM_TIME)
 
     val boundCondition = condition.map(GpuBindReferences.bindGpuReference(_, output))
 
@@ -281,8 +294,9 @@ case class GpuCartesianProductExec(
         numOutputBatches,
         filterTime,
         totalTime,
-        left.executeColumnar().map(cb => new GpuSerializableBatch(cb)),
-        right.executeColumnar().map(cb => new GpuSerializableBatch(cb)))
+        semTime,
+        left.executeColumnar().map(cb => new GpuCartesianProductSerializableBatch(cb)),
+        right.executeColumnar().map(cb => new GpuCartesianProductSerializableBatch(cb)))
     }
   }
 }

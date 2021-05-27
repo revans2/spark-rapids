@@ -205,9 +205,10 @@ trait LazySpillableColumnarBatch extends LazySpillable {
 
 object LazySpillableColumnarBatch {
   def apply(cb: ColumnarBatch,
+      semTime: GpuMetric,
       spillCallback: SpillCallback,
       name: String): LazySpillableColumnarBatch =
-    new LazySpillableColumnarBatchImpl(cb, spillCallback, name)
+    new LazySpillableColumnarBatchImpl(cb, semTime, spillCallback, name)
 
   def spillOnly(wrapped: LazySpillableColumnarBatch): LazySpillableColumnarBatch = wrapped match {
     case alreadyGood: AllowSpillOnlyLazySpillableColumnarBatchImpl => alreadyGood
@@ -246,6 +247,7 @@ case class AllowSpillOnlyLazySpillableColumnarBatchImpl(wrapped: LazySpillableCo
  */
 class LazySpillableColumnarBatchImpl(
     cb: ColumnarBatch,
+    semTime: GpuMetric,
     spillCallback: SpillCallback,
     name: String) extends LazySpillableColumnarBatch with Arm {
 
@@ -271,6 +273,7 @@ class LazySpillableColumnarBatchImpl(
         // First time we need to allow for spilling
         spill = Some(SpillableColumnarBatch(cached.get,
           SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+          semTime,
           spillCallback))
         // Putting data in a SpillableColumnarBatch takes ownership of it.
         cached = None
@@ -305,8 +308,11 @@ trait LazySpillableGatherMap extends LazySpillable with Arm {
 }
 
 object LazySpillableGatherMap {
-  def apply(map: GatherMap, spillCallback: SpillCallback, name: String): LazySpillableGatherMap =
-    new LazySpillableGatherMapImpl(map, spillCallback, name)
+  def apply(map: GatherMap,
+      semTime: GpuMetric,
+      spillCallback: SpillCallback,
+      name: String): LazySpillableGatherMap =
+    new LazySpillableGatherMapImpl(map, semTime, spillCallback, name)
 
   def leftCross(leftCount: Int, rightCount: Int): LazySpillableGatherMap =
     new LeftCrossGatherMap(leftCount, rightCount)
@@ -320,6 +326,7 @@ object LazySpillableGatherMap {
  */
 class LazySpillableGatherMapImpl(
     map: GatherMap,
+    semTime: GpuMetric,
     spillCallback: SpillCallback,
     name: String) extends LazySpillableGatherMap {
 
@@ -347,6 +354,7 @@ class LazySpillableGatherMapImpl(
         // First time we need to allow for spilling
         spill = Some(SpillableBuffer(cached.get,
           SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
+          semTime,
           spillCallback))
         // Putting data in a SpillableBuffer takes ownership of it.
         cached = None

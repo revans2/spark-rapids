@@ -68,6 +68,7 @@ abstract class GpuShuffledHashJoinBase(
     val joinTime = gpuLongMetric(JOIN_TIME)
     val filterTime = gpuLongMetric(FILTER_TIME)
     val joinOutputRows = gpuLongMetric(JOIN_OUTPUT_ROWS)
+    val semTime = gpuLongMetric(SEM_TIME)
     val targetSize = RapidsConf.GPU_BATCH_SIZE_BYTES.get(conf)
     val spillCallback = GpuMetric.makeSpillCallback(allMetrics)
     val localBuildOutput: Seq[Attribute] = buildPlan.output
@@ -86,7 +87,7 @@ abstract class GpuShuffledHashJoinBase(
 
           doJoin(builtBatch, streamIter, targetSize, spillCallback,
             numOutputRows, joinOutputRows, numOutputBatches,
-            streamTime, joinTime, filterTime, totalTime)
+            streamTime, joinTime, filterTime, totalTime, semTime)
         }
       }
     }

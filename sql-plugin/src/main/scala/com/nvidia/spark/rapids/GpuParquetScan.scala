@@ -970,6 +970,8 @@ class MultiFileParquetPartitionReader(
   extends FileParquetPartitionReaderBase(conf, isSchemaCaseSensitive, readDataSchema,
     debugDumpPrefix, execMetrics) {
 
+  private val semTime = execMetrics(SEM_TIME)
+
   private val blockIterator: BufferedIterator[ParquetFileInfoWithSingleBlockMeta] =
     clippedBlocks.iterator.buffered
 
@@ -1007,7 +1009,7 @@ class MultiFileParquetPartitionReader(
     }
     // This is odd, but some operators return data even when there is no input so we need to
     // be sure that we grab the GPU
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
     batch.isDefined
   }
 
@@ -1182,7 +1184,7 @@ class MultiFileParquetPartitionReader(
           None
         } else {
           // Someone is going to process this data, even if it is just a row count
-          GpuSemaphore.acquireIfNecessary(TaskContext.get())
+          GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
           val emptyBatch = new ColumnarBatch(Array.empty, currentChunkMeta.numTotalRows.toInt)
           addAllPartitionValues(Some(emptyBatch), currentChunkMeta.allPartValues,
             currentChunkMeta.rowsPerPartition, partitionSchema)
@@ -1228,7 +1230,7 @@ class MultiFileParquetPartitionReader(
           .includeColumn(readDataSchema.fieldNames:_*).build()
 
         // about to start using the GPU
-        GpuSemaphore.acquireIfNecessary(TaskContext.get())
+        GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
         val table = withResource(new NvtxWithMetrics("Parquet decode", NvtxColor.DARK_GREEN,
           metrics(GPU_DECODE_TIME))) { _ =>
@@ -1391,6 +1393,8 @@ class MultiFileCloudParquetPartitionReader(
   extends MultiFileCloudPartitionReaderBase(conf, files, numThreads, maxNumFileProcessed, filters,
     execMetrics) with ParquetPartitionReaderBase with MultiFileReaderFunctions {
 
+  private val semTime = execMetrics(SEM_TIME)
+
   case class HostMemoryBuffersWithMetaData(
     override val partitionedFile: PartitionedFile,
     override val memBuffersAndSizes: Array[(HostMemoryBuffer, Long)],
@@ -1531,7 +1535,7 @@ class MultiFileCloudParquetPartitionReader(
     // not reading any data, but add in partition data if needed
     if (hostBuffer == null) {
       // Someone is going to process this data, even if it is just a row count
-      GpuSemaphore.acquireIfNecessary(TaskContext.get())
+      GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
       val emptyBatch = new ColumnarBatch(Array.empty, dataSize.toInt)
       return addPartitionValues(Some(emptyBatch), partValues, partitionSchema)
     }
@@ -1545,7 +1549,7 @@ class MultiFileCloudParquetPartitionReader(
         .includeColumn(readDataSchema.fieldNames: _*).build()
 
       // about to start using the GPU
-      GpuSemaphore.acquireIfNecessary(TaskContext.get())
+      GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
       val table = withResource(new NvtxWithMetrics("Parquet decode", NvtxColor.DARK_GREEN,
         metrics(GPU_DECODE_TIME))) { _ =>
@@ -1616,6 +1620,8 @@ class ParquetPartitionReader(
   FileParquetPartitionReaderBase(conf,
     isSchemaCaseSensitive, readDataSchema, debugDumpPrefix, execMetrics) {
 
+  private val semTime = execMetrics(SEM_TIME)
+
   private val blockIterator:  BufferedIterator[BlockMetaData] = clippedBlocks.iterator.buffered
 
   override def next(): Boolean = {
@@ -1631,7 +1637,7 @@ class ParquetPartitionReader(
     }
     // This is odd, but some operators return data even when there is no input so we need to
     // be sure that we grab the GPU
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
     batch.isDefined
   }
 
@@ -1681,7 +1687,7 @@ class ParquetPartitionReader(
           .includeColumn(readDataSchema.fieldNames:_*).build()
 
         // about to start using the GPU
-        GpuSemaphore.acquireIfNecessary(TaskContext.get())
+        GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
         val table = withResource(new NvtxWithMetrics("Parquet decode", NvtxColor.DARK_GREEN,
             metrics(GPU_DECODE_TIME))) { _ =>

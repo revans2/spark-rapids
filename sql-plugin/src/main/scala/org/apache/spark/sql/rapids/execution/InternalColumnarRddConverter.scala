@@ -370,7 +370,8 @@ private class ExternalRowToColumnarIterator(
     rowIter: Iterator[Row],
     localSchema: StructType,
     localGoal: CoalesceGoal,
-    converters: GpuExternalRowToColumnConverter) extends Iterator[ColumnarBatch] {
+    converters: GpuExternalRowToColumnConverter,
+    semTime: GpuMetric) extends Iterator[ColumnarBatch] {
 
   private val dataTypes: Array[DataType] = localSchema.fields.map(_.dataType)
   private val variableWidthColumnCount = dataTypes.count(dt => !GpuBatchUtils.isFixedWidth(dt))
@@ -427,7 +428,7 @@ private class ExternalRowToColumnarIterator(
       }
 
       // About to place data back on the GPU
-      GpuSemaphore.acquireIfNecessary(TaskContext.get())
+      GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
       val ret = builders.build(rowCount)
 
@@ -468,11 +469,13 @@ private class ExternalRowToColumnarIterator(
  * when they no longer need it.
  */
 object InternalColumnarRddConverter extends Logging {
-  def apply(df: DataFrame): RDD[Table] = {
-    convert(df)
+  def apply(df: DataFrame,
+      semTime: GpuMetric): RDD[Table] = {
+    convert(df, semTime)
   }
 
-  def convert(df: DataFrame): RDD[Table] = {
+  def convert(df: DataFrame,
+      semTime: GpuMetric): RDD[Table] = {
     val schema = df.schema
     if (!GpuOverrides.areAllSupportedTypes(schema.map(_.dataType) :_*)) {
       val unsupported = schema.map(_.dataType).filter(!GpuOverrides.isSupportedType(_)).toSet
@@ -532,7 +535,7 @@ object InternalColumnarRddConverter extends Logging {
       val conf = new RapidsConf(df.sqlContext.conf)
       val goal = TargetSize(conf.gpuTargetBatchSizeBytes)
       input.mapPartitions { rowIter =>
-        new ExternalRowToColumnarIterator(rowIter, schema, goal, converters)
+        new ExternalRowToColumnarIterator(rowIter, schema, goal, converters, semTime)
       }
     })
 

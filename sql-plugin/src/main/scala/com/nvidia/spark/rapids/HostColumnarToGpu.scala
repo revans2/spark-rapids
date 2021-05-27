@@ -257,6 +257,7 @@ class HostToGpuCoalesceIterator(iter: Iterator[ColumnarBatch],
     concatTime: GpuMetric,
     totalTime: GpuMetric,
     peakDevMemory: GpuMetric,
+    semTime: GpuMetric,
     opName: String,
     useArrowCopyOpt: Boolean)
   extends AbstractGpuCoalesceIterator(iter,
@@ -336,7 +337,7 @@ class HostToGpuCoalesceIterator(iter: Iterator[ColumnarBatch],
 
   override def concatAllAndPutOnGPU(): ColumnarBatch = {
     // About to place data back on the GPU
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
     val ret = batchBuilder.build(totalRows)
     maxDeviceMemory = GpuColumnVector.getTotalDeviceMemoryUsed(ret)
@@ -419,6 +420,7 @@ case class HostColumnarToGpu(child: SparkPlan, goal: CoalesceGoal)
     val concatTime = gpuLongMetric(CONCAT_TIME)
     val totalTime = gpuLongMetric(TOTAL_TIME)
     val peakDevMemory = gpuLongMetric(PEAK_DEVICE_MEMORY)
+    val semTime = gpuLongMetric(SEM_TIME)
 
     // cache in a local to avoid serializing the plan
     val outputSchema = schema
@@ -429,7 +431,7 @@ case class HostColumnarToGpu(child: SparkPlan, goal: CoalesceGoal)
     batches.mapPartitions { iter =>
       new HostToGpuCoalesceIterator(iter, goal, outputSchema,
         numInputRows, numInputBatches, numOutputRows, numOutputBatches, collectTime, concatTime,
-        totalTime, peakDevMemory, "HostColumnarToGpu", confUseArrow)
+        totalTime, peakDevMemory, semTime,"HostColumnarToGpu", confUseArrow)
     }
   }
 }

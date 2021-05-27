@@ -389,6 +389,7 @@ class CSVPartitionReader(
   private var maxDeviceMemory: Long = 0
 
   metrics = execMetrics
+  private val semTime = execMetrics(SEM_TIME)
 
   private lazy val estimatedHostBufferSize: Long = {
     val rawPath = new Path(partFile.filePath)
@@ -511,7 +512,7 @@ class CSVPartitionReader(
         val cudfSchema = GpuColumnVector.from(dataSchema)
         val csvOpts = buildCsvOptions(parsedOptions, newReadDataSchema, hasHeader)
         // about to start using the GPU
-        GpuSemaphore.acquireIfNecessary(TaskContext.get())
+        GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
 
         // The buffer that is sent down
         val table = withResource(new NvtxWithMetrics("CSV decode", NvtxColor.DARK_GREEN,
@@ -542,7 +543,7 @@ class CSVPartitionReader(
     }
     // This is odd, but some operators return data even when there is no input so we need to
     // be sure that we grab the GPU
-    GpuSemaphore.acquireIfNecessary(TaskContext.get())
+    GpuSemaphore.acquireIfNecessary(TaskContext.get(), semTime)
     batch.isDefined
   }
 

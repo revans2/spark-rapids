@@ -39,11 +39,11 @@ import org.apache.spark.sql.rapids.execution.InternalColumnarRddConverter
  * when they no longer need it.
  */
 object ColumnarRdd {
-  def apply(df: DataFrame): RDD[Table] = {
-    InternalColumnarRddConverter(df)
+  def apply(df: DataFrame, semTime: GpuMetric): RDD[Table] = {
+    InternalColumnarRddConverter(df, semTime)
   }
 
-  def convert(df: DataFrame): RDD[Table] = {
-    InternalColumnarRddConverter.convert(df)
+  def convert(df: DataFrame, semTime: GpuMetric): RDD[Table] = {
+    InternalColumnarRddConverter.convert(df, semTime)
   }
 }

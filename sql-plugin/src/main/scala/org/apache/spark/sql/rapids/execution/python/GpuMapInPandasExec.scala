@@ -81,7 +81,7 @@ case class GpuMapInPandasExec(
   override def outputPartitioning: Partitioning = child.outputPartitioning
 
   override def doExecuteColumnar(): RDD[ColumnarBatch] = {
-    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches,
+    val (mNumInputRows, mNumInputBatches, mNumOutputRows, mNumOutputBatches, semTime,
          spillCallback) = commonGpuMetrics()
 
     lazy val isPythonOnGpuEnabled = GpuPythonHelper.isPythonOnGpuEnabled(conf)
@@ -115,7 +115,7 @@ case class GpuMapInPandasExec(
       }
 
       val pyInputIterator = new RebatchingRoundoffIterator(contextAwareIter, pyInputTypes,
-          batchSize, mNumInputRows, mNumInputBatches, spillCallback)
+          batchSize, mNumInputRows, mNumInputBatches, semTime, spillCallback)
         .map { batch =>
           // Here we wrap it via another column so that Python sides understand it
           // as a DataFrame.
@@ -139,6 +139,7 @@ case class GpuMapInPandasExec(
           batchSize,
           onDataWriteFinished = null,
           pythonOutputSchema,
+          semTime,
           // We can not assert the result batch from Python has the same row number with the
           // input batch. Because Map Pandas UDF allows the output of arbitrary length
           // and columns.
