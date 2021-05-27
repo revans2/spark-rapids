@@ -54,7 +54,8 @@ class RapidsCachingReader[K, C](
     metrics: ShuffleReadMetricsReporter,
     transport: Option[RapidsShuffleTransport],
     catalog: ShuffleBufferCatalog,
-    sparkTypes: Array[DataType])
+    sparkTypes: Array[DataType],
+    semTime: GpuMetric)
   extends ShuffleReader[K, C]  with Arm with Logging {
 
   override def read(): Iterator[Product2[K, C]] = {
@@ -141,7 +142,7 @@ class RapidsCachingReader[K, C](
       val itRange = new NvtxRange("Shuffle Iterator prep", NvtxColor.BLUE)
       try {
         val cachedIt = cachedBufferIds.iterator.map(bufferId => {
-          GpuSemaphore.acquireIfNecessary(context, NoopMetric)
+          GpuSemaphore.acquireIfNecessary(context, semTime)
           val cb = withResource(catalog.acquireBuffer(bufferId)) { buffer =>
             buffer.getColumnarBatch(sparkTypes)
           }
@@ -153,7 +154,7 @@ class RapidsCachingReader[K, C](
 
         val cbArrayFromUcx: Iterator[(K, C)] = if (blocksForRapidsTransport.nonEmpty) {
           val rapidsShuffleIterator = new RapidsShuffleIterator(localId, rapidsConf, transport.get,
-            blocksForRapidsTransport.toArray, metricsUpdater, sparkTypes)
+            blocksForRapidsTransport.toArray, metricsUpdater, sparkTypes, semTime)
           rapidsShuffleIterator.map(cb => {
             (0, cb)
           }).asInstanceOf[Iterator[(K, C)]]

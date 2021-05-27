@@ -100,8 +100,8 @@ abstract class GpuShuffleExchangeExecBase(
     PARTITION_SIZE -> createMetric(ESSENTIAL_LEVEL, DESCRIPTION_PARTITION_SIZE),
     NUM_PARTITIONS -> createMetric(ESSENTIAL_LEVEL, DESCRIPTION_NUM_PARTITIONS),
     NUM_OUTPUT_ROWS -> createMetric(ESSENTIAL_LEVEL, DESCRIPTION_NUM_OUTPUT_ROWS),
-    NUM_OUTPUT_BATCHES -> createMetric(MODERATE_LEVEL, DESCRIPTION_NUM_OUTPUT_BATCHES)
-    // TODO SEM_TIME???
+    NUM_OUTPUT_BATCHES -> createMetric(MODERATE_LEVEL, DESCRIPTION_NUM_OUTPUT_BATCHES),
+    SEM_TIME -> createNanoTimingMetric(DEBUG_LEVEL, DESCRIPTION_SEM_TIME)
   ) ++ additionalMetrics
 
   override def nodeName: String = "GpuColumnarExchange"
@@ -201,7 +201,8 @@ object GpuShuffleExchangeExec {
     } else {
       rdd
     }
-    val partitioner: GpuExpression = getPartitioner(newRdd, outputAttributes, newPartitioning)
+    val partitioner: GpuExpression = getPartitioner(newRdd, outputAttributes,
+      newPartitioning, metrics(GpuMetric.SEM_TIME))
     def getPartitioned: ColumnarBatch => Any = {
       batch => partitioner.columnarEval(batch)
     }
@@ -275,16 +276,17 @@ object GpuShuffleExchangeExec {
   }
 
   private def getPartitioner(
-    rdd: RDD[ColumnarBatch],
-    outputAttributes: Seq[Attribute],
-    newPartitioning: Partitioning): GpuExpression with GpuPartitioning = {
+      rdd: RDD[ColumnarBatch],
+      outputAttributes: Seq[Attribute],
+      newPartitioning: Partitioning,
+      semTime: GpuMetric): GpuExpression with GpuPartitioning = {
     newPartitioning match {
       case h: GpuHashPartitioning =>
         GpuBindReferences.bindReference(h, outputAttributes)
       case r: GpuRangePartitioning =>
         val sorter = new GpuSorter(r.gpuOrdering, outputAttributes)
         val bounds = GpuRangePartitioner.createRangeBounds(r.numPartitions, sorter,
-          rdd, SQLConf.get.rangeExchangeSampleSizePerPartition, NoopMetric)
+          rdd, SQLConf.get.rangeExchangeSampleSizePerPartition, semTime)
         // No need to bind arguments for the GpuRangePartitioner. The Sorter has already done it
         new GpuRangePartitioner(bounds, sorter)
       case GpuSinglePartitioning =>

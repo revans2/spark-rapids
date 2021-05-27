@@ -21,7 +21,7 @@ import java.util.concurrent.{LinkedBlockingQueue, TimeUnit}
 import scala.collection.mutable
 
 import ai.rapids.cudf.{NvtxColor, NvtxRange}
-import com.nvidia.spark.rapids.{Arm, GpuSemaphore, NoopMetric, RapidsBuffer, RapidsConf, ShuffleReceivedBufferCatalog, ShuffleReceivedBufferId}
+import com.nvidia.spark.rapids.{Arm, GpuMetric, GpuSemaphore, RapidsBuffer, RapidsConf, ShuffleReceivedBufferCatalog, ShuffleReceivedBufferId}
 
 import org.apache.spark.TaskContext
 import org.apache.spark.internal.Logging
@@ -53,6 +53,7 @@ class RapidsShuffleIterator(
     blocksByAddress: Array[(BlockManagerId, Seq[(BlockId, Long, Int)])],
     metricsUpdater: ShuffleMetricsUpdater,
     sparkTypes: Array[DataType],
+    semTime: GpuMetric,
     catalog: ShuffleReceivedBufferCatalog = GpuShuffleEnv.getReceivedCatalog,
     timeoutSeconds: Long = GpuShuffleEnv.shuffleFetchTimeoutSeconds)
   extends Iterator[ColumnarBatch]
@@ -317,7 +318,7 @@ class RapidsShuffleIterator(
     // fetches and so it could produce device memory. Note this is not allowing for some external
     // thread to schedule the fetches for us, it may be something we consider in the future, given
     // memory pressure.
-    taskContext.foreach(tc => GpuSemaphore.acquireIfNecessary(tc, NoopMetric))
+    taskContext.foreach(tc => GpuSemaphore.acquireIfNecessary(tc, semTime))
 
     if (!started) {
       // kick off if we haven't already

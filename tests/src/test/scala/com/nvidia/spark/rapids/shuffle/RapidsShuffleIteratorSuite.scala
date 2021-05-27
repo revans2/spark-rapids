@@ -16,13 +16,13 @@
 
 package com.nvidia.spark.rapids.shuffle
 
-import com.nvidia.spark.rapids.{RapidsBuffer, ShuffleReceivedBufferId}
+import com.nvidia.spark.rapids.{NoopMetric, RapidsBuffer, ShuffleReceivedBufferId}
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers._
 import org.mockito.Mockito._
 
 import org.apache.spark.shuffle.{RapidsShuffleFetchFailedException, RapidsShuffleTimeoutException}
-import org.apache.spark.sql.vectorized.{ColumnarBatch, ColumnVector}
+import org.apache.spark.sql.vectorized.ColumnarBatch
 
 class RapidsShuffleIteratorSuite extends RapidsShuffleTestHelper {
   test("inability to get a client raises a fetch failure") {
@@ -35,6 +35,7 @@ class RapidsShuffleIteratorSuite extends RapidsShuffleTestHelper {
       blocksByAddress,
       testMetricsUpdater,
       Array.empty,
+      NoopMetric,
       mockCatalog,
       123)
 
@@ -63,6 +64,7 @@ class RapidsShuffleIteratorSuite extends RapidsShuffleTestHelper {
         blocksByAddress,
         testMetricsUpdater,
         Array.empty,
+        NoopMetric,
         mockCatalog,
         123))
 
@@ -97,6 +99,7 @@ class RapidsShuffleIteratorSuite extends RapidsShuffleTestHelper {
       blocksByAddress,
       testMetricsUpdater,
       Array.empty,
+      NoopMetric,
       mockCatalog,
       123))
 
@@ -139,6 +142,7 @@ class RapidsShuffleIteratorSuite extends RapidsShuffleTestHelper {
       blocksByAddress,
       testMetricsUpdater,
       Array.empty,
+      NoopMetric,
       mockCatalog,
       123))
 
@@ -170,6 +174,7 @@ class RapidsShuffleIteratorSuite extends RapidsShuffleTestHelper {
       blocksByAddress,
       testMetricsUpdater,
       Array.empty,
+      NoopMetric,
       mockCatalog,
       123)
 
