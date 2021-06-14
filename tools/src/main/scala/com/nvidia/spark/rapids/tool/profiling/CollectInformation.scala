@@ -128,15 +128,40 @@ class CollectInformation(apps: ArrayBuffer[ApplicationInfo],
       val requiredDataFrames = Seq("sqlMetricsDF", "driverAccumDF",
           "taskStageAccumDF", "taskStageAccumDF")
         .map(name => s"${name}_${app.index}")
+      System.err.println("\n\n\n\t\t DATA FRAMES!!!\n\n")
+      app.allDataFrames.foreach {
+        case (key, value) =>
+          System.err.println(s"DATA FRAME '$key'")
+          value.printSchema()
+      }
       if (requiredDataFrames.forall(app.allDataFrames.contains)) {
         val accums = accumsOpt.getOrElse(app.runQuery(app.generateSQLAccums))
+
+        val taskStageAccum = app.runQuery(
+          s"""
+            | select
+            | stageId,
+            | taskId,
+            | accumulatorId as accumID
+            | from taskStageAccumDF_${app.index}
+            | """.stripMargin)
+
+        taskStageAccum.join(accums,
+          accums("accumulatorId") === taskStageAccum("accumID"),
+          joinType="Inner").groupBy("accumulatorId").agg(Map(
+          "stageId" -> "max",
+          "taskId" -> "max",
+          "sqlID" -> "max",
+          "nodeID" -> "max")).show()
+
         val start = System.nanoTime()
         val accumSummary = accums
           .select(col("sqlId"), col("accumulatorId"), col("max_value"))
           .collect()
-        val map = new mutable.HashMap[Long, ArrayBuffer[(Long,Long)]]()
+        val sqlIdToMaxMetric = new mutable.HashMap[Long, ArrayBuffer[(Long,Long)]]()
         for (row <- accumSummary) {
-          val list = map.getOrElseUpdate(row.getLong(0), new ArrayBuffer[(Long, Long)]())
+          val list = sqlIdToMaxMetric.getOrElseUpdate(row.getLong(0),
+            new ArrayBuffer[(Long, Long)]())
           list += row.getLong(1) -> row.getLong(2)
         }
 
@@ -147,8 +172,8 @@ class CollectInformation(apps: ArrayBuffer[ApplicationInfo],
           val dotFileWriter = new ToolTextFileWriter(outputDirectory,
             s"${app.appId}-query-$sqlID.dot")
           try {
-            val metrics = map.getOrElse(sqlID, Seq.empty).toMap
-            GenerateDot.generateDotGraph(QueryPlanWithMetrics(planInfo, metrics),
+            val metrics = sqlIdToMaxMetric.getOrElse(sqlID, Seq.empty).toMap
+            GenerateDot.writeDotGraph(QueryPlanWithMetrics(planInfo, metrics),
               physicalPlan, None, dotFileWriter, sqlID, app.appId)
           } finally {
             dotFileWriter.close()

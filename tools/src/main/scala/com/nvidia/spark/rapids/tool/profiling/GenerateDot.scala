@@ -15,13 +15,67 @@
  */
 package com.nvidia.spark.rapids.tool.profiling
 
-import java.io.{File, FileWriter}
 import java.util.concurrent.TimeUnit
+
+import scala.collection.mutable.ArrayBuffer
 
 import com.nvidia.spark.rapids.tool.ToolTextFileWriter
 
 import org.apache.spark.sql.execution.SparkPlanInfo
 import org.apache.spark.sql.execution.metric.SQLMetricInfo
+
+class DotGraph(
+    val id: String,
+    val label: String,
+    val labelLoc: String = "b",
+    val fontName: String = "Courier") {
+
+  val nodes = new ArrayBuffer[DotNode]()
+  val links = new ArrayBuffer[DotLink]()
+
+  def addNode(node: DotNode): Unit = {
+    nodes += node
+  }
+
+  def addLink(link: DotLink): Unit = {
+    links += link
+  }
+
+  def write(writer: ToolTextFileWriter): Unit = {
+    writer.write(
+      s"""
+         |digraph $id {
+         |  label="$label"
+         |  labelloc=$labelLoc
+         |  fontname=$fontName
+         |""".stripMargin)
+
+    nodes.foreach(_.write(writer))
+    links.foreach(_.write(writer))
+
+    writer.write("}\n")
+  }
+}
+
+class DotLink(
+    val leftId: String,
+    val rightId: String,
+    val color: String,
+    val style: String = "bold") {
+  def write(writer: ToolTextFileWriter): Unit =
+    writer.write(s"""$leftId -> $rightId [color="$color",style=$style];\n""")
+}
+
+class DotNode(
+    val id: String,
+    val label: String,
+    val color: String,
+    val shape: String = "box",
+    val style: String = "filled") {
+
+  def write(writer: ToolTextFileWriter): Unit =
+    writer.write(s"""$id [shape=$shape,color="$color",style="$style",label="$label"];\n""")
+}
 
 /**
  * Generate a DOT graph for one query plan, or showing differences between two query plans.
@@ -50,7 +104,7 @@ object GenerateDot {
    * @param sqlId id of the SQL query for the dot graph
    * @param appId Spark application Id
    */
-  def generateDotGraph(
+  def writeDotGraph(
     plan: QueryPlanWithMetrics,
     physicalPlanString: String,
     comparisonPlan: Option[QueryPlanWithMetrics],
@@ -59,7 +113,6 @@ object GenerateDot {
     appId: String
   ): Unit = {
 
-    val fileName  = s"$sqlId.dot"
     var nextId = 1
 
     def isGpuPlan(plan: SparkPlanInfo): Boolean = {
@@ -88,8 +141,8 @@ object GenerateDot {
     }
 
     /** Recursively graph the operator nodes in the spark plan */
-    def writeGraph(
-        w: ToolTextFileWriter,
+    def buildGraph(
+        graph: DotGraph,
         node: QueryPlanWithMetrics,
         comparisonNode: QueryPlanWithMetrics,
         id: Int = 0): Unit = {
@@ -137,37 +190,29 @@ object GenerateDot {
           nodePlan.nodeName
         }
 
-        val nodeText =
-          s"""node$id [shape=box,color="$color",style="filled",
-             |label = "$label\n
-             |$metrics"];
-             |""".stripMargin
+        graph.addNode(new DotNode(s"node$id", s"$label\n$metrics", color))
 
-        w.write(nodeText)
         nodePlan.children.indices.foreach(i => {
           val childId = nextId
           nextId += 1
-          writeGraph(
-            w,
+          buildGraph(
+            graph,
             QueryPlanWithMetrics(nodePlan.children(i), node.metrics),
             QueryPlanWithMetrics(comparisonPlan.children(i), comparisonNode.metrics),
             childId);
 
-          val style = (isGpuPlan(nodePlan), isGpuPlan(nodePlan.children(i))) match {
-            case (true, true) => s"""color="$GPU_COLOR""""
-            case (false, false) => s"""color="$CPU_COLOR""""
-            case _ =>
-              // show emphasis on transitions between CPU and GPU
-              s"color=$TRANSITION_COLOR, style=bold"
+          val color = (isGpuPlan(nodePlan), isGpuPlan(nodePlan.children(i))) match {
+            case (true, true) => GPU_COLOR
+            case (false, false) => CPU_COLOR
+            case _ => TRANSITION_COLOR
           }
-          w.write(s"node$childId -> node$id [$style];\n")
+          graph.addLink(new DotLink(s"node$childId", s"node$id", color))
         })
       } else {
         // plans have diverged - cannot recurse further
-        w.write(
-          s"""node$id [shape=box, color=red,
-             |label = "plans diverge here:
-             |${nodePlan.nodeName} vs ${comparisonPlan.nodeName}"];\n""".stripMargin)
+        graph.addNode(new DotNode(s"node$id",
+          s"plans diverge here: ${nodePlan.nodeName} vs ${comparisonPlan.nodeName}",
+          "red"))
       }
     }
 
@@ -180,18 +225,10 @@ object GenerateDot {
           .stripMargin
           .replace("\n", "\\l")
 
-    // write the dot graph to a file
-    fileWriter.write(
-      s"""digraph G {
-         |
-         |label="$leftAlignedLabel"
-         |labelloc=b
-         |fontname=Courier
-         |
-         |""".stripMargin)
+    val graph = new DotGraph("G", leftAlignedLabel)
 
-    writeGraph(fileWriter, plan, comparisonPlan.getOrElse(plan), 0)
-    fileWriter.write("}\n")
+    buildGraph(graph, plan, comparisonPlan.getOrElse(plan), 0)
+    graph.write(fileWriter)
   }
 
   private def createPercentDiffString(n1: Long, n2: Long) = {

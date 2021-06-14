@@ -98,7 +98,7 @@ class Analysis(apps: ArrayBuffer[ApplicationInfo], fileWriter: Option[ToolTextFi
         }
       }
       if (query.nonEmpty) {
-        apps.head.runQuery(query + " order by appIndex, Duration desc",
+        apps.head.runQuery(query + " order by ID, appIndex, Duration desc",
           false, fileWriter, messageHeader)
       } else {
         fileWriter.foreach(_.write("Unable to calculate Job and Stage Metrics\n"))

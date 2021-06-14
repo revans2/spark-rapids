@@ -40,7 +40,7 @@ class CompareApplications(apps: ArrayBuffer[ApplicationInfo],
       if (i < apps.size) {
         query += "\n union \n"
       } else {
-        query += " order by appIndex"
+        query += " order by appIndex, appId "
       }
       i += 1
     }
@@ -57,7 +57,7 @@ class CompareApplications(apps: ArrayBuffer[ApplicationInfo],
       if (i < apps.size) {
         query += "\n union \n"
       } else {
-        query += " order by appIndex"
+        query += " order by jobID, appIndex "
       }
       i += 1
     }
@@ -74,7 +74,7 @@ class CompareApplications(apps: ArrayBuffer[ApplicationInfo],
       if (i < apps.size) {
         query += "\n union \n"
       } else {
-        query += " order by appIndex, cast(executorID as long)"
+        query += " order by cast(executorID as long), appIndex "
       }
       i += 1
     }
