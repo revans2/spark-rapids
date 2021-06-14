@@ -25,7 +25,7 @@ import com.nvidia.spark.rapids.tool.ToolTextFileWriter
 import org.apache.spark.sql.execution.SparkPlanInfo
 import org.apache.spark.sql.execution.metric.SQLMetricInfo
 
-class DotStage(val id: Int) {
+class DotStage(val id: Int, val metrics: Option[StageMetrics]) {
   val nodes = new ArrayBuffer[DotNode]()
 
   def addNode(node: DotNode): Unit = {
@@ -33,10 +33,16 @@ class DotStage(val id: Int) {
   }
 
   def write(writer: ToolTextFileWriter): Unit = {
+    val m = metrics.map { metrics =>
+      s"""
+         |numTasks: ${metrics.numTasks}
+         |duration: ${metrics.duration}
+         |""".stripMargin
+    }.getOrElse("")
     writer.write(
       s"""
          |subgraph cluster$id {
-         |  label="stage $id"
+         |  label="stage $id$m"
          |  color="blue"
          |""".stripMargin)
 
@@ -60,8 +66,8 @@ class DotGraph(
     nodes += node
   }
 
-  def addNodeToStage(stageId: Int, node: DotNode): Unit = {
-    stages.getOrElseUpdate(stageId, new DotStage(stageId)).addNode(node)
+  def addNodeToStage(stageId: Int, node: DotNode, metrics: Option[StageMetrics]): Unit = {
+    stages.getOrElseUpdate(stageId, new DotStage(stageId, metrics)).addNode(node)
   }
 
   def addLink(link: DotLink): Unit = {
@@ -136,8 +142,8 @@ object GenerateDot {
     plan: QueryPlanWithMetrics,
     physicalPlanString: String,
     comparisonPlan: Option[QueryPlanWithMetrics],
-    stageIdToJobId: Map[Int, Int],
-    accumIdToStageIdAndTaskId: Map[Long, (Int, Long)],
+    accumIdToStageIdAndTaskId: Map[Long, Int],
+    stageIdToStageMetrics: Map[Int, StageMetrics],
     fileWriter: ToolTextFileWriter,
     sqlId: Long,
     appId: String
@@ -147,13 +153,17 @@ object GenerateDot {
 
     def getStageId(nodePlan: SparkPlanInfo): Option[Int] = {
       val possibleStageId = nodePlan.metrics.flatMap { metric =>
-        accumIdToStageIdAndTaskId.get(metric.accumulatorId).map(_._1)
+        accumIdToStageIdAndTaskId.get(metric.accumulatorId)
       }
       if (possibleStageId.isEmpty) {
         None
       } else {
         Some(possibleStageId.head)
       }
+    }
+
+    def getStageMetrics(stageId: Int): Option[StageMetrics] = {
+      stageIdToStageMetrics.get(stageId)
     }
 
     def isGpuPlan(plan: SparkPlanInfo): Boolean = {
@@ -234,7 +244,7 @@ object GenerateDot {
         val dotNode = new DotNode(s"node$id", s"$label\n$metrics", color)
         val stageId = getStageId(nodePlan)
         if (stageId.isDefined) {
-          stageId.foreach(id => graph.addNodeToStage(id, dotNode))
+          stageId.foreach(id => graph.addNodeToStage(id, dotNode, getStageMetrics(id)))
         } else {
           graph.addNode(dotNode)
         }
