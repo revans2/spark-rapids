@@ -196,8 +196,8 @@ object GenerateDot {
         graph: DotGraph,
         node: QueryPlanWithMetrics,
         comparisonNode: QueryPlanWithMetrics,
+        previousStageId: Option[Int] = None,
         id: Int = 0): Unit = {
-
       val nodePlan = node.plan
       val comparisonPlan = comparisonNode.plan
       if (nodePlan.nodeName == comparisonPlan.nodeName &&
@@ -242,9 +242,12 @@ object GenerateDot {
         }
 
         val dotNode = new DotNode(s"node$id", s"$label\n$metrics", color)
-        val stageId = getStageId(nodePlan)
+        var stageId = getStageId(nodePlan)
         if (stageId.isDefined) {
           stageId.foreach(id => graph.addNodeToStage(id, dotNode, getStageMetrics(id)))
+        } else if (previousStageId.isDefined) {
+          previousStageId.foreach(id => graph.addNodeToStage(id, dotNode, getStageMetrics(id)))
+          stageId = previousStageId
         } else {
           graph.addNode(dotNode)
         }
@@ -256,7 +259,8 @@ object GenerateDot {
             graph,
             QueryPlanWithMetrics(nodePlan.children(i), node.metrics),
             QueryPlanWithMetrics(comparisonPlan.children(i), comparisonNode.metrics),
-            childId);
+            stageId,
+            childId)
 
           val color = (isGpuPlan(nodePlan), isGpuPlan(nodePlan.children(i))) match {
             case (true, true) => GPU_COLOR
@@ -284,7 +288,7 @@ object GenerateDot {
 
     val graph = new DotGraph("G", leftAlignedLabel)
 
-    buildGraph(graph, plan, comparisonPlan.getOrElse(plan), 0)
+    buildGraph(graph, plan, comparisonPlan.getOrElse(plan), None, 0)
     graph.write(fileWriter)
   }
 

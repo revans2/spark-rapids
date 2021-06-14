@@ -142,7 +142,6 @@ class CollectInformation(apps: ArrayBuffer[ApplicationInfo],
           s"""
              | select
              | stageId,
-             | taskId,
              | accumulatorId
              | from taskStageAccumDF_${app.index}
              | """.stripMargin).groupBy("accumulatorId").agg(
