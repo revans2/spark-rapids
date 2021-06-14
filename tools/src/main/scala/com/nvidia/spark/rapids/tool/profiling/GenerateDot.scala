@@ -17,12 +17,34 @@ package com.nvidia.spark.rapids.tool.profiling
 
 import java.util.concurrent.TimeUnit
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 
 import com.nvidia.spark.rapids.tool.ToolTextFileWriter
 
 import org.apache.spark.sql.execution.SparkPlanInfo
 import org.apache.spark.sql.execution.metric.SQLMetricInfo
+
+class DotTask(val id: Long) {
+  val nodes = new ArrayBuffer[DotNode]()
+
+  def addNode(node: DotNode): Unit = {
+    nodes += node
+  }
+
+  def write(writer: ToolTextFileWriter): Unit = {
+    writer.write(
+      s"""
+         |subgraph cluster$id {
+         |  label="task $id"
+         |  color="blue"
+         |""".stripMargin)
+
+    nodes.foreach(_.write(writer))
+
+    writer.write("}\n")
+  }
+}
 
 class DotGraph(
     val id: String,
@@ -31,10 +53,15 @@ class DotGraph(
     val fontName: String = "Courier") {
 
   val nodes = new ArrayBuffer[DotNode]()
+  val tasks = new mutable.HashMap[Long, DotTask]()
   val links = new ArrayBuffer[DotLink]()
 
   def addNode(node: DotNode): Unit = {
     nodes += node
+  }
+
+  def addNodeToTask(taskId: Long, node: DotNode): Unit = {
+    tasks.getOrElseUpdate(taskId, new DotTask(taskId)).addNode(node)
   }
 
   def addLink(link: DotLink): Unit = {
@@ -50,6 +77,7 @@ class DotGraph(
          |  fontname=$fontName
          |""".stripMargin)
 
+    tasks.values.foreach(_.write(writer))
     nodes.foreach(_.write(writer))
     links.foreach(_.write(writer))
 
@@ -108,12 +136,25 @@ object GenerateDot {
     plan: QueryPlanWithMetrics,
     physicalPlanString: String,
     comparisonPlan: Option[QueryPlanWithMetrics],
+    stageIdToJobId: Map[Int, Int],
+    accumIdToStageIdAndTaskId: Map[Long, (Int, Long)],
     fileWriter: ToolTextFileWriter,
     sqlId: Long,
     appId: String
   ): Unit = {
 
     var nextId = 1
+
+    def getTaskId(nodePlan: SparkPlanInfo): Option[Long] = {
+      val possibleTaskId = nodePlan.metrics.flatMap { metric =>
+        accumIdToStageIdAndTaskId.get(metric.accumulatorId).map(_._2)
+      }
+      if (possibleTaskId.isEmpty) {
+        None
+      } else {
+        Some(possibleTaskId.head)
+      }
+    }
 
     def isGpuPlan(plan: SparkPlanInfo): Boolean = {
       plan.nodeName match {
@@ -190,7 +231,13 @@ object GenerateDot {
           nodePlan.nodeName
         }
 
-        graph.addNode(new DotNode(s"node$id", s"$label\n$metrics", color))
+        val dotNode = new DotNode(s"node$id", s"$label\n$metrics", color)
+        val task = getTaskId(nodePlan)
+        if (task.isDefined) {
+          task.foreach(id => graph.addNodeToTask(id, dotNode))
+        } else {
+          graph.addNode(dotNode)
+        }
 
         nodePlan.children.indices.foreach(i => {
           val childId = nextId

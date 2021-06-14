@@ -15,7 +15,6 @@
  */
 package com.nvidia.spark.rapids.tool.profiling
 
-import java.io.File
 import java.util.concurrent.TimeUnit
 
 import scala.collection.mutable
@@ -24,7 +23,7 @@ import scala.collection.mutable.ArrayBuffer
 import com.nvidia.spark.rapids.tool.ToolTextFileWriter
 
 import org.apache.spark.sql.DataFrame
-import org.apache.spark.sql.functions.col
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.rapids.tool.profiling.ApplicationInfo
 
 /**
@@ -137,22 +136,40 @@ class CollectInformation(apps: ArrayBuffer[ApplicationInfo],
       if (requiredDataFrames.forall(app.allDataFrames.contains)) {
         val accums = accumsOpt.getOrElse(app.runQuery(app.generateSQLAccums))
 
-        val taskStageAccum = app.runQuery(
+        val stageIdToJobId = app.runQuery(
           s"""
-            | select
-            | stageId,
-            | taskId,
-            | accumulatorId as accumID
-            | from taskStageAccumDF_${app.index}
-            | """.stripMargin)
+            |select
+            | jobID,
+            | explode(stageIds) as stageId
+            | from jobDF_${app.index}
+            |""".stripMargin).collect().map { row =>
+          (row.getInt(1), row.getInt(0))
+        }.toMap
 
-        taskStageAccum.join(accums,
-          accums("accumulatorId") === taskStageAccum("accumID"),
-          joinType="Inner").groupBy("accumulatorId").agg(Map(
-          "stageId" -> "max",
-          "taskId" -> "max",
-          "sqlID" -> "max",
-          "nodeID" -> "max")).show()
+//        System.err.println("STAGE ID\t| JOB ID:")
+//        stageIdToJobId.foreach {
+//          case (stageId, jobId) => System.err.println(s"$stageId\t| $jobId")
+//        }
+
+        val accumIdToStageIdAndTaskId = app.runQuery(
+          s"""
+             | select
+             | stageId,
+             | taskId,
+             | accumulatorId
+             | from taskStageAccumDF_${app.index}
+             | """.stripMargin).groupBy("accumulatorId").agg(
+          max(col("stageId")).alias("stageId"),
+          max(col("taskId")).alias("taskId")).collect().map { row =>
+          (row.getLong(0), (row.getInt(1), row.getLong(2)))
+        }.toMap
+
+//        System.err.println("ACCUM ID\t| STAGE ID\t| TASK ID\t| JOB ID")
+//        accumIdToStageIdAndTaskId.foreach {
+//          case (accumId, (stageId, taskId)) =>
+//            val jobId = stageIdToJobId.get(stageId)
+//            System.err.println(s"$accumId\t| $stageId\t| $taskId\t| $jobId")
+//        }
 
         val start = System.nanoTime()
         val accumSummary = accums
@@ -174,7 +191,8 @@ class CollectInformation(apps: ArrayBuffer[ApplicationInfo],
           try {
             val metrics = sqlIdToMaxMetric.getOrElse(sqlID, Seq.empty).toMap
             GenerateDot.writeDotGraph(QueryPlanWithMetrics(planInfo, metrics),
-              physicalPlan, None, dotFileWriter, sqlID, app.appId)
+              physicalPlan, None, stageIdToJobId, accumIdToStageIdAndTaskId,
+              dotFileWriter, sqlID, app.appId)
           } finally {
             dotFileWriter.close()
           }
