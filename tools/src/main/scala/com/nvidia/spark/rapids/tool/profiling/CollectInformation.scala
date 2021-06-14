@@ -149,15 +149,29 @@ class CollectInformation(apps: ArrayBuffer[ApplicationInfo],
           (row.getLong(0), row.getInt(1))
         }.toMap
 
+        val formatter = java.text.NumberFormat.getIntegerInstance
+
         val stageIdToStageMetrics = app.runQuery(
           s"""
              |select
              | stageId,
-             | numTasks,
-             | durationStr
-             | from stageDF_${app.index}
-             |""".stripMargin).collect().map { row =>
-          (row.getInt(0), StageMetrics(row.getInt(1), row.getString(2)))
+             | duration
+             | from taskDF_${app.index}
+             |""".stripMargin).groupBy(col("stageId"))
+            .agg(min(col("duration")).alias("min_dur"),
+              max(col("duration")).alias("max_dur"),
+              mean(col("duration")).alias("mean_dur"),
+              count(col("duration")).alias("num_tasks"))
+            .collect().map { row =>
+          val stageId = row.getInt(0)
+          val minDur = row.getLong(1)
+          val maxDur = row.getLong(2)
+          val meanDur = row.getDouble(3)
+          val numTasks = row.getLong(4)
+          (stageId, StageMetrics(numTasks.toInt,
+            s"MIN: ${formatter.format(minDur)} ms " +
+                s"MAX: ${formatter.format(maxDur)} ms " +
+                s"AVG: ${formatter.format(meanDur)} ms"))
         }.toMap
 
         val start = System.nanoTime()
