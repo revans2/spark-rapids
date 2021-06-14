@@ -25,7 +25,7 @@ import com.nvidia.spark.rapids.tool.ToolTextFileWriter
 import org.apache.spark.sql.execution.SparkPlanInfo
 import org.apache.spark.sql.execution.metric.SQLMetricInfo
 
-class DotTask(val id: Long) {
+class DotStage(val id: Int) {
   val nodes = new ArrayBuffer[DotNode]()
 
   def addNode(node: DotNode): Unit = {
@@ -36,7 +36,7 @@ class DotTask(val id: Long) {
     writer.write(
       s"""
          |subgraph cluster$id {
-         |  label="task $id"
+         |  label="stage $id"
          |  color="blue"
          |""".stripMargin)
 
@@ -53,15 +53,15 @@ class DotGraph(
     val fontName: String = "Courier") {
 
   val nodes = new ArrayBuffer[DotNode]()
-  val tasks = new mutable.HashMap[Long, DotTask]()
+  val stages = new mutable.HashMap[Int, DotStage]()
   val links = new ArrayBuffer[DotLink]()
 
   def addNode(node: DotNode): Unit = {
     nodes += node
   }
 
-  def addNodeToTask(taskId: Long, node: DotNode): Unit = {
-    tasks.getOrElseUpdate(taskId, new DotTask(taskId)).addNode(node)
+  def addNodeToStage(stageId: Int, node: DotNode): Unit = {
+    stages.getOrElseUpdate(stageId, new DotStage(stageId)).addNode(node)
   }
 
   def addLink(link: DotLink): Unit = {
@@ -77,7 +77,7 @@ class DotGraph(
          |  fontname=$fontName
          |""".stripMargin)
 
-    tasks.values.foreach(_.write(writer))
+    stages.values.foreach(_.write(writer))
     nodes.foreach(_.write(writer))
     links.foreach(_.write(writer))
 
@@ -145,14 +145,14 @@ object GenerateDot {
 
     var nextId = 1
 
-    def getTaskId(nodePlan: SparkPlanInfo): Option[Long] = {
-      val possibleTaskId = nodePlan.metrics.flatMap { metric =>
-        accumIdToStageIdAndTaskId.get(metric.accumulatorId).map(_._2)
+    def getStageId(nodePlan: SparkPlanInfo): Option[Int] = {
+      val possibleStageId = nodePlan.metrics.flatMap { metric =>
+        accumIdToStageIdAndTaskId.get(metric.accumulatorId).map(_._1)
       }
-      if (possibleTaskId.isEmpty) {
+      if (possibleStageId.isEmpty) {
         None
       } else {
-        Some(possibleTaskId.head)
+        Some(possibleStageId.head)
       }
     }
 
@@ -232,9 +232,9 @@ object GenerateDot {
         }
 
         val dotNode = new DotNode(s"node$id", s"$label\n$metrics", color)
-        val task = getTaskId(nodePlan)
-        if (task.isDefined) {
-          task.foreach(id => graph.addNodeToTask(id, dotNode))
+        val stageId = getStageId(nodePlan)
+        if (stageId.isDefined) {
+          stageId.foreach(id => graph.addNodeToStage(id, dotNode))
         } else {
           graph.addNode(dotNode)
         }
