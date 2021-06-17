@@ -25,6 +25,11 @@ import org.apache.spark.sql.rapids.tool.profiling.ApplicationInfo
 case class OccupancyTaskInfo(stageId: Int, taskId: Long,
     launchTime: Long, finishTime: Long, duration: Long)
 
+case class OccupancyStageInfo(stageId: Int,
+    submissionTime: Long,
+    completionTime:Long,
+    duration: Long)
+
 /**
  * Generates an SVG graph that is used to show cluster occupancy of tasks.
  */
@@ -37,6 +42,7 @@ object GenerateOccupancy {
   private val FOOTER_HEIGHT = FONT_SIZE + (PADDING * 2)
   private val MS_PER_PIXEL = 1
 
+  // Generated using https://mokole.com/palette.html
   private val COLORS = Array(
     "#696969",
     "#dcdcdc",
@@ -106,6 +112,37 @@ object GenerateOccupancy {
       })
     }
 
+    val stageInfo = app.runQuery(
+      s"""
+         |select
+         |stageId,
+         |submissionTime,
+         |completionTime,
+         |duration
+         |from stageDF_${app.index} order by submissionTime
+         |""".stripMargin).collect().map { row =>
+      val stageId = row.getInt(0)
+      val submissionTime = row.getLong(1)
+      val completionTime = row.getLong(2)
+      val duration = row.getLong(3)
+      minStart = Math.min(minStart, submissionTime)
+      maxFinish = Math.max(maxFinish, completionTime)
+      OccupancyStageInfo(stageId, submissionTime, completionTime, duration)
+    }
+    // To know how many slots we need for displaying stages we need to pretend to draw it
+    val tmpStageSlotFreeUntil = ArrayBuffer[Long]()
+    stageInfo.foreach { si =>
+      val startTime = si.submissionTime
+      val slot = (0 until tmpStageSlotFreeUntil.length)
+          .find(i => startTime >= tmpStageSlotFreeUntil(i))
+          .getOrElse{
+            tmpStageSlotFreeUntil.append(0L)
+            tmpStageSlotFreeUntil.length - 1
+          }
+      tmpStageSlotFreeUntil(slot) = si.completionTime
+    }
+    val numStageSlots = tmpStageSlotFreeUntil.length
+
     val execHostToCores = app.runQuery(
       s"""
          | select
@@ -126,7 +163,8 @@ object GenerateOccupancy {
       s"${app.appId}-occupancy.svg")
     try {
       val width = (maxFinish - minStart)/MS_PER_PIXEL + HEADER_WIDTH + PADDING * 2
-      val height = (numSlots * TASK_HEIGHT) + TITLE_HEIGHT + FOOTER_HEIGHT
+      val height = (numSlots * TASK_HEIGHT) + TITLE_HEIGHT +
+          FOOTER_HEIGHT + (numStageSlots * TASK_HEIGHT) + PADDING * 2
       // scalastyle:off line.size.limit
       fileWriter.write(
         s"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
@@ -170,7 +208,7 @@ object GenerateOccupancy {
           }
           execHostYStart += execHostHeight
       }
-      System.err.println(s"END OF GRAPH $execHostYStart HEIGHT $height")
+
       val xStart = taskHostExecXEnd
       val xEnd = taskHostExecXEnd + (maxFinish - minStart)/MS_PER_PIXEL
       val yStart = PADDING + TITLE_HEIGHT
@@ -195,6 +233,38 @@ object GenerateOccupancy {
                |""".stripMargin)
         }
       }
+      // Now do the stage Slots
+      val stageSlotsHeight = (numStageSlots * TASK_HEIGHT)
+      val stageSlotYStart = yEnd + FOOTER_HEIGHT
+      val stageStartMiddleY = stageSlotYStart + (stageSlotsHeight/2)
+      fileWriter.write(
+        s"""<rect x="$PADDING" y="$stageSlotYStart"
+           | width="$HEADER_WIDTH" height="$stageSlotsHeight"
+           | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
+           |<text x="${PADDING * 2}" y="$stageStartMiddleY" dominant-baseline="middle"
+           | font-family="Courier,monospace" font-size="$FONT_SIZE">STAGES</text>
+           |""".stripMargin)
+
+      val stageSlotFreeUntil = new Array[Long](numStageSlots)
+      stageInfo.foreach { si =>
+        val startTime = si.submissionTime
+        val endTime = si.completionTime
+        val slot = (0 until stageSlotFreeUntil.length)
+            .find(i => startTime >= stageSlotFreeUntil(i))
+            .getOrElse(throw new IllegalStateException("Error scheduling stage for second time"))
+        stageSlotFreeUntil(slot) = endTime
+
+        val stageY = (slot * TASK_HEIGHT) + stageSlotYStart
+        val stageXStart = taskHostExecXEnd + (startTime - minStart)/MS_PER_PIXEL
+        val taskWidth = (endTime - startTime)/MS_PER_PIXEL
+        val color = stageIdToColor(si.stageId)
+        fileWriter.write(
+          s"""<rect x="$stageXStart" y="$stageY" width="$taskWidth" height="$TASK_HEIGHT"
+             | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
+             |""".stripMargin)
+        // TODO add in text???
+      }
+
       fileWriter.write(s"""</svg>""")
       // scalastyle:on line.size.limit
     } finally {
