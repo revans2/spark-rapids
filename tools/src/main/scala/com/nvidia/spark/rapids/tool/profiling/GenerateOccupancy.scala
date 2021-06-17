@@ -34,10 +34,35 @@ object GenerateOccupancy {
   val PADDING = 5
   val FONT_SIZE = 14
   val TITLE_HEIGHT = FONT_SIZE + (PADDING * 2)
+  val MS_PER_PIXEL = 1
+
+  val colors = Array(
+    "#696969",
+    "#2e8b57",
+    "#800000",
+    "#191970",
+    "#808000",
+    "#ff0000",
+    "#ff8c00",
+    "#ffd700",
+    "#0000cd",
+    "#ba55d3",
+    "#00ff7f",
+    "#adff2f",
+    "#ff00ff",
+    "#1e90ff",
+    "#fa8072",
+    "#dda0dd",
+    "#87ceeb",
+    "#ff1493",
+    "#f5deb3",
+    "#7fffd4")
 
   def generateFor(app: ApplicationInfo, outputDirectory: String): Unit = {
     val hostToExecList = new mutable.TreeMap[String,
         mutable.TreeMap[String, ArrayBuffer[OccupancyTaskInfo]]]()
+    val stageIdToColor = mutable.HashMap[Int, String]()
+    var colorIndex = 0
     var minStart = Long.MaxValue
     var maxFinish = 0L
     app.runQuery(
@@ -65,14 +90,18 @@ object GenerateOccupancy {
       execToTaskList.getOrElseUpdate(execId, ArrayBuffer.empty) += taskInfo
       minStart = Math.min(launchTime, minStart)
       maxFinish = Math.max(finishTime, maxFinish)
+      stageIdToColor.getOrElseUpdate(stageId, {
+        val color = colors(colorIndex % colors.length)
+        colorIndex += 1
+        color
+      })
     }
     val numSlots = hostToExecList.values.map(_.size).sum
 
     val fileWriter = new ToolTextFileWriter(outputDirectory,
       s"${app.appId}-occupancy.svg")
     try {
-      // For now 10ms per px??
-      val width = (maxFinish - minStart)/10 + (HEADER_WIDTH * 2) + PADDING * 2
+      val width = (maxFinish - minStart)/MS_PER_PIXEL + (HEADER_WIDTH * 2) + PADDING * 2
       val height = (numSlots * TASK_HEIGHT) + TITLE_HEIGHT
       // scalastyle:off line.size.limit
       fileWriter.write(
@@ -95,26 +124,31 @@ object GenerateOccupancy {
           fileWriter.write(
             s"""<rect x="$PADDING" y="$hostYStart" width="$HEADER_WIDTH" height="$hostHeight"
               | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
-              |<text x="$PADDING" y="$hostMiddleY" dominant-baseline="middle"
+              |<text x="${PADDING * 2}" y="$hostMiddleY" dominant-baseline="middle"
               | font-family="Courier,monospace" font-size="$FONT_SIZE">$host</text>
               |""".stripMargin)
+          var slotYStart = hostYStart
           execToTaskList.foreach {
             case (execId, taskList) =>
-              var taskYStart = hostYStart
-              val taskXStart = PADDING + HEADER_WIDTH
-              val taskMiddleY = TASK_HEIGHT/2 + taskYStart
+              val slotXStart = PADDING + HEADER_WIDTH
+              val slotXEnd = slotXStart + HEADER_WIDTH
+              val slotMiddleY = TASK_HEIGHT/2 + slotYStart
               fileWriter.write(
-                s"""<rect x="$taskXStart" y="$taskYStart" width="$HEADER_WIDTH" height="$TASK_HEIGHT"
+                s"""<rect x="$slotXStart" y="$slotYStart" width="$HEADER_WIDTH" height="$TASK_HEIGHT"
                    | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
-                   |<text x="${taskXStart + PADDING}" y="$taskMiddleY" dominant-baseline="middle"
+                   |<text x="${slotXStart + PADDING}" y="$slotMiddleY" dominant-baseline="middle"
                    | font-family="Courier,monospace" font-size="$FONT_SIZE">$execId</text>
                    |""".stripMargin)
-              System.err.println(s"HOST:EXEC: $host:$execId")
               taskList.foreach { taskInfo =>
-                System.err.println(s"${taskInfo.stageId}: " +
-                    s"${taskInfo.launchTime} -> ${taskInfo.finishTime} (${taskInfo.duration} ms)")
-                taskYStart += TASK_HEIGHT
+                val taskXStart = slotXEnd + (taskInfo.launchTime - minStart)/MS_PER_PIXEL
+                val taskWidth = (taskInfo.finishTime - taskInfo.launchTime)/MS_PER_PIXEL
+                val color = stageIdToColor(taskInfo.stageId)
+                fileWriter.write(
+                  s"""<rect x="$taskXStart" y="$slotYStart" width="$taskWidth" height="$TASK_HEIGHT"
+                     | style="fill:$color;fill-opacity:1.0;stroke:black;stroke-width:1"/>
+                     |""".stripMargin)
               }
+              slotYStart += TASK_HEIGHT
           }
           hostYStart += hostHeight
       }
