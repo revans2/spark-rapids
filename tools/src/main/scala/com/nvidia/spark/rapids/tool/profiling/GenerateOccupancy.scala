@@ -29,14 +29,14 @@ case class OccupancyTaskInfo(stageId: Int, taskId: Long,
  * Generates an SVG graph that is used to show cluster occupancy of tasks.
  */
 object GenerateOccupancy {
-  val TASK_HEIGHT = 100
-  val HEADER_WIDTH = 200
-  val PADDING = 5
-  val FONT_SIZE = 14
-  val TITLE_HEIGHT = FONT_SIZE + (PADDING * 2)
-  val MS_PER_PIXEL = 1
+  private val TASK_HEIGHT = 100
+  private val HEADER_WIDTH = 200
+  private val PADDING = 5
+  private val FONT_SIZE = 14
+  private val TITLE_HEIGHT = FONT_SIZE + (PADDING * 2)
+  private val MS_PER_PIXEL = 1
 
-  val colors = Array(
+  private val COLORS = Array(
     "#696969",
     "#2e8b57",
     "#800000",
@@ -59,8 +59,7 @@ object GenerateOccupancy {
     "#7fffd4")
 
   def generateFor(app: ApplicationInfo, outputDirectory: String): Unit = {
-    val hostToExecList = new mutable.TreeMap[String,
-        mutable.TreeMap[String, ArrayBuffer[OccupancyTaskInfo]]]()
+    val execHostToTaskList = new mutable.TreeMap[String, ArrayBuffer[OccupancyTaskInfo]]()
     val stageIdToColor = mutable.HashMap[Int, String]()
     var colorIndex = 0
     var minStart = Long.MaxValue
@@ -75,7 +74,7 @@ object GenerateOccupancy {
          | launchTime,
          | finishTime,
          | duration
-         | from taskDF_${app.index} order by host, executorId, launchTime
+         | from taskDF_${app.index} order by executorId, launchTime
          | """.stripMargin).collect().foreach { row =>
       val host = row.getString(0)
       val execId = row.getString(1)
@@ -85,23 +84,37 @@ object GenerateOccupancy {
       val finishTime = row.getLong(5)
       val duration = row.getLong(6)
       val taskInfo = OccupancyTaskInfo(stageId, taskId, launchTime, finishTime, duration)
-      val execToTaskList = hostToExecList.getOrElseUpdate(host,
-        new mutable.TreeMap[String, ArrayBuffer[OccupancyTaskInfo]]())
-      execToTaskList.getOrElseUpdate(execId, ArrayBuffer.empty) += taskInfo
+      val execHost = s"$execId/$host"
+      execHostToTaskList.getOrElseUpdate(execHost, ArrayBuffer.empty) += taskInfo
       minStart = Math.min(launchTime, minStart)
       maxFinish = Math.max(finishTime, maxFinish)
       stageIdToColor.getOrElseUpdate(stageId, {
-        val color = colors(colorIndex % colors.length)
+        val color = COLORS(colorIndex % COLORS.length)
         colorIndex += 1
         color
       })
     }
-    val numSlots = hostToExecList.values.map(_.size).sum
+
+    val execHostToCores = app.runQuery(
+      s"""
+         | select
+         | executorID,
+         | host,
+         | totalCores
+         | from executorsDF_${app.index}
+         | """.stripMargin).collect().map { row =>
+      val execId = row.getString(0)
+      val host = row.getString(1)
+      val numCores = row.getInt(2)
+      (s"$execId/$host", numCores)
+    }.toMap
+
+    val numSlots = execHostToCores.values.sum
 
     val fileWriter = new ToolTextFileWriter(outputDirectory,
       s"${app.appId}-occupancy.svg")
     try {
-      val width = (maxFinish - minStart)/MS_PER_PIXEL + (HEADER_WIDTH * 2) + PADDING * 2
+      val width = (maxFinish - minStart)/MS_PER_PIXEL + HEADER_WIDTH + PADDING * 2
       val height = (numSlots * TASK_HEIGHT) + TITLE_HEIGHT
       // scalastyle:off line.size.limit
       fileWriter.write(
@@ -114,43 +127,30 @@ object GenerateOccupancy {
            | <title>${app.appId} OCCUPANCY</title>
            |""".stripMargin)
       fileWriter.write(s"""<text x="$PADDING" y="${TITLE_HEIGHT/2}" dominant-baseline="middle" font-family="Courier,monospace" font-size="$FONT_SIZE">${app.appId} OCCUPANCY</text>\n""")
-      var hostYStart = PADDING + TITLE_HEIGHT
-      hostToExecList.foreach {
-        case (host, execToTaskList) =>
-          val numElements = execToTaskList.size
-          val hostHeight = numElements * TASK_HEIGHT
-          val hostMiddleY = hostHeight/2 + hostYStart
+      val taskHostExecXEnd = PADDING + HEADER_WIDTH
+      var execHostYStart = PADDING + TITLE_HEIGHT
+      execHostToTaskList.foreach {
+        case (execHost, taskList) =>
+          val numElements = execHostToCores(execHost)
+          val execHostHeight = numElements * TASK_HEIGHT
+          val execHostMiddleY = execHostHeight/2 + execHostYStart
           // Draw a box for the Host
           fileWriter.write(
-            s"""<rect x="$PADDING" y="$hostYStart" width="$HEADER_WIDTH" height="$hostHeight"
-              | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
-              |<text x="${PADDING * 2}" y="$hostMiddleY" dominant-baseline="middle"
-              | font-family="Courier,monospace" font-size="$FONT_SIZE">$host</text>
-              |""".stripMargin)
-          var slotYStart = hostYStart
-          execToTaskList.foreach {
-            case (execId, taskList) =>
-              val slotXStart = PADDING + HEADER_WIDTH
-              val slotXEnd = slotXStart + HEADER_WIDTH
-              val slotMiddleY = TASK_HEIGHT/2 + slotYStart
-              fileWriter.write(
-                s"""<rect x="$slotXStart" y="$slotYStart" width="$HEADER_WIDTH" height="$TASK_HEIGHT"
-                   | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
-                   |<text x="${slotXStart + PADDING}" y="$slotMiddleY" dominant-baseline="middle"
-                   | font-family="Courier,monospace" font-size="$FONT_SIZE">$execId</text>
-                   |""".stripMargin)
-              taskList.foreach { taskInfo =>
-                val taskXStart = slotXEnd + (taskInfo.launchTime - minStart)/MS_PER_PIXEL
-                val taskWidth = (taskInfo.finishTime - taskInfo.launchTime)/MS_PER_PIXEL
-                val color = stageIdToColor(taskInfo.stageId)
-                fileWriter.write(
-                  s"""<rect x="$taskXStart" y="$slotYStart" width="$taskWidth" height="$TASK_HEIGHT"
-                     | style="fill:$color;fill-opacity:1.0;stroke:black;stroke-width:1"/>
-                     |""".stripMargin)
-              }
-              slotYStart += TASK_HEIGHT
+            s"""<rect x="$PADDING" y="$execHostYStart" width="$HEADER_WIDTH" height="$execHostHeight"
+               | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
+               |<text x="${PADDING * 2}" y="$execHostMiddleY" dominant-baseline="middle"
+               | font-family="Courier,monospace" font-size="$FONT_SIZE">$execHost</text>
+               |""".stripMargin)
+          taskList.foreach { taskInfo =>
+            val taskXStart = taskHostExecXEnd + (taskInfo.launchTime - minStart)/MS_PER_PIXEL
+            val taskWidth = (taskInfo.finishTime - taskInfo.launchTime)/MS_PER_PIXEL
+            val color = stageIdToColor(taskInfo.stageId)
+            fileWriter.write(
+              s"""<rect x="$taskXStart" y="$execHostYStart" width="$taskWidth" height="$TASK_HEIGHT"
+                 | style="fill:$color;fill-opacity:1.0;stroke:black;stroke-width:1"/>
+                 |""".stripMargin)
           }
-          hostYStart += hostHeight
+          execHostYStart += execHostHeight
       }
       fileWriter.write(s"""</svg>""")
       // scalastyle:on line.size.limit
