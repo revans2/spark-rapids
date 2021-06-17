@@ -262,8 +262,9 @@ object GenerateOccupancy {
         fileWriter.write(
           s"""<rect x="$stageXStart" y="$stageY" width="$taskWidth" height="$TASK_HEIGHT"
              | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
+             |<text x="$stageXStart" y="${stageY + TASK_HEIGHT/2}" dominant-baseline="middle"
+             |  font-family="Courier,monospace" font-size="$FONT_SIZE">STAGE ${si.stageId} ${si.duration} ms</text>
              |""".stripMargin)
-        // TODO add in text???
       }
 
       fileWriter.write(s"""</svg>""")
