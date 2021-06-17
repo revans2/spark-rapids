@@ -129,11 +129,11 @@ object GenerateOccupancy {
       maxFinish = Math.max(maxFinish, completionTime)
       OccupancyStageInfo(stageId, submissionTime, completionTime, duration)
     }
-    // To know how many slots we need for displaying stages we need to pretend to draw it
+    // To know how many slots we need we need to pretend to draw it
     val tmpStageSlotFreeUntil = ArrayBuffer[Long]()
     stageInfo.foreach { si =>
       val startTime = si.submissionTime
-      val slot = (0 until tmpStageSlotFreeUntil.length)
+      val slot = tmpStageSlotFreeUntil.indices
           .find(i => startTime >= tmpStageSlotFreeUntil(i))
           .getOrElse{
             tmpStageSlotFreeUntil.append(0L)
@@ -143,21 +143,24 @@ object GenerateOccupancy {
     }
     val numStageSlots = tmpStageSlotFreeUntil.length
 
-    val execHostToCores = app.runQuery(
-      s"""
-         | select
-         | executorID,
-         | host,
-         | totalCores
-         | from executorsDF_${app.index}
-         | """.stripMargin).collect().map { row =>
-      val execId = row.getString(0)
-      val host = row.getString(1)
-      val numCores = row.getInt(2)
-      (s"$execId/$host", numCores)
+    val execHostToSlots = execHostToTaskList.map {
+      case (execHost, taskList) =>
+        val tmpSlotFreeUntil = ArrayBuffer[Long]()
+        taskList.foreach { ti =>
+          val startTime = ti.launchTime
+          val slot = tmpSlotFreeUntil.indices
+              .find(i => startTime >= tmpSlotFreeUntil(i))
+              .getOrElse{
+                tmpSlotFreeUntil.append(0L)
+                tmpSlotFreeUntil.length - 1
+              }
+          tmpSlotFreeUntil(slot) = ti.finishTime
+        }
+        val numStageSlots = tmpSlotFreeUntil.length
+        (execHost, numStageSlots)
     }.toMap
 
-    val numSlots = execHostToCores.values.sum
+    val numSlots = execHostToSlots.values.sum
 
     val fileWriter = new ToolTextFileWriter(outputDirectory,
       s"${app.appId}-occupancy.svg")
@@ -180,7 +183,7 @@ object GenerateOccupancy {
       var execHostYStart = PADDING + TITLE_HEIGHT
       execHostToTaskList.foreach {
         case (execHost, taskList) =>
-          val numElements = execHostToCores(execHost)
+          val numElements = execHostToSlots(execHost)
           val slotFreeUntil = Array.fill(numElements)(0L)
           val execHostHeight = numElements * TASK_HEIGHT
           val execHostMiddleY = execHostHeight/2 + execHostYStart
@@ -192,10 +195,8 @@ object GenerateOccupancy {
                | font-family="Courier,monospace" font-size="$FONT_SIZE">$execHost</text>
                |""".stripMargin)
           taskList.foreach { taskInfo =>
-            // Because of clock skew/etc there can be overlap between tasks. So we are
-            // just going to live with it and pick the slot closest to being free each time
-            val minFreeTime = slotFreeUntil.min
-            val slot = (0 until numElements).find(i => minFreeTime == slotFreeUntil(i)).get
+            val slot = (0 until numElements).find(i => taskInfo.launchTime >= slotFreeUntil(i))
+                .getOrElse(throw new IllegalArgumentException("SCHEDULING SECOND TIME FAILED"))
             slotFreeUntil(slot) = taskInfo.finishTime
             val taskY = (slot * TASK_HEIGHT) + execHostYStart
             val taskXStart = taskHostExecXEnd + (taskInfo.launchTime - minStart)/MS_PER_PIXEL
@@ -234,7 +235,7 @@ object GenerateOccupancy {
         }
       }
       // Now do the stage Slots
-      val stageSlotsHeight = (numStageSlots * TASK_HEIGHT)
+      val stageSlotsHeight = numStageSlots * TASK_HEIGHT
       val stageSlotYStart = yEnd + FOOTER_HEIGHT
       val stageStartMiddleY = stageSlotYStart + (stageSlotsHeight/2)
       fileWriter.write(
@@ -249,7 +250,7 @@ object GenerateOccupancy {
       stageInfo.foreach { si =>
         val startTime = si.submissionTime
         val endTime = si.completionTime
-        val slot = (0 until stageSlotFreeUntil.length)
+        val slot = stageSlotFreeUntil.indices
             .find(i => startTime >= stageSlotFreeUntil(i))
             .getOrElse(throw new IllegalStateException("Error scheduling stage for second time"))
         stageSlotFreeUntil(slot) = endTime
