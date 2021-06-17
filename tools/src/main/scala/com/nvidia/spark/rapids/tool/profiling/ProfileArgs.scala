@@ -76,6 +76,9 @@ For usage see below:
   val printPlans: ScallopOption[Boolean] =
     opt[Boolean](required = false,
       descr = "Print the SQL plans to a file starting with 'planDescriptions-'. Default is false")
+  val generateOccupancy: ScallopOption[Boolean] =
+    opt[Boolean](required = false,
+      descr = "Write an SVG cluster occupancy graph out for the application.")
 
   verify()
 }

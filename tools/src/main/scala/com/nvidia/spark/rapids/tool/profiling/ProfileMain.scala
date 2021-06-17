@@ -174,6 +174,15 @@ object ProfileMain extends Logging {
       healthCheck.listRemovedBlockManager()
       healthCheck.listRemovedExecutors()
       healthCheck.listPossibleUnsupportedSQLPlan()
+
+      if (appArgs.generateOccupancy()) {
+        if (appArgs.compare()) {
+          logWarning("OCCUPANCY GRAPH DOES NOT COMPARE APPS")
+        }
+        apps.foreach { app =>
+          GenerateOccupancy.generateFor(app, outputDirectory)
+        }
+      }
     }
 
     def logApplicationInfo(app: ApplicationInfo) = {
