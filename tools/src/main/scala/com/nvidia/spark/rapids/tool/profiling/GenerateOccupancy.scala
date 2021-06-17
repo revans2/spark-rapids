@@ -29,7 +29,7 @@ case class OccupancyTaskInfo(stageId: Int, taskId: Long,
  * Generates an SVG graph that is used to show cluster occupancy of tasks.
  */
 object GenerateOccupancy {
-  private val TASK_HEIGHT = 100
+  private val TASK_HEIGHT = 20
   private val HEADER_WIDTH = 200
   private val PADDING = 5
   private val FONT_SIZE = 14
@@ -132,6 +132,7 @@ object GenerateOccupancy {
       execHostToTaskList.foreach {
         case (execHost, taskList) =>
           val numElements = execHostToCores(execHost)
+          val slotFreeUntil = Array.fill(numElements)(0L)
           val execHostHeight = numElements * TASK_HEIGHT
           val execHostMiddleY = execHostHeight/2 + execHostYStart
           // Draw a box for the Host
@@ -142,11 +143,15 @@ object GenerateOccupancy {
                | font-family="Courier,monospace" font-size="$FONT_SIZE">$execHost</text>
                |""".stripMargin)
           taskList.foreach { taskInfo =>
+            val slot = (0 until numElements).find(i => taskInfo.launchTime >= slotFreeUntil(i))
+                .getOrElse(0) // TODO print error message...
+            slotFreeUntil(slot) = taskInfo.finishTime
+            val taskY = (slot * TASK_HEIGHT) + execHostYStart
             val taskXStart = taskHostExecXEnd + (taskInfo.launchTime - minStart)/MS_PER_PIXEL
             val taskWidth = (taskInfo.finishTime - taskInfo.launchTime)/MS_PER_PIXEL
             val color = stageIdToColor(taskInfo.stageId)
             fileWriter.write(
-              s"""<rect x="$taskXStart" y="$execHostYStart" width="$taskWidth" height="$TASK_HEIGHT"
+              s"""<rect x="$taskXStart" y="$taskY" width="$taskWidth" height="$TASK_HEIGHT"
                  | style="fill:$color;fill-opacity:1.0;stroke:black;stroke-width:1"/>
                  |""".stripMargin)
           }
