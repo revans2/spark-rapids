@@ -40,7 +40,7 @@ object GenerateOccupancy {
   private val FONT_SIZE = 14
   private val TITLE_HEIGHT = FONT_SIZE + (PADDING * 2)
   private val FOOTER_HEIGHT = FONT_SIZE + (PADDING * 2)
-  private val MS_PER_PIXEL = 1
+  private val MS_PER_PIXEL = 5.0
 
   // Generated using https://mokole.com/palette.html
   private val COLORS = Array(
@@ -214,14 +214,18 @@ object GenerateOccupancy {
       val xEnd = taskHostExecXEnd + (maxFinish - minStart)/MS_PER_PIXEL
       val yStart = PADDING + TITLE_HEIGHT
       val yEnd = execHostYStart
+      val yBottomStart = execHostYStart + FOOTER_HEIGHT
+      val yBottomEnd = yBottomStart + numStageSlots * TASK_HEIGHT
       fileWriter.write(
         s"""<line x1="$xStart" y1="$yEnd" x2="$xEnd" y2="$yEnd" style="stroke:black;stroke-width:1"/>
-           | <line x1="$xStart" y1="$yStart" x2="$xEnd" y2="$yStart" style="stroke:black;stroke-width:1"/>
+           |<line x1="$xStart" y1="$yStart" x2="$xEnd" y2="$yStart" style="stroke:black;stroke-width:1"/>
            |""".stripMargin)
       (0L until (maxFinish-minStart)).by(100L).foreach { timeForTick =>
         val xTick = timeForTick/MS_PER_PIXEL + taskHostExecXEnd
         fileWriter.write(
           s"""<line x1="$xTick" y1="$yStart" x2="$xTick" y2="$yEnd"
+             | style="stroke:black;stroke-width:1;opacity:0.5"/>
+             |<line x1="$xTick" y1="$yBottomStart" x2="$xTick" y2="$yBottomEnd"
              | style="stroke:black;stroke-width:1;opacity:0.5"/>
              |""".stripMargin)
         if (timeForTick % 1000 == 0) {
