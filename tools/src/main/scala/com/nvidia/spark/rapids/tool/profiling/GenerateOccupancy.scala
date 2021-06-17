@@ -107,9 +107,7 @@ object GenerateOccupancy {
       val execId = row.getString(0)
       val host = row.getString(1)
       val numCores = row.getInt(2)
-      // The * 2 is a hack to avoid odd scheduling overlaps. To match what Spark does on the
-      // UI I need to calculate they layout upfront.
-      (s"$execId/$host", numCores * 2)
+      (s"$execId/$host", numCores)
     }.toMap
 
     val numSlots = execHostToCores.values.sum
@@ -146,8 +144,10 @@ object GenerateOccupancy {
                | font-family="Courier,monospace" font-size="$FONT_SIZE">$execHost</text>
                |""".stripMargin)
           taskList.foreach { taskInfo =>
-            val slot = (0 until numElements).find(i => taskInfo.launchTime >= slotFreeUntil(i))
-                .getOrElse(throw new IllegalArgumentException("COULD NOT FIND A WAY TO SCHEDULE"))
+            // Because of clock skew/etc there can be overlap between tasks. So we are
+            // just going to live with it and pick the slot closest to being free each time
+            val minFreeTime = slotFreeUntil.min
+            val slot = (0 until numElements).find(i => minFreeTime == slotFreeUntil(i)).get
             slotFreeUntil(slot) = taskInfo.finishTime
             val taskY = (slot * TASK_HEIGHT) + execHostYStart
             val taskXStart = taskHostExecXEnd + (taskInfo.launchTime - minStart)/MS_PER_PIXEL
