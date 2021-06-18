@@ -123,6 +123,32 @@ object GenerateOccupancy {
     "#ff1493",
     "#7b68ee")
 
+  private def textBoxVirtCentered(
+      text: String,
+      x: Long,
+      y: Long,
+      fileWriter: ToolTextFileWriter): Unit =
+    fileWriter.write(
+      s"""<text x="$x" y="$y" dominant-baseline="middle"
+         | font-family="Courier,monospace" font-size="$FONT_SIZE">$text</text>
+         |""".stripMargin)
+
+  private def titleBox(
+      text: String,
+      yStart: Long,
+      numElements: Int,
+      fileWriter: ToolTextFileWriter): Int = {
+    val boxHeight = numElements * TASK_HEIGHT
+    val boxMiddleY = boxHeight/2 + yStart
+    // Draw a box for the Host
+    fileWriter.write(
+      s"""<rect x="$PADDING" y="$yStart" width="$HEADER_WIDTH" height="$boxHeight"
+         | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
+         |""".stripMargin)
+    textBoxVirtCentered(text, PADDING * 2, boxMiddleY, fileWriter)
+    boxHeight
+  }
+
   def generateFor(app: ApplicationInfo, outputDirectory: String): Unit = {
     val execHostToTaskList = new mutable.TreeMap[String, ArrayBuffer[OccupancyTaskInfo]]()
     val stageIdToColor = mutable.HashMap[Int, String]()
@@ -235,7 +261,9 @@ object GenerateOccupancy {
            | xmlns="http://www.w3.org/2000/svg">
            | <title>${app.appId} OCCUPANCY</title>
            |""".stripMargin)
-      fileWriter.write(s"""<text x="$PADDING" y="${TITLE_HEIGHT/2}" dominant-baseline="middle" font-family="Courier,monospace" font-size="$FONT_SIZE">${app.appId} OCCUPANCY</text>\n""")
+      // TITLE AT TOP
+      textBoxVirtCentered(s"${app.appId} OCCUPANCY", PADDING, TITLE_HEIGHT/2, fileWriter)
+
       val taskHostExecXEnd = PADDING + HEADER_WIDTH
       var execHostYStart = PADDING + TITLE_HEIGHT
       execHostToTaskList.foreach {
@@ -243,13 +271,8 @@ object GenerateOccupancy {
           val numElements = execHostToSlots(execHost)
           val execHostHeight = numElements * TASK_HEIGHT
           val execHostMiddleY = execHostHeight/2 + execHostYStart
-          // Draw a box for the Host
-          fileWriter.write(
-            s"""<rect x="$PADDING" y="$execHostYStart" width="$HEADER_WIDTH" height="$execHostHeight"
-               | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
-               |<text x="${PADDING * 2}" y="$execHostMiddleY" dominant-baseline="middle"
-               | font-family="Courier,monospace" font-size="$FONT_SIZE">$execHost</text>
-               |""".stripMargin)
+
+          titleBox(execHost, execHostYStart, numElements, fileWriter)
           OccupancyTiming.doLayout(taskList, numElements) {
             case (taskInfo, slot) =>
               val taskY = (slot * TASK_HEIGHT) + execHostYStart
@@ -300,13 +323,7 @@ object GenerateOccupancy {
       val stageSlotsHeight = numStageSlots * TASK_HEIGHT
       val stageSlotYStart = yEnd + FOOTER_HEIGHT
       val stageStartMiddleY = stageSlotYStart + (stageSlotsHeight/2)
-      fileWriter.write(
-        s"""<rect x="$PADDING" y="$stageSlotYStart"
-           | width="$HEADER_WIDTH" height="$stageSlotsHeight"
-           | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
-           |<text x="${PADDING * 2}" y="$stageStartMiddleY" dominant-baseline="middle"
-           | font-family="Courier,monospace" font-size="$FONT_SIZE">STAGES</text>
-           |""".stripMargin)
+      titleBox("STAGES", stageSlotYStart, numStageSlots, fileWriter)
 
       OccupancyTiming.doLayout(stageInfo, numStageSlots) {
         case (si, slot) =>
@@ -329,13 +346,7 @@ object GenerateOccupancy {
       val jobSlotsHeight = numJobSlots * TASK_HEIGHT
       val jobSlotYStart = stageSlotYStart + stageSlotsHeight
       val jobStartMiddleY = jobSlotYStart + (jobSlotsHeight/2)
-      fileWriter.write(
-        s"""<rect x="$PADDING" y="$jobSlotYStart"
-           | width="$HEADER_WIDTH" height="$jobSlotsHeight"
-           | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
-           |<text x="${PADDING * 2}" y="$jobStartMiddleY" dominant-baseline="middle"
-           | font-family="Courier,monospace" font-size="$FONT_SIZE">JOBS</text>
-           |""".stripMargin)
+      titleBox("JOBS", jobSlotYStart, numJobSlots, fileWriter)
 
       OccupancyTiming.doLayout(jobInfo, numJobSlots) {
         case (ji, slot) =>
@@ -345,7 +356,7 @@ object GenerateOccupancy {
           val jobY = (slot * TASK_HEIGHT) + jobSlotYStart
           val jobXStart = taskHostExecXEnd + (startTime - minStart)/MS_PER_PIXEL
           val taskWidth = (endTime - startTime)/MS_PER_PIXEL
-          val color = "green" // TODO stageIdToColor(si.stageId)
+          val color = "green" // TODO select colors???
           fileWriter.write(
             s"""<rect x="$jobXStart" y="$jobY" width="$taskWidth" height="$TASK_HEIGHT"
                | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
@@ -358,13 +369,7 @@ object GenerateOccupancy {
       val stageRangeSlotsHeight = numStageRangeSlots * TASK_HEIGHT
       val stageRangeSlotYStart = jobSlotYStart + jobSlotsHeight
       val stageRangeStartMiddleY = stageRangeSlotYStart + (stageRangeSlotsHeight/2)
-      fileWriter.write(
-        s"""<rect x="$PADDING" y="$stageRangeSlotYStart"
-           | width="$HEADER_WIDTH" height="$stageRangeSlotsHeight"
-           | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
-           |<text x="${PADDING * 2}" y="$stageRangeStartMiddleY" dominant-baseline="middle"
-           | font-family="Courier,monospace" font-size="$FONT_SIZE">STAGE RANGES</text>
-           |""".stripMargin)
+      titleBox("STAGE RANGES", stageRangeSlotYStart, numStageRangeSlots, fileWriter)
 
       OccupancyTiming.doLayout(stageRangeInfo, numStageRangeSlots) {
         case (si, slot) =>
