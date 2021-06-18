@@ -168,6 +168,37 @@ object GenerateOccupancy {
     textBoxVirtCentered(text, x, y + TASK_HEIGHT/2, fileWriter)
   }
 
+  private def scaleWithLines(x: Long,
+      y: Long,
+      minStart: Long,
+      maxFinish: Long,
+      height: Long,
+      fileWriter: ToolTextFileWriter): Unit = {
+    val timeRange = maxFinish - minStart
+    val xEnd = x + timeRange/MS_PER_PIXEL
+    val yEnd = y + height
+    fileWriter.write(
+      s"""<line x1="$x" y1="$yEnd" x2="$xEnd" y2="$yEnd" style="stroke:black;stroke-width:1"/>
+         |<line x1="$x" y1="$y" x2="$xEnd" y2="$y" style="stroke:black;stroke-width:1"/>
+         |""".stripMargin)
+    (0L until timeRange).by(100L).foreach { timeForTick =>
+      val xTick = timeForTick/MS_PER_PIXEL + x
+      fileWriter.write(
+        s"""<line x1="$xTick" y1="$y" x2="$xTick" y2="$yEnd"
+           | style="stroke:black;stroke-width:1;opacity:0.5"/>
+           |""".stripMargin)
+      if (timeForTick % 1000 == 0) {
+        fileWriter.write(
+          s"""<line x1="$xTick" y1="$yEnd"
+             | x2="$xTick" y2="${yEnd + PADDING}"
+             | style="stroke:black;stroke-width:1"/>
+             |<text x="$xTick" y="${yEnd + PADDING + FONT_SIZE}"
+             |font-family="Courier,monospace" font-size="$FONT_SIZE">$timeForTick ms</text>
+             |""".stripMargin)
+      }
+    }
+  }
+
   def generateFor(app: ApplicationInfo, outputDirectory: String): Unit = {
     val execHostToTaskList = new mutable.TreeMap[String, ArrayBuffer[OccupancyTaskInfo]]()
     val stageIdToColor = mutable.HashMap[Int, String]()
@@ -305,36 +336,15 @@ object GenerateOccupancy {
           execHostYStart += execHostHeight
       }
 
-      val xStart = taskHostExecXEnd
-      val xEnd = taskHostExecXEnd + (maxFinish - minStart)/MS_PER_PIXEL
-      val yStart = PADDING + TITLE_HEIGHT
+      scaleWithLines(taskHostExecXEnd,
+        PADDING + TITLE_HEIGHT,
+        minStart,
+        maxFinish,
+        execHostYStart - (PADDING + TITLE_HEIGHT),
+        fileWriter)
+
       val yEnd = execHostYStart
-      val yBottomStart = execHostYStart + FOOTER_HEIGHT
-      val yBottomEnd = yBottomStart + numStageSlots * TASK_HEIGHT
-      fileWriter.write(
-        s"""<line x1="$xStart" y1="$yEnd" x2="$xEnd" y2="$yEnd" style="stroke:black;stroke-width:1"/>
-           |<line x1="$xStart" y1="$yStart" x2="$xEnd" y2="$yStart" style="stroke:black;stroke-width:1"/>
-           |<line x1="$xStart" y1="$yBottomEnd" x2="$xEnd" y2="$yBottomEnd" style="stroke:black;stroke-width:1"/>
-           |<line x1="$xStart" y1="$yBottomStart" x2="$xEnd" y2="$yBottomStart" style="stroke:black;stroke-width:1"/>
-           |""".stripMargin)
-      (0L until (maxFinish-minStart)).by(100L).foreach { timeForTick =>
-        val xTick = timeForTick/MS_PER_PIXEL + taskHostExecXEnd
-        fileWriter.write(
-          s"""<line x1="$xTick" y1="$yStart" x2="$xTick" y2="$yEnd"
-             | style="stroke:black;stroke-width:1;opacity:0.5"/>
-             |<line x1="$xTick" y1="$yBottomStart" x2="$xTick" y2="$yBottomEnd"
-             | style="stroke:black;stroke-width:1;opacity:0.5"/>
-             |""".stripMargin)
-        if (timeForTick % 1000 == 0) {
-          fileWriter.write(
-            s"""<line x1="$xTick" y1="$yEnd"
-               | x2="$xTick" y2="${yEnd + PADDING}"
-               | style="stroke:black;stroke-width:1"/>
-               |<text x="$xTick" y="${yEnd + PADDING + FONT_SIZE}"
-               |font-family="Courier,monospace" font-size="$FONT_SIZE">$timeForTick ms</text>
-               |""".stripMargin)
-        }
-      }
+
       // Now do the stage Slots
       val stageSlotsHeight = numStageSlots * TASK_HEIGHT
       val stageSlotYStart = yEnd + FOOTER_HEIGHT
