@@ -27,11 +27,24 @@ abstract class OccupancyTiming(
     val endTime: Long)
 
 object OccupancyTiming {
+  def calcLayoutSlotsNeeded[A <: OccupancyTiming](toSchedule: Iterable[A]): Int = {
+    val slotsFreeUntil = ArrayBuffer[Long]()
+    computeLayout(toSchedule, (_: A, _: Int) => (), false, slotsFreeUntil)
+    slotsFreeUntil.length
+  }
+
+  def doLayout[A <: OccupancyTiming](
+      toSchedule: Iterable[A],
+      numSlots: Int)(scheduleCallback: (A, Int) => Unit): Unit = {
+    val slotsFreeUntil = new Array[Long](numSlots).toBuffer
+    computeLayout(toSchedule, scheduleCallback, true, slotsFreeUntil)
+  }
+
   def computeLayout[A <: OccupancyTiming](
-      toSchedule: Seq[A],
+      toSchedule: Iterable[A],
       scheduleCallback: (A, Int) => Unit,
       errorOnMissingSlot: Boolean,
-      slotsFreeUntil: ArrayBuffer[Long]): Unit = {
+      slotsFreeUntil: mutable.Buffer[Long]): Unit = {
     toSchedule.foreach { timing =>
       val startTime = timing.startTime
       val slot = slotsFreeUntil.indices
@@ -158,22 +171,6 @@ object GenerateOccupancy {
         new OccupancyStageInfo(stageId, start, end, end-start)
     }
 
-    val numStageRangeSlots = {
-      // To know how many slots we need we need to pretend to draw it
-      val tmpStageSlotFreeUntil = ArrayBuffer[Long]()
-      stageRangeInfo.foreach { si =>
-        val startTime = si.startTime
-        val slot = tmpStageSlotFreeUntil.indices
-            .find(i => startTime >= tmpStageSlotFreeUntil(i))
-            .getOrElse {
-              tmpStageSlotFreeUntil.append(0L)
-              tmpStageSlotFreeUntil.length - 1
-            }
-        tmpStageSlotFreeUntil(slot) = si.endTime
-      }
-      tmpStageSlotFreeUntil.length
-    }
-
     val stageInfo = app.runQuery(
       s"""
          |select
@@ -191,40 +188,11 @@ object GenerateOccupancy {
       maxFinish = Math.max(maxFinish, completionTime)
       new OccupancyStageInfo(stageId, submissionTime, completionTime, duration)
     }
-    val numStageSlots = {
-      // To know how many slots we need we need to pretend to draw it
-      val tmpStageSlotFreeUntil = ArrayBuffer[Long]()
-      stageInfo.foreach { si =>
-        val startTime = si.startTime
-        val slot = tmpStageSlotFreeUntil.indices
-            .find(i => startTime >= tmpStageSlotFreeUntil(i))
-            .getOrElse {
-              tmpStageSlotFreeUntil.append(0L)
-              tmpStageSlotFreeUntil.length - 1
-            }
-        tmpStageSlotFreeUntil(slot) = si.endTime
-      }
-      tmpStageSlotFreeUntil.length
-    }
 
     val execHostToSlots = execHostToTaskList.map {
       case (execHost, taskList) =>
-        val tmpSlotFreeUntil = ArrayBuffer[Long]()
-        taskList.foreach { ti =>
-          val startTime = ti.startTime
-          val slot = tmpSlotFreeUntil.indices
-              .find(i => startTime >= tmpSlotFreeUntil(i))
-              .getOrElse{
-                tmpSlotFreeUntil.append(0L)
-                tmpSlotFreeUntil.length - 1
-              }
-          tmpSlotFreeUntil(slot) = ti.endTime
-        }
-        val numStageSlots = tmpSlotFreeUntil.length
-        (execHost, numStageSlots)
+        (execHost, OccupancyTiming.calcLayoutSlotsNeeded(taskList))
     }.toMap
-
-    val numTaskSlots = execHostToSlots.values.sum
 
     val jobInfo = app.runQuery(
       s"""
@@ -244,21 +212,10 @@ object GenerateOccupancy {
       new OccupancyJobInfo(jobId, startTime, endTime, duration)
     }
 
-    val numJobSlots = {
-      // To know how many slots we need we need to pretend to draw it
-      val tmpJobSlotFreeUntil = ArrayBuffer[Long]()
-      jobInfo.foreach { ji =>
-        val startTime = ji.startTime
-        val slot = tmpJobSlotFreeUntil.indices
-            .find(i => startTime >= tmpJobSlotFreeUntil(i))
-            .getOrElse {
-              tmpJobSlotFreeUntil.append(0L)
-              tmpJobSlotFreeUntil.length - 1
-            }
-        tmpJobSlotFreeUntil(slot) = ji.endTime
-      }
-      tmpJobSlotFreeUntil.length
-    }
+    val numStageRangeSlots = OccupancyTiming.calcLayoutSlotsNeeded(stageRangeInfo)
+    val numStageSlots = OccupancyTiming.calcLayoutSlotsNeeded(stageInfo)
+    val numTaskSlots = execHostToSlots.values.sum
+    val numJobSlots = OccupancyTiming.calcLayoutSlotsNeeded(jobInfo)
 
     val fileWriter = new ToolTextFileWriter(outputDirectory,
       s"${app.appId}-occupancy.svg")
@@ -284,7 +241,6 @@ object GenerateOccupancy {
       execHostToTaskList.foreach {
         case (execHost, taskList) =>
           val numElements = execHostToSlots(execHost)
-          val slotFreeUntil = Array.fill(numElements)(0L)
           val execHostHeight = numElements * TASK_HEIGHT
           val execHostMiddleY = execHostHeight/2 + execHostYStart
           // Draw a box for the Host
@@ -294,20 +250,18 @@ object GenerateOccupancy {
                |<text x="${PADDING * 2}" y="$execHostMiddleY" dominant-baseline="middle"
                | font-family="Courier,monospace" font-size="$FONT_SIZE">$execHost</text>
                |""".stripMargin)
-          taskList.foreach { taskInfo =>
-            val slot = (0 until numElements).find(i => taskInfo.startTime >= slotFreeUntil(i))
-                .getOrElse(throw new IllegalArgumentException("SCHEDULING SECOND TIME FAILED"))
-            slotFreeUntil(slot) = taskInfo.endTime
-            val taskY = (slot * TASK_HEIGHT) + execHostYStart
-            val taskXStart = taskHostExecXEnd + (taskInfo.startTime - minStart)/MS_PER_PIXEL
-            val taskWidth = (taskInfo.endTime - taskInfo.startTime)/MS_PER_PIXEL
-            val color = stageIdToColor(taskInfo.stageId)
-            fileWriter.write(
-              s"""<rect x="$taskXStart" y="$taskY" width="$taskWidth" height="$TASK_HEIGHT"
-                 | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
-                 |<text x="$taskXStart" y="${taskY + TASK_HEIGHT/2}"
-                 | font-family="Courier,monospace" font-size="$FONT_SIZE">${taskInfo.duration} ms</text>
-                 |""".stripMargin)
+          OccupancyTiming.doLayout(taskList, numElements) {
+            case (taskInfo, slot) =>
+              val taskY = (slot * TASK_HEIGHT) + execHostYStart
+              val taskXStart = taskHostExecXEnd + (taskInfo.startTime - minStart)/MS_PER_PIXEL
+              val taskWidth = (taskInfo.endTime - taskInfo.startTime)/MS_PER_PIXEL
+              val color = stageIdToColor(taskInfo.stageId)
+              fileWriter.write(
+                s"""<rect x="$taskXStart" y="$taskY" width="$taskWidth" height="$TASK_HEIGHT"
+                   | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
+                   |<text x="$taskXStart" y="${taskY + TASK_HEIGHT/2}"
+                   | font-family="Courier,monospace" font-size="$FONT_SIZE">${taskInfo.duration} ms</text>
+                   |""".stripMargin)
           }
           execHostYStart += execHostHeight
       }
@@ -354,25 +308,21 @@ object GenerateOccupancy {
            | font-family="Courier,monospace" font-size="$FONT_SIZE">STAGES</text>
            |""".stripMargin)
 
-      val stageSlotFreeUntil = new Array[Long](numStageSlots)
-      stageInfo.foreach { si =>
-        val startTime = si.startTime
-        val endTime = si.endTime
-        val slot = stageSlotFreeUntil.indices
-            .find(i => startTime >= stageSlotFreeUntil(i))
-            .getOrElse(throw new IllegalStateException("Error scheduling stage for second time"))
-        stageSlotFreeUntil(slot) = endTime
+      OccupancyTiming.doLayout(stageInfo, numStageSlots) {
+        case (si, slot) =>
+          val startTime = si.startTime
+          val endTime = si.endTime
 
-        val stageY = (slot * TASK_HEIGHT) + stageSlotYStart
-        val stageXStart = taskHostExecXEnd + (startTime - minStart)/MS_PER_PIXEL
-        val taskWidth = (endTime - startTime)/MS_PER_PIXEL
-        val color = stageIdToColor(si.stageId)
-        fileWriter.write(
-          s"""<rect x="$stageXStart" y="$stageY" width="$taskWidth" height="$TASK_HEIGHT"
-             | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
-             |<text x="$stageXStart" y="${stageY + TASK_HEIGHT/2}" dominant-baseline="middle"
-             |  font-family="Courier,monospace" font-size="$FONT_SIZE">STAGE ${si.stageId} ${si.duration} ms</text>
-             |""".stripMargin)
+          val stageY = (slot * TASK_HEIGHT) + stageSlotYStart
+          val stageXStart = taskHostExecXEnd + (startTime - minStart)/MS_PER_PIXEL
+          val taskWidth = (endTime - startTime)/MS_PER_PIXEL
+          val color = stageIdToColor(si.stageId)
+          fileWriter.write(
+            s"""<rect x="$stageXStart" y="$stageY" width="$taskWidth" height="$TASK_HEIGHT"
+               | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
+               |<text x="$stageXStart" y="${stageY + TASK_HEIGHT/2}" dominant-baseline="middle"
+               |  font-family="Courier,monospace" font-size="$FONT_SIZE">STAGE ${si.stageId} ${si.duration} ms</text>
+               |""".stripMargin)
       }
 
       // Now do the Job Slots
@@ -387,25 +337,21 @@ object GenerateOccupancy {
            | font-family="Courier,monospace" font-size="$FONT_SIZE">JOBS</text>
            |""".stripMargin)
 
-      val jobSlotFreeUntil = new Array[Long](numJobSlots)
-      jobInfo.foreach { ji =>
-        val startTime = ji.startTime
-        val endTime = ji.endTime
-        val slot = jobSlotFreeUntil.indices
-            .find(i => startTime >= jobSlotFreeUntil(i))
-            .getOrElse(throw new IllegalStateException("Error scheduling job for second time"))
-        jobSlotFreeUntil(slot) = endTime
+      OccupancyTiming.doLayout(jobInfo, numJobSlots) {
+        case (ji, slot) =>
+          val startTime = ji.startTime
+          val endTime = ji.endTime
 
-        val jobY = (slot * TASK_HEIGHT) + jobSlotYStart
-        val jobXStart = taskHostExecXEnd + (startTime - minStart)/MS_PER_PIXEL
-        val taskWidth = (endTime - startTime)/MS_PER_PIXEL
-        val color = "green" // TODO stageIdToColor(si.stageId)
-        fileWriter.write(
-          s"""<rect x="$jobXStart" y="$jobY" width="$taskWidth" height="$TASK_HEIGHT"
-             | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
-             |<text x="$jobXStart" y="${jobY + TASK_HEIGHT/2}" dominant-baseline="middle"
-             |  font-family="Courier,monospace" font-size="$FONT_SIZE">JOB ${ji.jobId} ${ji.duration} ms</text>
-             |""".stripMargin)
+          val jobY = (slot * TASK_HEIGHT) + jobSlotYStart
+          val jobXStart = taskHostExecXEnd + (startTime - minStart)/MS_PER_PIXEL
+          val taskWidth = (endTime - startTime)/MS_PER_PIXEL
+          val color = "green" // TODO stageIdToColor(si.stageId)
+          fileWriter.write(
+            s"""<rect x="$jobXStart" y="$jobY" width="$taskWidth" height="$TASK_HEIGHT"
+               | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
+               |<text x="$jobXStart" y="${jobY + TASK_HEIGHT/2}" dominant-baseline="middle"
+               |  font-family="Courier,monospace" font-size="$FONT_SIZE">JOB ${ji.jobId} ${ji.duration} ms</text>
+               |""".stripMargin)
       }
 
       // Now do the stage Range Slots
@@ -420,25 +366,21 @@ object GenerateOccupancy {
            | font-family="Courier,monospace" font-size="$FONT_SIZE">STAGE RANGES</text>
            |""".stripMargin)
 
-      val stageRangeSlotFreeUntil = new Array[Long](numStageRangeSlots)
-      stageRangeInfo.foreach { si =>
-        val startTime = si.startTime
-        val endTime = si.endTime
-        val slot = stageRangeSlotFreeUntil.indices
-            .find(i => startTime >= stageRangeSlotFreeUntil(i))
-            .getOrElse(throw new IllegalStateException("Error scheduling stage range for second time"))
-        stageRangeSlotFreeUntil(slot) = endTime
+      OccupancyTiming.doLayout(stageRangeInfo, numStageRangeSlots) {
+        case (si, slot) =>
+          val startTime = si.startTime
+          val endTime = si.endTime
 
-        val stageRangeY = (slot * TASK_HEIGHT) + stageRangeSlotYStart
-        val stageRangeXStart = taskHostExecXEnd + (startTime - minStart)/MS_PER_PIXEL
-        val taskWidth = (endTime - startTime)/MS_PER_PIXEL
-        val color = stageIdToColor(si.stageId)
-        fileWriter.write(
-          s"""<rect x="$stageRangeXStart" y="$stageRangeY" width="$taskWidth" height="$TASK_HEIGHT"
-             | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
-             |<text x="$stageRangeXStart" y="${stageRangeY + TASK_HEIGHT/2}" dominant-baseline="middle"
-             |  font-family="Courier,monospace" font-size="$FONT_SIZE">STAGE RANGE ${si.stageId} ${si.duration} ms</text>
-             |""".stripMargin)
+          val stageRangeY = (slot * TASK_HEIGHT) + stageRangeSlotYStart
+          val stageRangeXStart = taskHostExecXEnd + (startTime - minStart)/MS_PER_PIXEL
+          val taskWidth = (endTime - startTime)/MS_PER_PIXEL
+          val color = stageIdToColor(si.stageId)
+          fileWriter.write(
+            s"""<rect x="$stageRangeXStart" y="$stageRangeY" width="$taskWidth" height="$TASK_HEIGHT"
+               | style="fill:$color;fill-opacity:1.0;stroke:#00ff00;stroke-width:1"/>
+               |<text x="$stageRangeXStart" y="${stageRangeY + TASK_HEIGHT/2}" dominant-baseline="middle"
+               |  font-family="Courier,monospace" font-size="$FONT_SIZE">STAGE RANGE ${si.stageId} ${si.duration} ms</text>
+               |""".stripMargin)
       }
 
       fileWriter.write(s"""</svg>""")
