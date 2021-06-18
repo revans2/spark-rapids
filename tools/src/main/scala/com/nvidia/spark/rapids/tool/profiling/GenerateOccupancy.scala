@@ -40,12 +40,17 @@ class OccupancyJobInfo(val jobId: Int,
     endTime: Long,
     val duration: Long) extends OccupancyTiming(startTime, endTime)
 
+class OccupancySqlInfo(val sqlId: Long,
+    startTime: Long,
+    endTime: Long,
+    val duration: Long) extends OccupancyTiming(startTime, endTime)
+
 /**
  * Generates an SVG graph that is used to show cluster occupancy of tasks.
  */
 object GenerateOccupancy {
   private val TASK_HEIGHT = 20
-  private val HEADER_WIDTH = 200
+  private val TITLE_BOX_WIDTH = 200
   private val PADDING = 5
   private val FONT_SIZE = 14
   private val TITLE_HEIGHT = FONT_SIZE + (PADDING * 2)
@@ -131,20 +136,19 @@ object GenerateOccupancy {
          | font-family="Courier,monospace" font-size="$FONT_SIZE">$text</text>
          |""".stripMargin)
 
-  private def titleBox(
+  private def sectionBox(
       text: String,
       yStart: Long,
       numElements: Int,
-      fileWriter: ToolTextFileWriter): Int = {
+      fileWriter: ToolTextFileWriter): Unit = {
     val boxHeight = numElements * TASK_HEIGHT
     val boxMiddleY = boxHeight/2 + yStart
     // Draw a box for the Host
     fileWriter.write(
-      s"""<rect x="$PADDING" y="$yStart" width="$HEADER_WIDTH" height="$boxHeight"
+      s"""<rect x="$PADDING" y="$yStart" width="$TITLE_BOX_WIDTH" height="$boxHeight"
          | style="fill:white;fill-opacity:0.0;stroke:black;stroke-width:2"/>
          |""".stripMargin)
     textBoxVirtCentered(text, PADDING * 2, boxMiddleY, fileWriter)
-    boxHeight
   }
 
   private def timingBox[A <: OccupancyTiming](
@@ -199,12 +203,15 @@ object GenerateOccupancy {
     }
   }
 
+  private def calcTimingHeights(slots: Int): Int = slots * TASK_HEIGHT
+
   def generateFor(app: ApplicationInfo, outputDirectory: String): Unit = {
+    // Gather the data
     val execHostToTaskList = new mutable.TreeMap[String, ArrayBuffer[OccupancyTaskInfo]]()
     val stageIdToColor = mutable.HashMap[Int, String]()
     var colorIndex = 0
-    var minStart = Long.MaxValue
-    var maxFinish = 0L
+    var minStartTime = Long.MaxValue
+    var maxEndTime = 0L
     app.runQuery(
       s"""
          | select
@@ -227,8 +234,8 @@ object GenerateOccupancy {
       val taskInfo = new OccupancyTaskInfo(stageId, taskId, launchTime, finishTime, duration)
       val execHost = s"$execId/$host"
       execHostToTaskList.getOrElseUpdate(execHost, ArrayBuffer.empty) += taskInfo
-      minStart = Math.min(launchTime, minStart)
-      maxFinish = Math.max(finishTime, maxFinish)
+      minStartTime = Math.min(launchTime, minStartTime)
+      maxEndTime = Math.max(finishTime, maxEndTime)
       stageIdToColor.getOrElseUpdate(stageId, {
         val color = COLORS(colorIndex % COLORS.length)
         colorIndex += 1
@@ -260,8 +267,8 @@ object GenerateOccupancy {
       val submissionTime = row.getLong(1)
       val completionTime = row.getLong(2)
       val duration = row.getLong(3)
-      minStart = Math.min(minStart, submissionTime)
-      maxFinish = Math.max(maxFinish, completionTime)
+      minStartTime = Math.min(minStartTime, submissionTime)
+      maxEndTime = Math.max(maxEndTime, completionTime)
       new OccupancyStageInfo(stageId, submissionTime, completionTime, duration)
     }
 
@@ -283,72 +290,138 @@ object GenerateOccupancy {
       val startTime = row.getLong(1)
       val endTime = row.getLong(2)
       val duration = row.getLong(3)
-      minStart = Math.min(minStart, startTime)
-      maxFinish = Math.max(maxFinish, endTime)
+      minStartTime = Math.min(minStartTime, startTime)
+      maxEndTime = Math.max(maxEndTime, endTime)
       new OccupancyJobInfo(jobId, startTime, endTime, duration)
     }
 
-    val numStageRangeSlots = calcLayoutSlotsNeeded(stageRangeInfo)
+    val sqlInfo = app.runQuery(
+      s"""
+         |select
+         |sqlID,
+         |startTime,
+         |endTime,
+         |duration
+         |from sqlDF_${app.index} order by startTime
+         |""".stripMargin).collect().map { row =>
+      val sqlId = row.getLong(0)
+      val startTime = row.getLong(1)
+      val endTime = row.getLong(2)
+      val duration = row.getLong(3)
+      minStartTime = Math.min(minStartTime, startTime)
+      maxEndTime = Math.max(maxEndTime, endTime)
+      new OccupancySqlInfo(sqlId, startTime, endTime, duration)
+    }
+
+    // Add 1 second for padding at the end...
+    maxEndTime += 1000
+
+    // Do the high level layout of what the output page should look like
+    // TITLE
+    // EXEC(s)      | TASK TIMING
+    // STAGES       | STAGE TIMING
+    // STAGE RANGES | STAGE RANGE TIMING
+    // JOBS         | JOB TIMING
+    // SQLS         | SQL TIMING
+    val titleStartX = PADDING
+    val titleStartY = 0
+    val titleEndY = titleStartY + TITLE_HEIGHT
+
+    // All of the timings start at the same place
+    val titleBoxStartX = PADDING
+    val titleBoxWidth = TITLE_BOX_WIDTH
+    val timingsStartX = titleBoxStartX + titleBoxWidth
+    val timingsWidth = (maxEndTime - minStartTime)/MS_PER_PIXEL
+    val timingsEndX = timingsStartX + timingsWidth
+
+    // EXEC(s)
+    val execsStartY = titleEndY
+    val numExecTaskSlotsTotal = execHostToSlots.values.sum
+    val execsHeight = calcTimingHeights(numExecTaskSlotsTotal)
+    val execsWithFooterHeight = execsHeight + FOOTER_HEIGHT
+    val execsEndY = execsStartY + execsWithFooterHeight
+
+    // STAGES
+    val stagesStartY = execsEndY
     val numStageSlots = calcLayoutSlotsNeeded(stageInfo)
-    val numTaskSlots = execHostToSlots.values.sum
-    val numJobSlots = calcLayoutSlotsNeeded(jobInfo)
+    val stagesHeight = calcTimingHeights(numStageSlots)
+    val stagesWithFooterHeight = stagesHeight + FOOTER_HEIGHT
+    val stagesEndY = stagesStartY + stagesWithFooterHeight
+
+    // STAGE RANGES
+    val stageRangesStartY = stagesEndY
+    val numStageRangeSlots = calcLayoutSlotsNeeded(stageRangeInfo)
+    val stageRangesHeight = calcTimingHeights(numStageRangeSlots)
+    val stageRangesWithFooterHeight = stageRangesHeight + FOOTER_HEIGHT
+    val stageRangesEndY = stageRangesStartY + stageRangesWithFooterHeight
+
+    // JOBS
+    val jobsStartY = stageRangesEndY
+    val numJobsSlots = calcLayoutSlotsNeeded(jobInfo)
+    val jobsHeight = calcTimingHeights(numJobsSlots)
+    val jobsWithFooterHeight = jobsHeight + FOOTER_HEIGHT
+    val jobsEndY = jobsStartY + jobsWithFooterHeight
+
+    // SQLS
+    val sqlsStartY = jobsEndY
+    val numSqlsSlots = calcLayoutSlotsNeeded(sqlInfo)
+    val sqlsHeight = calcTimingHeights(numSqlsSlots)
+    val sqlsWithFooterHeight = sqlsHeight + FOOTER_HEIGHT
+    val sqlsEndY = sqlsStartY + sqlsWithFooterHeight
+
+    // TOTAL IMAGE
+    val imageHeight = sqlsEndY + PADDING
+    val imageWidth = timingsEndX
 
     val fileWriter = new ToolTextFileWriter(outputDirectory,
       s"${app.appId}-occupancy.svg")
     try {
-      val width = (maxFinish - minStart)/MS_PER_PIXEL + HEADER_WIDTH + PADDING * 2
-      val height = (numTaskSlots * TASK_HEIGHT) + TITLE_HEIGHT +
-          FOOTER_HEIGHT + (numStageSlots * TASK_HEIGHT) +
-          (numJobSlots * TASK_HEIGHT) +
-          (numStageRangeSlots * TASK_HEIGHT) + PADDING * 2
-      // scalastyle:off line.size.limit
       fileWriter.write(
         s"""<?xml version="1.0" encoding="UTF-8" standalone="no"?>
            |<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
            | "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
            |<!-- Generated by Rapids Accelerator For Apache Spark Profiling Tool -->
-           |<svg width="$width" height="$height"
+           |<svg width="$imageWidth" height="$imageHeight"
            | xmlns="http://www.w3.org/2000/svg">
            | <title>${app.appId} OCCUPANCY</title>
            |""".stripMargin)
-      // TITLE AT TOP
-      textBoxVirtCentered(s"${app.appId} OCCUPANCY", PADDING, TITLE_HEIGHT/2, fileWriter)
+      // TITLE
+      textBoxVirtCentered(s"${app.appId} OCCUPANCY",
+        titleStartX,
+        titleStartY + TITLE_HEIGHT/2,
+        fileWriter)
 
-      val taskHostExecXEnd = PADDING + HEADER_WIDTH
-      var execHostYStart = PADDING + TITLE_HEIGHT
+      // EXEC(s)
+      var currentExecsStartY = execsStartY
       execHostToTaskList.foreach {
         case (execHost, taskList) =>
           val numElements = execHostToSlots(execHost)
-          val execHostHeight = numElements * TASK_HEIGHT
+          val execHostHeight = calcTimingHeights(numElements)
 
-          titleBox(execHost, execHostYStart, numElements, fileWriter)
+          sectionBox(execHost, currentExecsStartY, numElements, fileWriter)
           doLayout(taskList, numElements) {
             case (taskInfo, slot) =>
               timingBox(s"${taskInfo.duration} ms",
                 stageIdToColor(taskInfo.stageId),
                 taskInfo,
                 slot,
-                taskHostExecXEnd,
-                execHostYStart,
-                minStart,
+                timingsStartX,
+                currentExecsStartY,
+                minStartTime,
                 fileWriter)
           }
-          execHostYStart += execHostHeight
+          currentExecsStartY += execHostHeight
       }
 
-      scaleWithLines(taskHostExecXEnd,
-        PADDING + TITLE_HEIGHT,
-        minStart,
-        maxFinish,
-        execHostYStart - (PADDING + TITLE_HEIGHT),
+      scaleWithLines(timingsStartX,
+        execsStartY,
+        minStartTime,
+        maxEndTime,
+        execsHeight,
         fileWriter)
 
-      val yEnd = execHostYStart
-
-      // Now do the stage Slots
-      val stageSlotsHeight = numStageSlots * TASK_HEIGHT
-      val stageSlotYStart = yEnd + FOOTER_HEIGHT
-      titleBox("STAGES", stageSlotYStart, numStageSlots, fileWriter)
+      // STAGES
+      sectionBox("STAGES", stagesStartY, numStageSlots, fileWriter)
 
       doLayout(stageInfo, numStageSlots) {
         case (si, slot) =>
@@ -356,33 +429,21 @@ object GenerateOccupancy {
             stageIdToColor(si.stageId),
             si,
             slot,
-            taskHostExecXEnd,
-            stageSlotYStart,
-            minStart,
+            timingsStartX,
+            stagesStartY,
+            minStartTime,
             fileWriter)
       }
 
-      // Now do the Job Slots
-      val jobSlotsHeight = numJobSlots * TASK_HEIGHT
-      val jobSlotYStart = stageSlotYStart + stageSlotsHeight
-      titleBox("JOBS", jobSlotYStart, numJobSlots, fileWriter)
+      scaleWithLines(timingsStartX,
+        stagesStartY,
+        minStartTime,
+        maxEndTime,
+        stagesHeight,
+        fileWriter)
 
-      doLayout(jobInfo, numJobSlots) {
-        case (ji, slot) =>
-          timingBox(s"JOB ${ji.jobId} ${ji.duration} ms",
-            "green", // TODO select unique colors???
-            ji,
-            slot,
-            taskHostExecXEnd,
-            jobSlotYStart,
-            minStart,
-            fileWriter)
-      }
-
-      // Now do the stage Range Slots
-      val stageRangeSlotsHeight = numStageRangeSlots * TASK_HEIGHT
-      val stageRangeSlotYStart = jobSlotYStart + jobSlotsHeight
-      titleBox("STAGE RANGES", stageRangeSlotYStart, numStageRangeSlots, fileWriter)
+      // STAGE RANGES
+      sectionBox("STAGE RANGES", stageRangesStartY, numStageRangeSlots, fileWriter)
 
       doLayout(stageRangeInfo, numStageRangeSlots) {
         case (si, slot) =>
@@ -390,14 +451,62 @@ object GenerateOccupancy {
             stageIdToColor(si.stageId),
             si,
             slot,
-            taskHostExecXEnd,
-            stageRangeSlotYStart,
-            minStart,
+            timingsStartX,
+            stageRangesStartY,
+            minStartTime,
             fileWriter)
       }
 
+      scaleWithLines(timingsStartX,
+        stageRangesStartY,
+        minStartTime,
+        maxEndTime,
+        stageRangesHeight,
+        fileWriter)
+
+      // JOBS
+      sectionBox("JOBS", jobsStartY, numJobsSlots, fileWriter)
+
+      doLayout(jobInfo, numJobsSlots) {
+        case (ji, slot) =>
+          timingBox(s"JOB ${ji.jobId} ${ji.duration} ms",
+            "green", // TODO select unique colors???
+            ji,
+            slot,
+            timingsStartX,
+            jobsStartY,
+            minStartTime,
+            fileWriter)
+      }
+      scaleWithLines(timingsStartX,
+        jobsStartY,
+        minStartTime,
+        maxEndTime,
+        jobsHeight,
+        fileWriter)
+
+      // SQLS
+      sectionBox("SQL", sqlsStartY, numSqlsSlots, fileWriter)
+
+      doLayout(sqlInfo, numSqlsSlots) {
+        case (sql, slot) =>
+          timingBox(s"SQL ${sql.sqlId} ${sql.duration} ms",
+            "blue", // TODO select unique colors???
+            sql,
+            slot,
+            timingsStartX,
+            sqlsStartY,
+            minStartTime,
+            fileWriter)
+      }
+      scaleWithLines(timingsStartX,
+        sqlsStartY,
+        minStartTime,
+        maxEndTime,
+        sqlsHeight,
+        fileWriter)
+
       fileWriter.write(s"""</svg>""")
-      // scalastyle:on line.size.limit
     } finally {
       fileWriter.close()
     }
