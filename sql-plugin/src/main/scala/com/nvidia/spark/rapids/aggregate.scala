@@ -16,6 +16,8 @@
 
 package com.nvidia.spark.rapids
 
+import java.util
+
 import scala.annotation.tailrec
 import scala.collection.mutable
 
@@ -24,13 +26,12 @@ import ai.rapids.cudf.{DType, NvtxColor, Scalar}
 import com.nvidia.spark.rapids.GpuMetric._
 import com.nvidia.spark.rapids.RapidsPluginImplicits._
 import com.nvidia.spark.rapids.shims.v2.ShimUnaryExecNode
-import java.util
 
 import org.apache.spark.TaskContext
 import org.apache.spark.internal.Logging
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Alias, Ascending, Attribute, AttributeReference, AttributeSeq, AttributeSet, Expression, ExprId, If, NamedExpression, NullsFirst}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Ascending, Attribute, AttributeReference, AttributeSeq, AttributeSet, Expression, ExprId, If, NamedExpression, NullsFirst, Projection, UnsafeProjection}
 import org.apache.spark.sql.catalyst.expressions.aggregate._
 import org.apache.spark.sql.catalyst.expressions.codegen.LazilyGeneratedOrdering
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -1048,9 +1049,9 @@ abstract class GpuTypedImperativeSupportedAggregateExecMeta[INPUT <: BaseAggrega
       GpuHashAggregateExec(
         requiredChildDistributionExpressions.map(_.map(_.convertToGpu())),
         groupingExpressions.map(_.convertToGpu()),
-        aggregateExpressions.map(_.convertToGpu().asInstanceOf[GpuAggregateExpression]),
-        aggAttributes.map(_.convertToGpu().asInstanceOf[Attribute]),
-        retExpressions.map(_.convertToGpu().asInstanceOf[NamedExpression]),
+        aggregateExpressions.map(_.convertToGpu()).asInstanceOf[Seq[GpuAggregateExpression]],
+        aggAttributes.map(_.convertToGpu()).asInstanceOf[Seq[Attribute]],
+        retExpressions.map(_.convertToGpu()).asInstanceOf[Seq[NamedExpression]],
         childPlans.head.convertIfNeeded(),
         conf.gpuTargetBatchSizeBytes)
     } else {
@@ -1209,13 +1210,13 @@ object GpuTypedImperativeSupportedAggregateExecMeta {
           // GpuRowToColumnarExec
           case List(parent, child) if parent.canThisBeReplaced =>
             val childPlan = child.wrapped.asInstanceOf[SparkPlan]
-            val expressions = createBufferConverter(stages(i), stages(i + 1), fromCpuToGpu = true)
+            val expressions = createBufferConverter(stages(i), stages(i + 1), true)
             childPlan.setTagValue(GpuOverrides.preRowToColProjection, expressions)
           // create postColumnarToRowTransition, and bind it to the parent node (CPU plan) of
           // GpuColumnarToRowExec
           case List(parent, _) =>
             val parentPlan = parent.wrapped.asInstanceOf[SparkPlan]
-            val expressions = createBufferConverter(stages(i), stages(i + 1), fromCpuToGpu = false)
+            val expressions = createBufferConverter(stages(i), stages(i + 1), false)
             parentPlan.setTagValue(GpuOverrides.postColToRowProjection, expressions)
         }
       case _ =>

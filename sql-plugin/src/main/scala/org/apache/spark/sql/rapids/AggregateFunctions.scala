@@ -16,6 +16,8 @@
 
 package org.apache.spark.sql.rapids
 
+import java.io.{ByteArrayInputStream, ObjectInputStream}
+
 import ai.rapids.cudf
 import ai.rapids.cudf.{BinaryOp, ColumnVector, DType, GroupByAggregation, GroupByScanAggregation, NullPolicy, ReductionAggregation, ReplacePolicy, RollingAggregation, RollingAggregationOnColumn, ScanAggregation}
 import com.nvidia.spark.rapids._
@@ -24,11 +26,12 @@ import com.nvidia.spark.rapids.shims.v2._
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult
 import org.apache.spark.sql.catalyst.analysis.TypeCheckResult.TypeCheckSuccess
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, ExprId, ImplicitCastInputTypes, UnaryExpression, UnsafeProjection, UnsafeRow}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, ExprId, ImplicitCastInputTypes, UnaryExpression, UnsafeArrayData, UnsafeProjection, UnsafeRow}
 import org.apache.spark.sql.catalyst.expressions.aggregate._
 import org.apache.spark.sql.catalyst.expressions.codegen.CodegenFallback
-import org.apache.spark.sql.catalyst.util.{ArrayData, TypeUtils}
+import org.apache.spark.sql.catalyst.util.{ArrayData, GenericArrayData, TypeUtils}
 import org.apache.spark.sql.types._
+import org.apache.spark.unsafe.Platform
 
 trait GpuAggregateFunction extends GpuExpression
     with ShimExpression
@@ -70,10 +73,10 @@ trait GpuAggregateFunction extends GpuExpression
   val initialValues: Seq[GpuExpression]
 
   // update: first half of the aggregation (count = count)
-  val updateExpressions: Seq[CudfAggregate]
+  val updateExpressions: Seq[Expression]
 
   // merge: second half of the aggregation (count = sum). Also use to merge multiple batches.
-  val mergeExpressions: Seq[CudfAggregate]
+  val mergeExpressions: Seq[GpuExpression]
 
   // mostly likely a pass through (count => sum we merged above).
   // average has a more interesting expression to compute the division of sum/count
@@ -116,9 +119,9 @@ case class WrappedAggFunction(aggregateFunction: GpuAggregateFunction, filter: E
 
   override val initialValues: Seq[GpuExpression] =
     aggregateFunction.initialValues
-  override val updateExpressions: Seq[CudfAggregate] =
+  override val updateExpressions: Seq[Expression] =
     aggregateFunction.updateExpressions
-  override val mergeExpressions: Seq[CudfAggregate] =
+  override val mergeExpressions: Seq[GpuExpression] =
     aggregateFunction.mergeExpressions
   override val evaluateExpression: Expression =
     aggregateFunction.evaluateExpression
@@ -345,8 +348,8 @@ case class GpuMin(child: Expression) extends GpuAggregateFunction
   private lazy val cudfMin = AttributeReference("min", child.dataType)()
 
   override lazy val inputProjection: Seq[Expression] = Seq(child)
-  override lazy val updateExpressions: Seq[CudfAggregate] = Seq(new CudfMin(cudfMin))
-  override lazy val mergeExpressions: Seq[CudfAggregate] = Seq(new CudfMin(cudfMin))
+  override lazy val updateExpressions: Seq[GpuExpression] = Seq(new CudfMin(cudfMin))
+  override lazy val mergeExpressions: Seq[GpuExpression] = Seq(new CudfMin(cudfMin))
   override lazy val evaluateExpression: Expression = cudfMin
 
   override lazy val aggBufferAttributes: Seq[AttributeReference] = cudfMin :: Nil
@@ -400,8 +403,8 @@ case class GpuMax(child: Expression) extends GpuAggregateFunction
   private lazy val cudfMax = AttributeReference("max", child.dataType)()
 
   override lazy val inputProjection: Seq[Expression] = Seq(child)
-  override lazy val updateExpressions: Seq[CudfAggregate] = Seq(new CudfMax(cudfMax))
-  override lazy val mergeExpressions: Seq[CudfAggregate] = Seq(new CudfMax(cudfMax))
+  override lazy val updateExpressions: Seq[GpuExpression] = Seq(new CudfMax(cudfMax))
+  override lazy val mergeExpressions: Seq[GpuExpression] = Seq(new CudfMax(cudfMax))
   override lazy val evaluateExpression: Expression = cudfMax
 
   override lazy val aggBufferAttributes: Seq[AttributeReference] = cudfMax :: Nil
@@ -456,8 +459,8 @@ case class GpuSum(child: Expression, resultType: DataType)
   private lazy val cudfSum = AttributeReference("sum", resultType)()
 
   override lazy val inputProjection: Seq[Expression] = Seq(child)
-  override lazy val updateExpressions: Seq[CudfAggregate] = Seq(new CudfSum(cudfSum))
-  override lazy val mergeExpressions: Seq[CudfAggregate] = Seq(new CudfSum(cudfSum))
+  override lazy val updateExpressions: Seq[GpuExpression] = Seq(new CudfSum(cudfSum))
+  override lazy val mergeExpressions: Seq[GpuExpression] = Seq(new CudfSum(cudfSum))
   override lazy val evaluateExpression: Expression = cudfSum
 
   override lazy val aggBufferAttributes: Seq[AttributeReference] = cudfSum :: Nil
@@ -539,12 +542,12 @@ case class GpuPivotFirst(
   valueColumn: Expression,
   pivotColumnValues: Seq[Any]) extends GpuAggregateFunction {
 
-  private val valueDataType = valueColumn.dataType
+  val valueDataType = valueColumn.dataType
 
   override val dataType: DataType = valueDataType
   override val nullable: Boolean = false
 
-  private val pivotColAttr = pivotColumnValues.map(pivotColumnValue => {
+  val pivotColAttr = pivotColumnValues.map(pivotColumnValue => {
     // If `pivotColumnValue` is null, then create an AttributeReference for null column.
     if (pivotColumnValue == null) {
       AttributeReference(GpuLiteral(null, valueDataType).toString, valueDataType)()
@@ -565,16 +568,16 @@ case class GpuPivotFirst(
     expr
   }
 
-  override lazy val updateExpressions: Seq[CudfAggregate] = {
+  override lazy val updateExpressions: Seq[GpuExpression] = {
     pivotColAttr.map(pivotColumnValue => new CudfLastExcludeNulls(pivotColumnValue))
   }
 
-  override lazy val mergeExpressions: Seq[CudfAggregate] = {
+  override lazy val mergeExpressions: Seq[GpuExpression] = {
     pivotColAttr.map(pivotColumnValue => new CudfLastExcludeNulls(pivotColumnValue))
   }
 
   override lazy val evaluateExpression: Expression = {
-    GpuCreateArray(pivotColAttr, useStringTypeWhenEmpty = false)
+    GpuCreateArray(pivotColAttr, false)
   }
   override lazy val aggBufferAttributes: Seq[AttributeReference] = pivotColAttr
 
@@ -592,8 +595,8 @@ case class GpuCount(children: Seq[Expression]) extends GpuAggregateFunction
   private lazy val cudfCount = AttributeReference("count", LongType)()
 
   override lazy val inputProjection: Seq[Expression] = Seq(children.head)
-  override lazy val updateExpressions: Seq[CudfAggregate] = Seq(new CudfCount(cudfCount))
-  override lazy val mergeExpressions: Seq[CudfAggregate] = Seq(new CudfSum(cudfCount))
+  override lazy val updateExpressions: Seq[GpuExpression] = Seq(new CudfCount(cudfCount))
+  override lazy val mergeExpressions: Seq[GpuExpression] = Seq(new CudfSum(cudfCount))
   override lazy val evaluateExpression: Expression = cudfCount
 
   override lazy val aggBufferAttributes: Seq[AttributeReference] = cudfCount :: Nil
@@ -673,14 +676,14 @@ case class GpuAverage(child: Expression) extends GpuAggregateFunction
         // a sum of this == the count
         GpuCast(GpuIsNotNull(child), LongType)
     })
-  override lazy val mergeExpressions: Seq[CudfAggregate] = Seq(new CudfSum(cudfSum),
+  override lazy val mergeExpressions: Seq[GpuExpression] = Seq(new CudfSum(cudfSum),
     new CudfSum(cudfCount))
   // The count input projection will need to be collected as a sum (of counts) instead of
   // counts (of counts) as the GpuIsNotNull o/p is casted to count=0 for null and 1 otherwise, and
   // the total count can be correctly evaluated only by summing them. eg. avg(col(null, 27))
   // should be 27, with count column projection as (0, 1) and total count for dividing the
   // average = (0 + 1) and not 2 which is the rowcount of the projected column.
-  override lazy val updateExpressions: Seq[CudfAggregate] = Seq(new CudfSum(cudfSum),
+  override lazy val updateExpressions: Seq[GpuExpression] = Seq(new CudfSum(cudfSum),
     new CudfSum(cudfCount))
 
   // NOTE: this sets `failOnErrorOverride=false` in `GpuDivide` to force it not to throw
@@ -736,8 +739,8 @@ case class GpuFirst(child: Expression, ignoreNulls: Boolean)
     Seq(new CudfFirstIncludeNulls(cudfFirst), new CudfFirstIncludeNulls(valueSet))
   }
 
-  override lazy val updateExpressions: Seq[CudfAggregate] = commonExpressions
-  override lazy val mergeExpressions: Seq[CudfAggregate] = commonExpressions
+  override lazy val updateExpressions: Seq[GpuExpression] = commonExpressions
+  override lazy val mergeExpressions: Seq[GpuExpression] = commonExpressions
   override lazy val evaluateExpression: Expression = cudfFirst
 
   override lazy val aggBufferAttributes: Seq[AttributeReference] = cudfFirst :: valueSet :: Nil
@@ -781,8 +784,8 @@ case class GpuLast(child: Expression, ignoreNulls: Boolean)
     Seq(new CudfLastIncludeNulls(cudfLast), new CudfLastIncludeNulls(valueSet))
   }
 
-  override lazy val updateExpressions: Seq[CudfAggregate] = commonExpressions
-  override lazy val mergeExpressions: Seq[CudfAggregate] = commonExpressions
+  override lazy val updateExpressions: Seq[GpuExpression] = commonExpressions
+  override lazy val mergeExpressions: Seq[GpuExpression] = commonExpressions
   override lazy val evaluateExpression: Expression = cudfLast
 
   override lazy val aggBufferAttributes: Seq[AttributeReference] = cudfLast :: valueSet :: Nil
@@ -857,9 +860,9 @@ case class GpuCollectList(
     inputAggBufferOffset: Int = 0)
     extends GpuCollectBase {
 
-  override lazy val updateExpressions: Seq[CudfAggregate] = new CudfCollectList(inputBuf) :: Nil
+  override lazy val updateExpressions: Seq[GpuExpression] = new CudfCollectList(inputBuf) :: Nil
 
-  override lazy val mergeExpressions: Seq[CudfAggregate] = new CudfMergeLists(outputBuf) :: Nil
+  override lazy val mergeExpressions: Seq[GpuExpression] = new CudfMergeLists(outputBuf) :: Nil
 
   override lazy val evaluateExpression: Expression = outputBuf
 
@@ -884,9 +887,9 @@ case class GpuCollectSet(
     inputAggBufferOffset: Int = 0)
     extends GpuCollectBase {
 
-  override lazy val updateExpressions: Seq[CudfAggregate] = new CudfCollectSet(inputBuf) :: Nil
+  override lazy val updateExpressions: Seq[GpuExpression] = new CudfCollectSet(inputBuf) :: Nil
 
-  override lazy val mergeExpressions: Seq[CudfAggregate] = new CudfMergeSets(outputBuf) :: Nil
+  override lazy val mergeExpressions: Seq[GpuExpression] = new CudfMergeSets(outputBuf) :: Nil
 
   override lazy val evaluateExpression: Expression = outputBuf
 
