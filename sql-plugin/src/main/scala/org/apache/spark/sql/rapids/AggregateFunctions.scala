@@ -139,6 +139,14 @@ case class GpuAggregateExpression(origAggregateFunction: GpuAggregateFunction,
     origAggregateFunction
   }
 
+  lazy val cudfAggregates: Seq[CudfAggregate] = {
+    if (mode == Partial || mode == Complete) {
+      aggregateFunction.updateExpressions
+    } else {
+      aggregateFunction.mergeExpressions
+    }
+  }
+
   //
   // Overrides form AggregateExpression
   //

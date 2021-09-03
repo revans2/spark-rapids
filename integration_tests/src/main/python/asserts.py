@@ -391,6 +391,12 @@ def assert_gpu_sql_fallback_collect(df_fun, cpu_fallback_class_name, table_name,
             return spark.sql(sql)
     assert_gpu_fallback_collect(do_it_all, cpu_fallback_class_name, conf)
 
+class CpuRunException(Exception):
+    pass
+
+class GpuRunException(Exception):
+    pass
+
 def _assert_gpu_and_cpu_are_equal(func,
     mode,
     conf={},
@@ -403,7 +409,10 @@ def _assert_gpu_and_cpu_are_equal(func,
         global cpu_start
         cpu_start = time.time()
         global from_cpu
-        from_cpu = with_cpu_session(bring_back, conf=conf)
+        try:
+            from_cpu = with_cpu_session(bring_back, conf=conf)
+        except Exception as e:
+            raise CpuRunException from e
         global cpu_end
         cpu_end = time.time()
 
@@ -412,7 +421,10 @@ def _assert_gpu_and_cpu_are_equal(func,
         global gpu_start
         gpu_start = time.time()
         global from_gpu
-        from_gpu = with_gpu_session(bring_back, conf=conf)
+        try:
+            from_gpu = with_gpu_session(bring_back, conf=conf)
+        except Exception as e:
+            raise GpuRunException from e
         global gpu_end
         gpu_end = time.time()
 

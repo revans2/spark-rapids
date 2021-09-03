@@ -325,7 +325,7 @@
                             <workingDirectory>./</workingDirectory>
                             <environmentVariables>
                                 <SKIP_TESTS>${skipTests}</SKIP_TESTS>
-                                <TEST>${test}</TEST>
+                                <TEST>${pytest.TEST}</TEST>
                                 <COVERAGE_SUBMIT_FLAGS>${argLine}</COVERAGE_SUBMIT_FLAGS>
                                 <TEST_TAGS>${pytest.TEST_TAGS}</TEST_TAGS>
                                 <TEST_PARALLEL>${pytest.TEST_PARALLEL}</TEST_PARALLEL>

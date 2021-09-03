@@ -722,6 +722,7 @@
         <project.reporting.sourceEncoding>UTF-8</project.reporting.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <pytest.TEST_TAGS>not qarun</pytest.TEST_TAGS>
+        <pytest.TEST>${test}</pytest.TEST>
         <pytest.TEST_PARALLEL/>
         <pytest.TEST_TYPE>developer</pytest.TEST_TYPE>
         <rat.consoleOutput>false</rat.consoleOutput>
