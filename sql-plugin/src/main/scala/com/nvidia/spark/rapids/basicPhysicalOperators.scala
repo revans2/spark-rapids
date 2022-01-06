@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2021, NVIDIA CORPORATION.
+ * Copyright (c) 2019-2022, NVIDIA CORPORATION.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -282,7 +282,7 @@ object GpuFilter extends Arm {
   }
 
   def apply(batch: ColumnarBatch,
-      boundCondition: Expression) : ColumnarBatch = {
+      boundCondition: Expression): ColumnarBatch = {
     withResource(batch) { batch =>
       val checkedFilterMask = withResource(
         GpuProjectExec.projectSingle(batch, boundCondition)) { filterMask =>
@@ -305,6 +305,100 @@ object GpuFilter extends Arm {
       }.getOrElse {
         // Nothing to filter so it is a NOOP
         GpuColumnVector.incRefCounts(batch)
+      }
+    }
+  }
+
+  def hack(batch: ColumnarBatch,
+      boundCondition: Expression): ColumnarBatch = {
+    withResource(batch) { _ =>
+      withResource(GpuProjectExec.projectSingle(batch, boundCondition)) { column =>
+        if (column.hasNull) {
+          withResource(column.getBase.isNotNull) { nn =>
+            val colTypes = GpuColumnVector.extractTypes(batch)
+            withResource(GpuColumnVector.from(batch)) { tbl =>
+              withResource(tbl.filter(nn)) { filteredData =>
+                GpuColumnVector.from(filteredData, colTypes)
+              }
+            }
+          }
+        } else {
+          GpuColumnVector.incRefCounts(batch)
+        }
+      }
+    }
+  }
+}
+
+case class GpuHackIsNotNullFilterExec(
+    isNotNullCol: Expression,
+    child: SparkPlan,
+    override val coalesceAfter: Boolean = true)
+    extends ShimUnaryExecNode with GpuPredicateHelper with GpuExec {
+
+  override lazy val additionalMetrics: Map[String, GpuMetric] = Map(
+    OP_TIME -> createNanoTimingMetric(MODERATE_LEVEL, DESCRIPTION_OP_TIME))
+
+  // Split out all the IsNotNulls from condition.
+  private val notNullPreds = if (isNullIntolerant(isNotNullCol) &&
+      isNotNullCol.references.subsetOf(child.outputSet)) {
+    Seq(isNotNullCol)
+  } else {
+    Seq.empty
+  }
+
+  // If one expression and its children are null intolerant, it is null intolerant.
+  private def isNullIntolerant(expr: Expression): Boolean = expr match {
+    case e: NullIntolerant => e.children.forall(isNullIntolerant)
+    case _ => false
+  }
+
+  // The columns that will filtered out by `IsNotNull` could be considered as not nullable.
+  private val notNullAttributes = notNullPreds.flatMap(_.references).distinct.map(_.exprId)
+
+  override def output: Seq[Attribute] = {
+    child.output.map { a =>
+      if (a.nullable && notNullAttributes.contains(a.exprId)) {
+        a.withNullability(false)
+      } else {
+        a
+      }
+    }
+  }
+
+  override def outputOrdering: Seq[SortOrder] = child.outputOrdering
+
+  override def outputPartitioning: Partitioning = child.outputPartitioning
+
+  override def doExecute(): RDD[InternalRow] =
+    throw new IllegalStateException(s"Row-based execution should not occur for $this")
+
+  override val outputRowsLevel: MetricsLevel = ESSENTIAL_LEVEL
+  override val outputBatchesLevel: MetricsLevel = MODERATE_LEVEL
+
+  override def doExecuteColumnar(): RDD[ColumnarBatch] = {
+    val numOutputRows = gpuLongMetric(NUM_OUTPUT_ROWS)
+    val numOutputBatches = gpuLongMetric(NUM_OUTPUT_BATCHES)
+    val opTime = gpuLongMetric(OP_TIME)
+    val boundIsNotNullCol = GpuBindReferences.bindReference(isNotNullCol, child.output)
+    val boundCheck = GpuIsNotNull(boundIsNotNullCol)
+    val rdd = child.executeColumnar()
+    rdd.map { batch =>
+      withResource(batch) { _ =>
+        val start = System.nanoTime()
+        withResource(GpuFilter.hack(GpuColumnVector.incRefCounts(batch), boundIsNotNullCol)) { _ =>
+          // empty
+        }
+        val middle = System.nanoTime()
+        val ret = GpuFilter(GpuColumnVector.incRefCounts(batch), boundCheck)
+        val end = System.nanoTime()
+        numOutputBatches += 1
+        numOutputRows += ret.numRows()
+        System.err.println(s"HACK: ${middle - start} " +
+            s"NOT HACK: ${end - middle} " +
+            s"FILTERED? ${batch.numRows() != ret.numRows()} ${batch.numRows()} != ${ret.numRows()}")
+        opTime += (end - start)
+        ret
       }
     }
   }
