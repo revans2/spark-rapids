@@ -196,6 +196,7 @@ abstract class MultiFilePartitionReaderFactoryBase(
 
   protected val maxReadBatchSizeRows: Int = rapidsConf.maxReadBatchSizeRows
   protected val maxReadBatchSizeBytes: Long = rapidsConf.maxReadBatchSizeBytes
+  protected val targetBatchSizeBytes: Long = rapidsConf.gpuTargetBatchSizeBytes
   private val allCloudSchemes = rapidsConf.getCloudSchemes.toSet
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
@@ -890,8 +891,8 @@ abstract class MultiFileCoalescingPartitionReaderBase(
    * @param extraInfo the extra information for specific file format
    * @return Table
    */
-  def readBufferToTables(dataBuffer: HostMemoryBuffer, dataSize: Long, clippedSchema: SchemaBase,
-    readSchema: StructType, extraInfo: ExtraInfo): TableReader
+  def readBufferToTablesAndClose(dataBuffer: HostMemoryBuffer, dataSize: Long,
+      clippedSchema: SchemaBase, readSchema: StructType, extraInfo: ExtraInfo): TableReader
 
   /**
    * Write a header for a specific file format. If there is no header for the file format,
@@ -1024,12 +1025,12 @@ abstract class MultiFileCoalescingPartitionReaderBase(
       return EmptyTableReader
     }
     val (dataBuffer, dataSize) = readPartFiles(currentChunkedBlocks, clippedSchema)
-    withResource(dataBuffer) { _ =>
+    closeOnExcept(dataBuffer) { _ =>
       if (dataSize == 0) {
         EmptyTableReader
       } else {
-        val tableReader = readBufferToTables(dataBuffer, dataSize, clippedSchema, readDataSchema,
-          extraInfo)
+        val tableReader = readBufferToTablesAndClose(dataBuffer, dataSize, clippedSchema,
+          readDataSchema, extraInfo)
         WrappedTableReader(tableReader, table => {
           maxDeviceMemory = max(GpuColumnVector.getTotalDeviceMemoryUsed(table), maxDeviceMemory)
           if (readDataSchema.length < table.getNumberOfColumns) {

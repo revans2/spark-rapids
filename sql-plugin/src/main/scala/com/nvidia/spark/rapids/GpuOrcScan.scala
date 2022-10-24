@@ -2141,14 +2141,15 @@ class MultiFileOrcPartitionReader(
    * @param clippedSchema the clipped schema
    * @return Table
    */
-  override def readBufferToTables(
+  override def readBufferToTablesAndClose(
       dataBuffer: HostMemoryBuffer,
       dataSize: Long,
       clippedSchema: SchemaBase,
       readSchema: StructType,
-      extraInfo: ExtraInfo): TableReader =
+      extraInfo: ExtraInfo): TableReader = withResource(dataBuffer) { _ =>
     new SingleTableReader(decodeToTable(dataBuffer, dataSize, clippedSchema,
       extraInfo.requestedMapping, isCaseSensitive, files))
+  }
 
   /**
    * Write a header for a specific file format. If there is no header for the file format,

@@ -921,9 +921,12 @@ class GpuMultiFileAvroPartitionReader(
     (buffer, footerOffset)
   }
 
-  override def readBufferToTables(dataBuffer: HostMemoryBuffer, dataSize: Long,
+  override def readBufferToTablesAndClose(dataBuffer: HostMemoryBuffer, dataSize: Long,
       clippedSchema: SchemaBase,  readSchema: StructType, extraInfo: ExtraInfo): TableReader =
-    new SingleTableReader(sendToGpuUnchecked(dataBuffer, dataSize, splits))
+    withResource(dataBuffer) { _ =>
+      new SingleTableReader(sendToGpuUnchecked(dataBuffer, dataSize, splits))
+    }
+
 
   override final def getFileFormatShortName: String = "AVRO"
 
