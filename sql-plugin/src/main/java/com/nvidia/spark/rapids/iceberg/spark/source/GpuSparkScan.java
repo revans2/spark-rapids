@@ -288,6 +288,7 @@ abstract class GpuSparkScan extends ScanWithMetricsWrapper
     BatchReader(ReadTask task, scala.collection.immutable.Map<String, GpuMetric> metrics) {
       super(task.task, task.table(), task.expectedSchema(), task.isCaseSensitive(),
           task.getConfiguration(), task.getMaxBatchSizeRows(), task.getMaxBatchSizeBytes(),
+          task.getTargetBatchSizeBytes(),
           task.getParquetDebugDumpPrefix(), metrics);
     }
   }
@@ -301,6 +302,8 @@ abstract class GpuSparkScan extends ScanWithMetricsWrapper
     private final Broadcast<SerializableConfiguration> confBroadcast;
     private final int maxBatchSizeRows;
     private final long maxBatchSizeBytes;
+
+    private final long targetBatchSizeBytes;
     private final String parquetDebugDumpPrefix;
     private final int numThreads;
     private final int maxNumFileProcessed;
@@ -324,6 +327,7 @@ abstract class GpuSparkScan extends ScanWithMetricsWrapper
       this.confBroadcast = confBroadcast;
       this.maxBatchSizeRows = rapidsConf.maxReadBatchSizeRows();
       this.maxBatchSizeBytes = rapidsConf.maxReadBatchSizeBytes();
+      this.targetBatchSizeBytes = rapidsConf.gpuTargetBatchSizeBytes();
       this.parquetDebugDumpPrefix = rapidsConf.parquetDebugDumpPrefix();
       this.numThreads = rapidsConf.multiThreadReadNumThreads();
       this.maxNumFileProcessed = rapidsConf.maxNumParquetFilesParallel();
@@ -356,6 +360,10 @@ abstract class GpuSparkScan extends ScanWithMetricsWrapper
 
     public long getMaxBatchSizeBytes() {
       return maxBatchSizeBytes;
+    }
+
+    public long getTargetBatchSizeBytes() {
+      return targetBatchSizeBytes;
     }
 
     public String getParquetDebugDumpPrefix() {
