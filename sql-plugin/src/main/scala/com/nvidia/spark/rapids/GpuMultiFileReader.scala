@@ -688,7 +688,7 @@ trait DataBlockBase {
  * The sub-class should wrap the real schema for the specific file format
  */
 trait SchemaBase {
-  def fieldNames: Array[String]
+  def isEmpty: Boolean
 }
 
 /**
@@ -984,7 +984,7 @@ abstract class MultiFileCoalescingPartitionReaderBase(
   private def readBatch(): ColumnarBatchReader = {
     withResource(new NvtxRange(s"$getFileFormatShortName readBatch", NvtxColor.GREEN)) { _ =>
       val currentChunkMeta = populateCurrentBlockChunk()
-      val batchReader = if (currentChunkMeta.clippedSchema.fieldNames.isEmpty) {
+      val batchReader = if (currentChunkMeta.clippedSchema.isEmpty) {
         // not reading any data, so return a degenerate ColumnarBatch with the row count
         if (currentChunkMeta.numTotalRows == 0) {
           EmptyColumnarBatchReader

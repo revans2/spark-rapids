@@ -112,6 +112,25 @@ def test_parquet_read_coalescing_multiple_files(spark_tmp_path, parquet_gens, re
             conf=all_confs)
 
 
+@pytest.mark.parametrize('v1_enabled_list', ["", "parquet"])
+def test_parquet_read_avoid_coalesce_incompatible_files(spark_tmp_path, v1_enabled_list):
+    data_path = spark_tmp_path + '/PARQUET_DATA'
+    def setup_table(spark):
+        df1 = spark.createDataFrame([(("a", "b"),)], "x: struct<y: string, z: string>")
+        df1.write.parquet(data_path + "/data1")
+        df2 = spark.createDataFrame([(("a",),)], "x: struct<z: string>")
+        df2.write.parquet(data_path + "/data2")
+    with_cpu_session(setup_table, conf=rebase_write_corrected_conf)
+    # Configure confs to read as a single task
+    all_confs = copy_and_update(coalesce_parquet_file_reader_multithread_filter_conf, {
+        "spark.sql.sources.useV1SourceList": v1_enabled_list,
+        "spark.sql.files.minPartitionNum": "1"})
+    assert_gpu_and_cpu_are_equal_collect(
+        lambda spark: spark.read\
+            .schema("x STRUCT<y: string, z: string>")\
+            .option("recursiveFileLookup", "true").parquet(data_path),
+        conf=all_confs)
+
 @pytest.mark.parametrize('parquet_gens', parquet_gens_list, ids=idfn)
 @pytest.mark.parametrize('read_func', [read_parquet_df, read_parquet_sql])
 @pytest.mark.parametrize('reader_confs', reader_opt_confs)
@@ -178,8 +197,8 @@ def test_parquet_read_round_trip_binary(std_input_path, read_func, binary_as_str
 def test_binary_df_read(spark_tmp_path, binary_as_string, read_func, data_gen):
     data_path = spark_tmp_path + '/PARQUET_DATA'
     # TODO go back to the original test.  Looks like we have a lot of issues
-    with_cpu_session(lambda spark: unary_op_df(spark, data_gen).coalesce(1).write.parquet(data_path))
-    #with_cpu_session(lambda spark: unary_op_df(spark, data_gen).write.parquet(data_path))
+    #with_cpu_session(lambda spark: unary_op_df(spark, data_gen).coalesce(1).write.parquet(data_path))
+    with_cpu_session(lambda spark: unary_op_df(spark, data_gen).write.parquet(data_path))
     all_confs = {
         'spark.sql.parquet.binaryAsString': binary_as_string,
         # set the int96 rebase mode values because its LEGACY in databricks which will preclude this op from running on GPU
