@@ -976,7 +976,7 @@ case class GpuParquetMultiFilePartitionReaderFactory(
       filterHandler.filterBlocks(footerReadType, file, conf, filters, readDataSchema)
     }
     new MultiFileCloudParquetPartitionReader(conf, files, filterFunc, isCaseSensitive,
-      debugDumpPrefix, maxReadBatchSizeRows, maxReadBatchSizeBytes,
+      debugDumpPrefix, maxReadBatchSizeRows, maxReadBatchSizeBytes, targetBatchSizeBytes,
       metrics, partitionSchema, numThreads, maxNumFileProcessed,
       ignoreMissingFiles, ignoreCorruptFiles, readUseFieldId,
       alluxioPathReplacementMap.getOrElse(Map.empty), alluxioReplacementTaskTime)
@@ -1745,6 +1745,7 @@ class MultiFileCloudParquetPartitionReader(
     debugDumpPrefix: String,
     maxReadBatchSizeRows: Integer,
     maxReadBatchSizeBytes: Long,
+    targetBatchSizeBytes: Long,
     override val execMetrics: Map[String, GpuMetric],
     partitionSchema: StructType,
     numThreads: Int,
@@ -1960,7 +1961,7 @@ class MultiFileCloudParquetPartitionReader(
       partedFile: PartitionedFile,
       hostBuffer: HostMemoryBuffer,
       dataSize: Long): ColumnarBatchReader = {
-    val table = withResource(hostBuffer) { _ =>
+    val tableReader = closeOnExcept(hostBuffer) { _ =>
 
       // Dump parquet data into a file
       dumpDataToFile(hostBuffer, dataSize, files, Option(debugDumpPrefix), Some("parquet"))
@@ -1969,31 +1970,19 @@ class MultiFileCloudParquetPartitionReader(
       // about to start using the GPU
       GpuSemaphore.acquireIfNecessary(TaskContext.get(), metrics(SEMAPHORE_WAIT_TIME))
 
-      val table = withResource(new NvtxWithMetrics("Parquet decode", NvtxColor.DARK_GREEN,
-        metrics(GPU_DECODE_TIME))) { _ =>
-        Table.readParquet(parseOpts, hostBuffer, 0, dataSize)
-      }
-      closeOnExcept(table) { _ =>
-        GpuParquetScan.throwIfNeeded(table, isCorrectInt96RebaseMode, isCorrectRebaseMode,
-          hasInt96Timestamps)
-        maxDeviceMemory = max(GpuColumnVector.getTotalDeviceMemoryUsed(table), maxDeviceMemory)
-        if (readDataSchema.length < table.getNumberOfColumns) {
-          throw new QueryExecutionException(s"Expected ${readDataSchema.length} columns " +
-              s"but read ${table.getNumberOfColumns} from ${partedFile.filePath}")
-        }
-      }
-      metrics(NUM_OUTPUT_BATCHES) += 1
-      ParquetSchemaUtils.evolveSchemaIfNeededAndClose(table, clippedSchema, readDataSchema,
-        isSchemaCaseSensitive, useFieldId)
+      ParquetTableReader(conf, targetBatchSizeBytes, parseOpts, hostBuffer, 0,
+        dataSize, metrics,
+        isCorrectInt96RebaseMode, isCorrectRebaseMode, hasInt96Timestamps,
+        isSchemaCaseSensitive, useFieldId, readDataSchema, clippedSchema, None,
+        tableSize => maxDeviceMemory = max(tableSize, maxDeviceMemory))
     }
-    withResource(table) { table =>
+
+    closeOnExcept(tableReader) { _ =>
       val colTypes = readDataSchema.fields.map(f => f.dataType)
-      val batch = GpuColumnVector.from(table, colTypes)
-      logDebug(s"GPU batch size: ${GpuColumnVector.getTotalDeviceMemoryUsed(batch)} bytes")
-      // we have to add partition values here for this batch, we already verified that
-      // its not different for all the blocks in this batch
-      SingleColumnarBatchReader(
-        addPartitionValues(batch, partedFile.partitionValues, partitionSchema))
+      val batchReader = new CachingBatchReader(tableReader, colTypes)
+      WrappedColumnarBatchReader(batchReader, batch => {
+        addPartitionValues(batch, partedFile.partitionValues, partitionSchema)
+      })
     }
   }
 }
