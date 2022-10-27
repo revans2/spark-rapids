@@ -28,7 +28,7 @@ import scala.language.implicitConversions
 import scala.math.max
 
 import ai.rapids.cudf.{ColumnVector, HostMemoryBuffer, NvtxColor, NvtxRange, Table}
-import com.nvidia.spark.rapids.GpuMetric.{BUFFER_TIME, FILTER_TIME, NUM_OUTPUT_BATCHES, PEAK_DEVICE_MEMORY, SEMAPHORE_WAIT_TIME}
+import com.nvidia.spark.rapids.GpuMetric.{makeSpillCallback, BUFFER_TIME, FILTER_TIME, NUM_OUTPUT_BATCHES, PEAK_DEVICE_MEMORY, SEMAPHORE_WAIT_TIME}
 import com.nvidia.spark.rapids.RapidsPluginImplicits.AutoCloseableProducingSeq
 import org.apache.commons.io.IOUtils
 import org.apache.hadoop.conf.Configuration
@@ -298,18 +298,17 @@ case class SingleColumnarBatchReader(batch: ColumnarBatch) extends ColumnarBatch
 }
 
 class CachingBatchReader(reader: TableReader,
-    dataTypes: Array[DataType]) extends ColumnarBatchReader with Arm {
+    dataTypes: Array[DataType],
+    spillCallback: SpillCallback) extends ColumnarBatchReader with Arm {
 
   private[this] var notSpillableBatch: Option[ColumnarBatch] = None
   private[this] val pending: mutable.Queue[SpillableColumnarBatch] = mutable.Queue.empty
 
   private[this] def makeSpillableAndClose(table: Table): SpillableColumnarBatch = {
-    // TODO need a spill callback at some point...
     withResource(table) { _ =>
-        // TODO do we need to close the ColumnarBatch???
       SpillableColumnarBatch(GpuColumnVector.from(table, dataTypes),
         SpillPriorities.ACTIVE_ON_DECK_PRIORITY,
-        RapidsBuffer.defaultSpillCallback)
+        spillCallback)
     }
   }
 
@@ -378,6 +377,7 @@ abstract class FilePartitionReaderBase(conf: Configuration, execMetrics: Map[Str
   protected var isDone: Boolean = false
   protected var maxDeviceMemory: Long = 0
   protected var batchReader: ColumnarBatchReader = EmptyColumnarBatchReader
+  protected lazy val spillCallback: SpillCallback = makeSpillCallback(execMetrics)
 
   override def get(): ColumnarBatch = {
     batchReader.next()
@@ -1001,7 +1001,7 @@ abstract class MultiFileCoalescingPartitionReaderBase(
         val colTypes = currentChunkMeta.readSchema.fields.map(f => f.dataType)
         val tableReader = readToTable(currentChunkMeta.currentChunk, currentChunkMeta.clippedSchema,
           currentChunkMeta.readSchema, currentChunkMeta.extraInfo)
-        new CachingBatchReader(tableReader, colTypes)
+        new CachingBatchReader(tableReader, colTypes, spillCallback)
       }
       WrappedColumnarBatchReader(batchReader,
         cb => {
