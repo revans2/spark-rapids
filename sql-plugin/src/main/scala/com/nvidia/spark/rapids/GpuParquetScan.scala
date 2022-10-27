@@ -940,6 +940,7 @@ case class GpuParquetMultiFilePartitionReaderFactory(
     rapidsConf, alluxioPathReplacementMap) {
 
   private val isCaseSensitive = sqlConf.caseSensitiveAnalysis
+  private val useChunkedReader = rapidsConf.chunkedReaderEnabled
   private val debugDumpPrefix = rapidsConf.parquetDebugDumpPrefix
   private val numThreads = rapidsConf.multiThreadReadNumThreads
   private val maxNumFileProcessed = rapidsConf.maxNumParquetFilesParallel
@@ -1087,8 +1088,9 @@ case class GpuParquetMultiFilePartitionReaderFactory(
       _ += TimeUnit.NANOSECONDS.toMillis(filterTime)
     }
     new MultiFileParquetPartitionReader(conf, files, clippedBlocks, isCaseSensitive,
-      debugDumpPrefix, maxReadBatchSizeRows, maxReadBatchSizeBytes, targetBatchSizeBytes,
-      metrics, partitionSchema, numThreads, ignoreMissingFiles, ignoreCorruptFiles, readUseFieldId)
+      debugDumpPrefix, useChunkedReader, maxReadBatchSizeRows, maxReadBatchSizeBytes,
+      targetBatchSizeBytes, metrics, partitionSchema, numThreads, ignoreMissingFiles,
+      ignoreCorruptFiles, readUseFieldId)
   }
 
   /**
@@ -1542,6 +1544,7 @@ class MultiFileParquetPartitionReader(
     clippedBlocks: Seq[ParquetSingleDataBlockMeta],
     override val isSchemaCaseSensitive: Boolean,
     debugDumpPrefix: String,
+    useChunkedReader: Boolean,
     maxReadBatchSizeRows: Integer,
     maxReadBatchSizeBytes: Long,
     targetBatchSizeBytes: Long,
@@ -1665,7 +1668,8 @@ class MultiFileParquetPartitionReader(
     // About to start using the GPU
     GpuSemaphore.acquireIfNecessary(TaskContext.get(), metrics(SEMAPHORE_WAIT_TIME))
 
-    ParquetTableReader(conf, targetBatchSizeBytes, parseOpts, dataBuffer, 0, dataSize, metrics,
+    MakeParquetTableReader(useChunkedReader, conf, targetBatchSizeBytes, parseOpts,
+      dataBuffer, 0, dataSize, metrics,
       extraInfo.isCorrectedInt96RebaseMode, extraInfo.isCorrectedRebaseMode,
       extraInfo.hasInt96Timestamps, isSchemaCaseSensitive, useFieldId, readDataSchema,
       clippedSchema, None,
@@ -1978,6 +1982,61 @@ class MultiFileCloudParquetPartitionReader(
       WrappedColumnarBatchReader(batchReader, batch => {
         addPartitionValues(batch, partedFile.partitionValues, partitionSchema)
       })
+    }
+  }
+}
+
+object MakeParquetTableReader extends Arm {
+  def apply(
+      chunkedReaderEnabled: Boolean,
+      conf: Configuration,
+      chunkSizeByteLimit: Long,
+      opts: ParquetOptions,
+      buffer: HostMemoryBuffer,
+      offset: Long,
+      len: Long,
+      metrics : Map[String, GpuMetric],
+      isCorrectedInt96RebaseMode: Boolean,
+      isCorrectedRebaseMode: Boolean,
+      hasInt96Timestamps: Boolean,
+      isSchemaCaseSensitive: Boolean,
+      useFieldId: Boolean,
+      readDataSchema: StructType,
+      clippedParquetSchema: MessageType,
+      filePath: Option[Path],
+      onTableSize: Long => Unit): TableReader = {
+    if (chunkedReaderEnabled) {
+      ParquetTableReader(conf, chunkSizeByteLimit, opts, buffer, offset, len, metrics,
+        isCorrectedInt96RebaseMode, isCorrectedRebaseMode, hasInt96Timestamps,
+        isSchemaCaseSensitive, useFieldId, readDataSchema, clippedParquetSchema,
+        filePath, onTableSize)
+    } else {
+      val table = withResource(buffer) { _ =>
+        withResource(new NvtxWithMetrics("Parquet decode", NvtxColor.DARK_GREEN,
+          metrics(GPU_DECODE_TIME))) { _ =>
+          Table.readParquet(opts, buffer, offset, len)
+        }
+      }
+      closeOnExcept(table) { _ =>
+        GpuParquetScan.throwIfNeeded(table, isCorrectedInt96RebaseMode, isCorrectedRebaseMode,
+          hasInt96Timestamps)
+        val actualSize = GpuColumnVector.getTotalDeviceMemoryUsed(table)
+        onTableSize(actualSize)
+        if (readDataSchema.length < table.getNumberOfColumns) {
+          filePath match {
+            case Some(path) =>
+              throw new QueryExecutionException(s"Expected ${readDataSchema.length} columns " +
+                  s"but read ${table.getNumberOfColumns} from $path")
+            case None =>
+              throw new QueryExecutionException(s"Expected ${readDataSchema.length} columns " +
+                  s"but read ${table.getNumberOfColumns}")
+          }
+        }
+      }
+      metrics(NUM_OUTPUT_BATCHES) += 1
+      val ret = ParquetSchemaUtils.evolveSchemaIfNeededAndClose(table,
+        clippedParquetSchema, readDataSchema, isSchemaCaseSensitive, useFieldId)
+      new SingleTableReader(ret)
     }
   }
 }
