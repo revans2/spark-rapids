@@ -2060,53 +2060,9 @@ case class ParquetTableReader(
     onTableSize: Long => Unit) extends TableReader with Arm {
   private[this] val reader = new ParquetChunkedReader(chunkSizeByteLimit, opts, buffer, offset, len)
 
-  private[this] var numBatchesRead = 0
-
-  /*
-  private[this] def dumpDataToFile(): Path = {
-    val (out, path) = FileUtils.createTempFile(conf, "/tmp/BOBBY/", s".parquet")
-
-    withResource(out) { _ =>
-      withResource(new HostMemoryInputStream(buffer, len)) { in =>
-        IOUtils.copy(in, out)
-      }
-    }
-    path
-  }
-   */
-
-  override def hasNext: Boolean = {
-    try {
-      System.err.println("\nHAS NEXT...")
-      if (reader.hasNext) {
-        System.err.println(s"LOOKING FOR NEXT BATCH $numBatchesRead $chunkSizeByteLimit")
-        true
-      } else {
-        false
-      }
-    } catch {
-      case e: CudfException =>
-        if (numBatchesRead == 0) {
-          System.err.println("FAILED TO FIND SPLIT WILL TRY TO READ FROM BEGINNING...")
-          //val path = dumpDataToFile()
-          withResource(Table.readParquet(opts, buffer, offset, len)) { tmp =>
-            val actualSize = GpuColumnVector.getTotalDeviceMemoryUsed(tmp)
-            System.err.println(s"FULL BATCH: " +
-                s"TARGET: $chunkSizeByteLimit " +
-                s"ACTUAL: $actualSize " +
-                s"ROWS: ${tmp.getRowCount} ") // +
-                //s"DUMMPED AT: $path")
-          }
-        } else {
-          System.err.println(s"FAILED LOOKING FOR NEXT $chunkSizeByteLimit " +
-              s"AFTER $numBatchesRead WERE READ")
-        }
-        throw e
-    }
-  }
+  override def hasNext: Boolean = reader.hasNext
 
   override def next(): Table = {
-    numBatchesRead += 1
     val table = withResource(new NvtxWithMetrics("Parquet decode", NvtxColor.DARK_GREEN,
       metrics(GPU_DECODE_TIME))) { _ =>
       reader.readChunk()
@@ -2116,10 +2072,6 @@ case class ParquetTableReader(
       GpuParquetScan.throwIfNeeded(table, isCorrectedInt96RebaseMode, isCorrectedRebaseMode,
         hasInt96Timestamps)
       val actualSize = GpuColumnVector.getTotalDeviceMemoryUsed(table)
-      System.err.println(s"BATCH: ${numBatchesRead - 1} " +
-          s"TARGET: $chunkSizeByteLimit " +
-          s"ACTUAL: $actualSize " +
-          s"ROWS: ${table.getRowCount}")
       onTableSize(actualSize)
       if (readDataSchema.length < table.getNumberOfColumns) {
         filePath match {

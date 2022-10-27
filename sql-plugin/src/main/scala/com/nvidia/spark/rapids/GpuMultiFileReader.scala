@@ -25,10 +25,9 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable.{ArrayBuffer, LinkedHashMap, Queue}
 import scala.collection.mutable
 import scala.language.implicitConversions
-import scala.math.max
 
 import ai.rapids.cudf.{ColumnVector, HostMemoryBuffer, NvtxColor, NvtxRange, Table}
-import com.nvidia.spark.rapids.GpuMetric.{makeSpillCallback, BUFFER_TIME, FILTER_TIME, NUM_OUTPUT_BATCHES, PEAK_DEVICE_MEMORY, SEMAPHORE_WAIT_TIME}
+import com.nvidia.spark.rapids.GpuMetric.{makeSpillCallback, BUFFER_TIME, FILTER_TIME, PEAK_DEVICE_MEMORY, SEMAPHORE_WAIT_TIME}
 import com.nvidia.spark.rapids.RapidsPluginImplicits.AutoCloseableProducingSeq
 import org.apache.commons.io.IOUtils
 import org.apache.hadoop.conf.Configuration
@@ -1029,17 +1028,7 @@ abstract class MultiFileCoalescingPartitionReaderBase(
       if (dataSize == 0) {
         EmptyTableReader
       } else {
-        val tableReader = readBufferToTablesAndClose(dataBuffer, dataSize, clippedSchema,
-          readDataSchema, extraInfo)
-        WrappedTableReader(tableReader, table => {
-          maxDeviceMemory = max(GpuColumnVector.getTotalDeviceMemoryUsed(table), maxDeviceMemory)
-          if (readDataSchema.length < table.getNumberOfColumns) {
-            throw new QueryExecutionException(s"Expected ${readDataSchema.length} columns " +
-                s"but read ${table.getNumberOfColumns} from $currentChunkedBlocks")
-          }
-          metrics(NUM_OUTPUT_BATCHES) += 1
-          table
-        })
+        readBufferToTablesAndClose(dataBuffer, dataSize, clippedSchema, readDataSchema, extraInfo)
       }
     }
   }

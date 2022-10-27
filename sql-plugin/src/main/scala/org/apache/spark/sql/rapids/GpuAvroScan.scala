@@ -922,10 +922,20 @@ class GpuMultiFileAvroPartitionReader(
   }
 
   override def readBufferToTablesAndClose(dataBuffer: HostMemoryBuffer, dataSize: Long,
-      clippedSchema: SchemaBase,  readSchema: StructType, extraInfo: ExtraInfo): TableReader =
-    withResource(dataBuffer) { _ =>
+      clippedSchema: SchemaBase,  readSchema: StructType, extraInfo: ExtraInfo): TableReader = {
+    val tableReader = withResource(dataBuffer) { _ =>
       new SingleTableReader(sendToGpuUnchecked(dataBuffer, dataSize, splits))
     }
+    WrappedTableReader(tableReader, table => {
+      maxDeviceMemory = max(GpuColumnVector.getTotalDeviceMemoryUsed(table), maxDeviceMemory)
+      if (readDataSchema.length < table.getNumberOfColumns) {
+        throw new QueryExecutionException(s"Expected ${readDataSchema.length} columns " +
+            s"but read ${table.getNumberOfColumns}")
+      }
+      metrics(NUM_OUTPUT_BATCHES) += 1
+      table
+    })
+  }
 
 
   override final def getFileFormatShortName: String = "AVRO"

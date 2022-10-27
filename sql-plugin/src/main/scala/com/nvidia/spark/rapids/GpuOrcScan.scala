@@ -2143,8 +2143,17 @@ class MultiFileOrcPartitionReader(
       clippedSchema: SchemaBase,
       readSchema: StructType,
       extraInfo: ExtraInfo): TableReader = withResource(dataBuffer) { _ =>
-    new SingleTableReader(decodeToTable(dataBuffer, dataSize, clippedSchema,
+    val tableReader = new SingleTableReader(decodeToTable(dataBuffer, dataSize, clippedSchema,
       extraInfo.requestedMapping, isCaseSensitive, files))
+    WrappedTableReader(tableReader, table => {
+      maxDeviceMemory = max(GpuColumnVector.getTotalDeviceMemoryUsed(table), maxDeviceMemory)
+      if (readDataSchema.length < table.getNumberOfColumns) {
+        throw new QueryExecutionException(s"Expected ${readDataSchema.length} columns " +
+            s"but read ${table.getNumberOfColumns}")
+      }
+      metrics(NUM_OUTPUT_BATCHES) += 1
+      table
+    })
   }
 
   /**
