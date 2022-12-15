@@ -90,6 +90,48 @@ def test_part_write_round_trip(spark_tmp_path, orc_gen):
             data_path,
             conf = {'spark.rapids.sql.format.orc.write.enabled': True})
 
+# There are race conditions around when individual files are read in for partitioned data
+@ignore_order
+@pytest.mark.parametrize('orc_gen', orc_part_write_gens, ids=idfn)
+def test_static_part_overwrite(spark_tmp_path, orc_gen):
+    gen_list_first = [('a', RepeatSeqGen(orc_gen, 10)),
+            ('b', orc_gen)]
+    gen_list_second = [('a', RepeatSeqGen(orc_gen, 2)),
+            ('b', orc_gen)]
+
+    data_path = spark_tmp_path + '/ORC_DATA'
+
+    def do_write(spark, path):
+        gen_df(spark, gen_list_first).coalesce(1).write.partitionBy('a').orc(path)
+        gen_df(spark, gen_list_second).coalesce(1).write.mode("overwrite").partitionBy('a').orc(path)
+        
+    assert_gpu_and_cpu_writes_are_equal_collect(
+            do_write,
+            lambda spark, path: spark.read.orc(path),
+            data_path,
+            conf = {'spark.rapids.sql.format.orc.write.enabled': True})
+
+# There are race conditions around when individual files are read in for partitioned data
+@ignore_order
+@pytest.mark.parametrize('orc_gen', orc_part_write_gens, ids=idfn)
+def test_dynamic_part_overwrite(spark_tmp_path, orc_gen):
+    gen_list_first = [('a', RepeatSeqGen(orc_gen, 10)),
+            ('b', orc_gen)]
+    gen_list_second = [('a', RepeatSeqGen(orc_gen, 2)),
+            ('b', orc_gen)]
+
+    data_path = spark_tmp_path + '/ORC_DATA'
+
+    def do_write(spark, path):
+        gen_df(spark, gen_list_first).coalesce(1).write.partitionBy('a').orc(path)
+        gen_df(spark, gen_list_second).coalesce(1).write.mode("overwrite").option("partitionOverwriteMode", "dynamic").partitionBy('a').orc(path)
+        
+    assert_gpu_and_cpu_writes_are_equal_collect(
+            do_write,
+            lambda spark, path: spark.read.orc(path),
+            data_path,
+            conf = {'spark.rapids.sql.format.orc.write.enabled': True})
+
 orc_write_compress_options = ['none', 'uncompressed', 'snappy']
 # zstd is available in spark 3.2.0 and later.
 if not is_before_spark_320() and not is_spark_cdh():

@@ -152,6 +152,50 @@ def test_part_write_round_trip(spark_tmp_path, parquet_gen):
             data_path,
             conf=writer_confs)
 
+# There are race conditions around when individual files are read in for partitioned data
+@ignore_order
+@pytest.mark.order(1) # at the head of xdist worker queue if pytest-order is installed
+@pytest.mark.parametrize('parquet_gen', parquet_part_write_gens, ids=idfn)
+def test_static_part_overwrite(spark_tmp_path, parquet_gen):
+    gen_list_first = [('a', RepeatSeqGen(parquet_gen, 10)),
+            ('b', parquet_gen)]
+    gen_list_second = [('a', RepeatSeqGen(parquet_gen, 2)),
+            ('b', parquet_gen)]
+
+    data_path = spark_tmp_path + '/PARQUET_DATA'
+
+    def do_write(spark, path):
+        gen_df(spark, gen_list_first).coalesce(1).write.partitionBy('a').parquet(path)
+        gen_df(spark, gen_list_second).coalesce(1).write.mode("overwrite").partitionBy('a').parquet(path)
+        
+    assert_gpu_and_cpu_writes_are_equal_collect(
+            do_write,
+            lambda spark, path: spark.read.parquet(path),
+            data_path,
+            conf=writer_confs)
+
+# There are race conditions around when individual files are read in for partitioned data
+@ignore_order
+@pytest.mark.order(1) # at the head of xdist worker queue if pytest-order is installed
+@pytest.mark.parametrize('parquet_gen', parquet_part_write_gens, ids=idfn)
+def test_dynamic_part_overwrite(spark_tmp_path, parquet_gen):
+    gen_list_first = [('a', RepeatSeqGen(parquet_gen, 10)),
+            ('b', parquet_gen)]
+    gen_list_second = [('a', RepeatSeqGen(parquet_gen, 2)),
+            ('b', parquet_gen)]
+
+    data_path = spark_tmp_path + '/PARQUET_DATA'
+
+    def do_write(spark, path):
+        gen_df(spark, gen_list_first).coalesce(1).write.partitionBy('a').parquet(path)
+        gen_df(spark, gen_list_second).coalesce(1).write.mode("overwrite").option("partitionOverwriteMode", "dynamic").partitionBy('a').parquet(path)
+        
+    assert_gpu_and_cpu_writes_are_equal_collect(
+            do_write,
+            lambda spark, path: spark.read.parquet(path),
+            data_path,
+            conf=writer_confs)
+
 # we are limiting TimestampGen to avoid overflowing the INT96 value
 # see https://github.com/rapidsai/cudf/issues/8070
 @pytest.mark.parametrize('data_gen', [TimestampGen(end=datetime(1677, 9, 22, tzinfo=timezone.utc)),
