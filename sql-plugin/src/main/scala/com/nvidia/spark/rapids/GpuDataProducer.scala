@@ -122,9 +122,9 @@ class CachedGpuBatchIterator private(pending: mutable.Queue[SpillableColumnarBat
       throw new NoSuchElementException()
     }
     withResource(pending.dequeue()) { spillable =>
-      val ret = spillable.getColumnarBatch()
-      spillable.close()
-      ret
+      RmmRapidsRetryIterator.withRetryNoSplit(spillable) { sb =>
+        sb.getColumnarBatch()
+      }
     }
   }
 

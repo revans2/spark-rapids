@@ -367,7 +367,9 @@ class LazySpillableGatherMapImpl(
   private def getBuffer = {
     if (cached.isEmpty) {
       withResource(new NvtxRange("get map " + name, NvtxColor.RED)) { _ =>
-        cached = spill.map(_.getDeviceBuffer())
+        RmmRapidsRetryIterator.withRetryNoSplit {
+          cached = spill.map(_.getDeviceBuffer())
+        }
       }
     }
     cached.get
