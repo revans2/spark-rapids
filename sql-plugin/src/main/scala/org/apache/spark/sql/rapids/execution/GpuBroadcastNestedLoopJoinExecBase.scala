@@ -20,6 +20,7 @@ import ai.rapids.cudf
 import ai.rapids.cudf.{ast, GatherMap, NvtxColor, OutOfBoundsPolicy, Scalar, Table}
 import ai.rapids.cudf.ast.CompiledExpression
 import com.nvidia.spark.rapids._
+import com.nvidia.spark.rapids.RmmRapidsRetryIterator.{withRestoreOnRetry, withRetryNoSplit}
 import com.nvidia.spark.rapids.shims.{GpuBroadcastJoinMeta, ShimBinaryExecNode}
 
 import org.apache.spark.TaskContext
@@ -196,22 +197,29 @@ class ConditionalNestedLoopJoinIterator(
   }
 
   override def createGatherer(
-      cb: ColumnarBatch,
+      cb: LazySpillableColumnarBatch,
       numJoinRows: Option[Long]): Option[JoinGatherer] = {
     if (numJoinRows.contains(0)) {
       // nothing matched
       return None
     }
-    withResource(GpuColumnVector.from(builtBatch.getBatch)) { builtTable =>
-      withResource(GpuColumnVector.from(cb)) { streamTable =>
-        closeOnExcept(LazySpillableColumnarBatch(cb, "stream_data")) { streamBatch =>
-          val builtSpillOnly = LazySpillableColumnarBatch.spillOnly(builtBatch)
-          val (leftTable, leftBatch, rightTable, rightBatch) = buildSide match {
-            case GpuBuildLeft => (builtTable, builtSpillOnly, streamTable, streamBatch)
-            case GpuBuildRight => (streamTable, streamBatch, builtTable, builtSpillOnly)
+    val batches = Seq(builtBatch, cb)
+    batches.foreach(_.checkpoint())
+    withRetryNoSplit {
+      withRestoreOnRetry(batches) {
+        withResource(GpuColumnVector.from(builtBatch.getBatch)) { builtTable =>
+          withResource(GpuColumnVector.from(cb.getBatch)) { streamTable =>
+            closeOnExcept(LazySpillableColumnarBatch(cb.getBatch, "stream_data")) {
+              streamBatch =>
+                val builtSpillOnly = LazySpillableColumnarBatch.spillOnly(builtBatch)
+                val (leftTable, leftBatch, rightTable, rightBatch) = buildSide match {
+                  case GpuBuildLeft => (builtTable, builtSpillOnly, streamTable, streamBatch)
+                  case GpuBuildRight => (streamTable, streamBatch, builtTable, builtSpillOnly)
+                }
+                val maps = computeGatherMaps(leftTable, rightTable, numJoinRows)
+                makeGatherer(maps, leftBatch, rightBatch, joinType)
+            }
           }
-          val maps = computeGatherMaps(leftTable, rightTable, numJoinRows)
-          makeGatherer(maps, leftBatch, rightBatch, joinType)
         }
       }
     }
