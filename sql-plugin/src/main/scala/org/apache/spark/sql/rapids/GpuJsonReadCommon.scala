@@ -63,6 +63,19 @@ object GpuJsonReadCommon {
     builder.build
   }
 
+  /**
+   * Make a read schema given an input array type
+   * @param input the input Spark schema to covert
+   * @return the desired data type
+   */
+  def makeSchema(input: ArrayType): Schema = {
+    val builder = Schema.listBuilder
+    populateSchema(input.elementType, "element", builder)
+    val ret = builder.build
+    System.err.println(s"CONVERTED $input to $ret")
+    ret
+  }
+
   private def dateFormat(options: JSONOptions): Option[String] =
     GpuJsonUtils.optionalDateFormatInRead(options)
 

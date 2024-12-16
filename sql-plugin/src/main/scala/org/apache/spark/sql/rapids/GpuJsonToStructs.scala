@@ -64,6 +64,20 @@ case class GpuJsonToStructs(
           } else {
             parsedStructs
           }
+        case array: ArrayType =>
+          val parsedArray = JSONUtils.fromJSONToStructs(input.getBase, makeSchema(array),
+            cudfOptions, parsedOptions.locale == Locale.US)
+          val hasDateTime = TrampolineUtil.dataTypeExistsRecursively(array, t =>
+            t.isInstanceOf[DateType] || t.isInstanceOf[TimestampType]
+          )
+          ai.rapids.cudf.TableDebug.get.debug("parsed array", parsedArray)
+          if (hasDateTime) {
+            withResource(parsedArray) { _ =>
+              convertDateTimeType(parsedArray, array, parsedOptions)
+            }
+          } else {
+            parsedArray
+          }
         case _ => throw new IllegalArgumentException(
           s"GpuJsonToStructs currently does not support schema of type $schema.")
       }

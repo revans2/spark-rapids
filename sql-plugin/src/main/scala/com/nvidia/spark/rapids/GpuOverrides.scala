@@ -3778,6 +3778,7 @@ object GpuOverrides extends Logging {
     expr[JsonToStructs](
       "Returns a struct value with the given `jsonStr` and `schema`",
       ExprChecks.projectOnly(
+        TypeSig.ARRAY.nested(jsonStructReadTypes) +
         TypeSig.STRUCT.nested(jsonStructReadTypes) +
           TypeSig.MAP.nested(TypeSig.STRING).withPsNote(TypeEnum.MAP,
           "MAP only supports keys and values that are of STRING type " +
@@ -3807,6 +3808,16 @@ object GpuOverrides extends Logging {
                     "names in a struct")
               }
               if (hasDateTimeType(st) && !this.conf.isJsonDateTimeReadEnabled) {
+                willNotWorkOnGpu("from_json on GPU does not support DateType or TimestampType" +
+                  " by default due to compatibility. " +
+                  "Set `spark.rapids.sql.json.read.datetime.enabled` to `true` to enable them.")
+              }
+            case at: ArrayType =>
+              if (hasDuplicateFieldNames(at)) {
+                willNotWorkOnGpu("from_json on GPU does not support duplicate field " +
+                  "names in a struct")
+              }
+              if (hasDateTimeType(at) && !this.conf.isJsonDateTimeReadEnabled) {
                 willNotWorkOnGpu("from_json on GPU does not support DateType or TimestampType" +
                   " by default due to compatibility. " +
                   "Set `spark.rapids.sql.json.read.datetime.enabled` to `true` to enable them.")
