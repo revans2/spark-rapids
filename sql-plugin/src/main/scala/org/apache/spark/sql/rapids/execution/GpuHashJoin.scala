@@ -308,6 +308,13 @@ object JoinStrategy extends Enumeration {
    */
   val INNER_HASH_WITH_POST = Value("INNER_HASH_WITH_POST")
   /**
+   * INNER_SORT_WITH_POST: Force inner sort-merge join with post-processing to convert to other
+   * join types and apply join filtering. This performs an inner sort-merge join first, then
+   * applies post-processing transformations to produce the desired join type. Falls back to
+   * INNER_HASH_WITH_POST when ARRAY or STRUCT key types are present.
+   */
+  val INNER_SORT_WITH_POST = Value("INNER_SORT_WITH_POST")
+  /**
    * HASH_ONLY: Force the use of traditional hash join only.
    */
   val HASH_ONLY = Value("HASH_ONLY")
@@ -315,7 +322,8 @@ object JoinStrategy extends Enumeration {
 
 /**
  * Options to control join behavior.
- * @param strategy the join strategy to use (AUTO, INNER_HASH_WITH_POST, or HASH_ONLY)
+ * @param strategy the join strategy to use (AUTO, INNER_HASH_WITH_POST, INNER_SORT_WITH_POST,
+ *                 or HASH_ONLY)
  * @param targetSize the target batch size in bytes for the join operation
  */
 case class JoinOptions(strategy: JoinStrategy.JoinStrategy, targetSize: Long)
@@ -378,6 +386,19 @@ abstract class BaseHashJoinIterator(
       case _ =>
         // existence joins don't change size
         JoinBuildSideStats(1.0, isDistinct = false)
+    }
+  }
+
+  /**
+   * Check if sort join is supported for the given key expressions.
+   * Sort join does not support ARRAY or STRUCT types in join keys.
+   */
+  protected def isSortJoinSupported(keys: Seq[GpuExpression]): Boolean = {
+    !keys.exists { expr =>
+      expr.dataType match {
+        case _: ArrayType | _: StructType => true
+        case _ => false
+      }
     }
   }
 
@@ -577,6 +598,21 @@ class HashJoinIterator(
       case JoinStrategy.INNER_HASH_WITH_POST =>
         // Use composable JNI APIs: inner join -> convert to target join type
         computeNonCondInnerHashWithPost(leftKeys, rightKeys)
+      case JoinStrategy.INNER_SORT_WITH_POST =>
+        // Check if sort join is supported (no ARRAY/STRUCT types)
+        val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
+        val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
+        if (leftKeysSupported && rightKeysSupported) {
+          computeNonCondInnerSortWithPost(leftKeys, rightKeys)
+        } else {
+          // Log warning and fall back to hash join
+          if (!leftKeysSupported || !rightKeysSupported) {
+            logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
+              s"ARRAY or STRUCT types which are not supported for sort joins. " +
+              s"Falling back to INNER_HASH_WITH_POST strategy.")
+          }
+          computeNonCondInnerHashWithPost(leftKeys, rightKeys)
+        }
       case _ =>
         // Use existing hash join methods (for AUTO and HASH_ONLY strategies)
         computeWithHashJoin(leftKeys, rightKeys)
@@ -628,6 +664,60 @@ class HashJoinIterator(
           innerMaps.foreach(_.close())
           throw new NotImplementedError(
             s"Join $joinType with INNER_HASH_WITH_POST strategy is not currently supported")
+      }
+    } catch {
+      case e: Throwable =>
+        innerMaps.foreach(_.close())
+        throw e
+    }
+  }
+
+  private def computeNonCondInnerSortWithPost(
+      leftKeys: Table,
+      rightKeys: Table): Array[GatherMap] = {
+    // Perform inner sort-merge join with smaller table on the left for better performance
+    val leftRowCount = leftKeys.getRowCount
+    val rightRowCount = rightKeys.getRowCount
+    
+    // innerMaps(0) is always the left table and innerMaps(1) is always the right table
+    // Note: isLeftKeySorted=false, isRightKeySorted=false since keys are not pre-sorted
+    val innerMaps = if (rightRowCount < leftRowCount) {
+      JoinPrimitives.sortMergeInnerJoin(rightKeys, leftKeys, compareNullsEqual, false, false).reverse
+    } else {
+      JoinPrimitives.sortMergeInnerJoin(leftKeys, rightKeys, compareNullsEqual, false, false)
+    }
+
+    try {      
+      joinType match {
+        case _: InnerLike =>
+          // Already have inner join maps
+          Array(innerMaps(0), innerMaps(1))
+        case LeftOuter =>
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            innerMaps(0), innerMaps(1), leftKeys.getRowCount, rightKeys.getRowCount)
+          innerMaps.foreach(_.close())
+          outerMaps
+        case RightOuter =>
+          // Right outer is left outer with sides swapped
+          val rightOuterMaps = JoinPrimitives.makeLeftOuter(
+            innerMaps(1), innerMaps(0), rightKeys.getRowCount, leftKeys.getRowCount)
+          innerMaps.foreach(_.close())
+          Array(rightOuterMaps(1), rightOuterMaps(0))
+        case LeftSemi =>
+          val semiMap = JoinPrimitives.makeSemi(innerMaps(0), leftKeys.getRowCount)
+          innerMaps.foreach(_.close())
+          Array(semiMap)
+        case LeftAnti =>
+          val semiMap = JoinPrimitives.makeSemi(innerMaps(0), leftKeys.getRowCount)
+          val antiMap = withResource(semiMap) { semi =>
+            JoinPrimitives.makeAnti(semi, leftKeys.getRowCount)
+          }
+          innerMaps.foreach(_.close())
+          Array(antiMap)
+        case _ =>
+          innerMaps.foreach(_.close())
+          throw new NotImplementedError(
+            s"Join $joinType with INNER_SORT_WITH_POST strategy is not currently supported")
       }
     } catch {
       case e: Throwable =>
@@ -699,6 +789,19 @@ class ConditionalHashJoinIterator(
             case JoinStrategy.INNER_HASH_WITH_POST =>
               // Use composable JNI APIs: inner join -> filter -> convert to target join type
               computeInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
+            case JoinStrategy.INNER_SORT_WITH_POST =>
+              // Check if sort join is supported (no ARRAY/STRUCT types)
+              val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
+              val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
+              if (leftKeysSupported && rightKeysSupported) {
+                computeInnerSortWithPost(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
+              } else {
+                // Log warning and fall back to hash join
+                logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
+                  s"ARRAY or STRUCT types which are not supported for sort joins. " +
+                  s"Falling back to INNER_HASH_WITH_POST strategy.")
+                computeInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
+              }
             case _ =>
               // Use existing mixed join methods (for AUTO and HASH_ONLY strategies)
               computeWithMixedJoin(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
@@ -782,6 +885,89 @@ class ConditionalHashJoinIterator(
           filteredMaps.foreach(_.close())
           throw new NotImplementedError(
             s"Join $joinType with INNER_HASH_WITH_POST strategy is not currently supported")
+      }
+    } catch {
+      case e: Throwable =>
+        filteredMaps.foreach(_.close())
+        throw e
+    }
+  }
+
+  private def computeInnerSortWithPost(
+      leftKeys: Table,
+      rightKeys: Table,
+      leftTable: Table,
+      rightTable: Table,
+      nullEquality: NullEquality): Array[GatherMap] = {
+    // Perform inner sort-merge join with smaller table on the left for better performance
+    val leftRowCount = leftKeys.getRowCount
+    val rightRowCount = rightKeys.getRowCount
+
+    // innerMaps(0) is always the left table and innerMaps(1) is always the right table
+    // Note: isLeftKeySorted=false, isRightKeySorted=false since keys are not pre-sorted
+    val innerMaps = if (rightRowCount < leftRowCount) {
+      JoinPrimitives.sortMergeInnerJoin(rightKeys, leftKeys, nullEquality == NullEquality.EQUAL, false, false).reverse
+    } else {
+      JoinPrimitives.sortMergeInnerJoin(leftKeys, rightKeys, nullEquality == NullEquality.EQUAL, false, false)
+    }
+
+    // Filter by AST condition
+    val filteredMaps = try {
+      // For AST to work we have to match the order of the left and right tables
+      // that it was compiled for
+      // InnerLike && GpuBuildRight | LeftOuter | LeftSemi | LeftAnti =>
+      //   LEFT, RIGHT
+      // InnerLike && GpuBuildLeft | RightOuter=>
+      //   RIGHT, LEFT
+      val conditionCompiledRightLeft = joinType match {
+        case _: InnerLike if buildSide == GpuBuildLeft => true
+        case RightOuter => true
+        case _ => false
+      }
+      if (conditionCompiledRightLeft) {
+        JoinPrimitives.filterGatherMapsByAST(
+          innerMaps(1), innerMaps(0), rightTable, leftTable, compiledCondition).reverse
+      } else {
+        JoinPrimitives.filterGatherMapsByAST(
+          innerMaps(0), innerMaps(1), leftTable, rightTable, compiledCondition)
+      }
+    } finally {
+      // Close innerMaps immediately to reduce peak memory usage
+      innerMaps.foreach(_.close())
+    }
+
+    try {
+      // Convert to target join type
+      joinType match {
+        case _: InnerLike =>
+          // Already have filtered inner join maps
+          Array(filteredMaps(0), filteredMaps(1))
+        case LeftOuter =>
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            filteredMaps(0), filteredMaps(1), leftRowCount, rightRowCount)
+          filteredMaps.foreach(_.close())
+          outerMaps
+        case RightOuter =>
+          // Right outer is left outer with sides swapped
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            filteredMaps(1), filteredMaps(0), rightRowCount, leftRowCount).reverse
+          filteredMaps.foreach(_.close())
+          outerMaps
+        case LeftSemi =>
+          val semiMap = JoinPrimitives.makeSemi(filteredMaps(0), leftRowCount)
+          filteredMaps.foreach(_.close())
+          Array(semiMap)
+        case LeftAnti =>
+          val semiMap = JoinPrimitives.makeSemi(filteredMaps(0), leftRowCount)
+          val antiMap = withResource(semiMap) { semi =>
+            JoinPrimitives.makeAnti(semi, leftRowCount)
+          }
+          filteredMaps.foreach(_.close())
+          Array(antiMap)
+        case _ =>
+          filteredMaps.foreach(_.close())
+          throw new NotImplementedError(
+            s"Join $joinType with INNER_SORT_WITH_POST strategy is not currently supported")
       }
     } catch {
       case e: Throwable =>
@@ -913,6 +1099,19 @@ class HashJoinStreamSideIterator(
       case JoinStrategy.INNER_HASH_WITH_POST =>
         // Use composable JNI APIs
         computeUnconditionalInnerHashWithPost(leftKeys, rightKeys)
+      case JoinStrategy.INNER_SORT_WITH_POST =>
+        // Check if sort join is supported (no ARRAY/STRUCT types)
+        val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
+        val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
+        if (leftKeysSupported && rightKeysSupported) {
+          computeUnconditionalInnerSortWithPost(leftKeys, rightKeys)
+        } else {
+          // Log warning and fall back to hash join
+          logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
+            s"ARRAY or STRUCT types which are not supported for sort joins. " +
+            s"Falling back to INNER_HASH_WITH_POST strategy.")
+          computeUnconditionalInnerHashWithPost(leftKeys, rightKeys)
+        }
       case _ =>
         // Use existing hash join methods
         computeUnconditionalHashJoin(leftKeys, rightKeys)
@@ -933,6 +1132,48 @@ class HashJoinStreamSideIterator(
     }
 
     try {
+      // Convert to target sub-join type
+      subJoinType match {
+        case Inner =>
+          // Already have inner join maps
+          Array(innerMaps(0), innerMaps(1))
+        case LeftOuter =>
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            innerMaps(0), innerMaps(1), leftRowCount, rightRowCount)
+          innerMaps.foreach(_.close())
+          outerMaps
+        case RightOuter =>
+          // Right outer is left outer with sides swapped
+          val rightOuterMaps = JoinPrimitives.makeLeftOuter(
+            innerMaps(1), innerMaps(0), rightRowCount, leftRowCount)
+          innerMaps.foreach(_.close())
+          Array(rightOuterMaps(1), rightOuterMaps(0))
+        case t =>
+          innerMaps.foreach(_.close())
+          throw new IllegalStateException(s"unsupported join type: $t")
+      }
+    } catch {
+      case e: Throwable =>
+        innerMaps.foreach(_.close())
+        throw e
+    }
+  }
+
+  private def computeUnconditionalInnerSortWithPost(
+      leftKeys: Table, rightKeys: Table): Array[GatherMap] = {
+    // Perform inner sort-merge join with smaller table on the left for better performance
+    val leftRowCount = leftKeys.getRowCount
+    val rightRowCount = rightKeys.getRowCount
+    
+    // innerMaps(0) is always the left table and innerMaps(1) is always the right table
+    // Note: isLeftKeySorted=false, isRightKeySorted=false since keys are not pre-sorted
+    val innerMaps = if (rightRowCount < leftRowCount) {
+      JoinPrimitives.sortMergeInnerJoin(rightKeys, leftKeys, compareNullsEqual, false, false).reverse
+    } else {
+      JoinPrimitives.sortMergeInnerJoin(leftKeys, rightKeys, compareNullsEqual, false, false)
+    }
+
+    try {      
       // Convert to target sub-join type
       subJoinType match {
         case Inner =>
@@ -989,6 +1230,21 @@ class HashJoinStreamSideIterator(
             // Use composable JNI APIs
             computeConditionalInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable,
               compiledCondition)
+          case JoinStrategy.INNER_SORT_WITH_POST =>
+            // Check if sort join is supported (no ARRAY/STRUCT types)
+            val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
+            val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
+            if (leftKeysSupported && rightKeysSupported) {
+              computeConditionalInnerSortWithPost(leftKeys, rightKeys, leftTable, rightTable,
+                compiledCondition)
+            } else {
+              // Log warning and fall back to hash join
+              logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
+                s"ARRAY or STRUCT types which are not supported for sort joins. " +
+                s"Falling back to INNER_HASH_WITH_POST strategy.")
+              computeConditionalInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable,
+                compiledCondition)
+            }
           case _ =>
             // Use existing mixed join methods
             computeConditionalMixedJoin(leftKeys, rightKeys, leftTable, rightTable,
@@ -1021,6 +1277,70 @@ class HashJoinStreamSideIterator(
       // that it was compiled for
       // subJoinType == LeftOuter | Inner => LEFT, RIGHT
       // subJoinType == RightOuter => RIGHT, LEFT
+      if (subJoinType == RightOuter) {
+        JoinPrimitives.filterGatherMapsByAST(
+          innerMaps(1), innerMaps(0), rightTable, leftTable, compiledCondition).reverse
+      } else {
+        JoinPrimitives.filterGatherMapsByAST(
+          innerMaps(0), innerMaps(1), leftTable, rightTable, compiledCondition)
+      }
+    } finally {
+      // Close innerMaps immediately to reduce peak memory usage
+      innerMaps.foreach(_.close())
+    }
+
+    try {
+      // Convert to target sub-join type
+      subJoinType match {
+        case Inner =>
+          // Already have filtered inner join maps
+          Array(filteredMaps(0), filteredMaps(1))
+        case LeftOuter =>
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            filteredMaps(0), filteredMaps(1), leftRowCount, rightRowCount)
+          filteredMaps.foreach(_.close())
+          outerMaps
+        case RightOuter =>
+          // Right outer is left outer with sides swapped
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            filteredMaps(1), filteredMaps(0), rightRowCount, leftRowCount).reverse
+          filteredMaps.foreach(_.close())
+          outerMaps
+        case t =>
+          filteredMaps.foreach(_.close())
+          throw new IllegalStateException(s"unsupported join type: $t")
+      }
+    } catch {
+      case e: Throwable =>
+        filteredMaps.foreach(_.close())
+        throw e
+    }
+  }
+
+  private def computeConditionalInnerSortWithPost(
+      leftKeys: Table,
+      rightKeys: Table,
+      leftTable: Table,
+      rightTable: Table,
+      compiledCondition: CompiledExpression): Array[GatherMap] = {
+    // Perform inner sort-merge join with smaller table on the left for better performance
+    val leftRowCount = leftTable.getRowCount
+    val rightRowCount = rightTable.getRowCount
+    
+    // innerMaps(0) is always the left table and innerMaps(1) is always the right table
+    // Note: isLeftKeySorted=false, isRightKeySorted=false since keys are not pre-sorted
+    val innerMaps = if (rightRowCount < leftRowCount) {
+      JoinPrimitives.sortMergeInnerJoin(rightKeys, leftKeys, compareNullsEqual, false, false).reverse
+    } else {
+      JoinPrimitives.sortMergeInnerJoin(leftKeys, rightKeys, compareNullsEqual, false, false)
+    }
+
+    // Filter by AST condition
+    // For AST to work we have to match the order of the left and right tables
+    // that it was compiled for
+    // subJoinType == LeftOuter | Inner => LEFT, RIGHT
+    // subJoinType == RightOuter => RIGHT, LEFT
+    val filteredMaps = try {
       if (subJoinType == RightOuter) {
         JoinPrimitives.filterGatherMapsByAST(
           innerMaps(1), innerMaps(0), rightTable, leftTable, compiledCondition).reverse

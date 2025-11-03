@@ -694,6 +694,8 @@ val GPU_COREDUMP_PIPE_PATTERN = conf("spark.rapids.gpu.coreDump.pipePattern")
       "AUTO (default) - automatically determine the best join strategy using heuristics; " +
       "INNER_HASH_WITH_POST - use inner hash join with post-processing to convert to other " +
       "join types and apply join filtering; " +
+      "INNER_SORT_WITH_POST - use inner sort-merge join with post-processing, falls back to " +
+      "INNER_HASH_WITH_POST for ARRAY/STRUCT key types; " +
       "HASH_ONLY - use traditional hash join only.")
     .internal()
     .stringConf
