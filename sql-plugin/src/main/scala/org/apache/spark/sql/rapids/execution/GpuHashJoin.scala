@@ -326,11 +326,14 @@ object JoinStrategy extends Enumeration {
  *                 or HASH_ONLY)
  * @param targetSize the target batch size in bytes for the join operation
  * @param logCardinalityEnabled whether to log cardinality statistics for debugging
+ * @param sizeEstimateThreshold the threshold used to decide when to skip the expensive join
+ *                              output size estimation (defaults to 0.75)
  */
 case class JoinOptions(
     strategy: JoinStrategy.JoinStrategy,
     targetSize: Long,
-    logCardinalityEnabled: Boolean)
+    logCardinalityEnabled: Boolean,
+    sizeEstimateThreshold: Double)
 
 /**
  * Statistics for join cardinality logging to help diagnose performance issues.
@@ -397,6 +400,7 @@ abstract class BaseHashJoinIterator(
       streamAttributes,
       built,
       joinOptions.targetSize,
+      joinOptions.sizeEstimateThreshold,
       opTime = opTime,
       joinTime = joinTime) {
   // We can cache this because the build side is not changing
