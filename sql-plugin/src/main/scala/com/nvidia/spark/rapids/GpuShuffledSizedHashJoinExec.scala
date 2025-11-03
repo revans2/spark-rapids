@@ -192,7 +192,6 @@ object GpuShuffledSizedHashJoinExec {
      * @param rawRightIter iterator of batches for the right table
      * @param condition inequality portions of the join condition
      * @param gpuBatchSizeBytes target GPU batch size
-     * @param allowSorted is sort merge join allowed
      * @param metrics map of metrics to update
      * @return join information including build side, bound expressions, etc.
      */
@@ -206,7 +205,6 @@ object GpuShuffledSizedHashJoinExec {
         rawRightIter: Iterator[ColumnarBatch],
         condition: Option[Expression],
         gpuBatchSizeBytes: Long,
-        allowSorted: Boolean,
         metrics: Map[String, GpuMetric]): JoinInfo
   }
 
@@ -320,8 +318,7 @@ object GpuShuffledSizedHashJoinExec {
       info: JoinInfo,
       spillableBuiltBatch: LazySpillableColumnarBatch,
       lazyStream: Iterator[LazySpillableColumnarBatch],
-      gpuBatchSizeBytes: Long,
-      isSMJOptAllowed: Boolean,
+      joinOptions: JoinOptions,
       opTime: GpuMetric,
       joinTime: GpuMetric): Iterator[ColumnarBatch] = {
     info.joinType match {
@@ -329,32 +326,32 @@ object GpuShuffledSizedHashJoinExec {
         new HashOuterJoinIterator(FullOuter, spillableBuiltBatch, info.exprs.boundBuildKeys,
           info.buildStats, None, lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
           info.exprs.boundCondition, info.exprs.numFirstConditionTableColumns,
-          gpuBatchSizeBytes, isSMJOptAllowed, info.buildSide, info.exprs.compareNullsEqual,
-          opTime, joinTime)
+          joinOptions, info.buildSide,
+          info.exprs.compareNullsEqual, opTime, joinTime)
       case LeftOuter if info.buildSide == GpuBuildLeft =>
         new HashOuterJoinIterator(LeftOuter, spillableBuiltBatch, info.exprs.boundBuildKeys,
           info.buildStats, None, lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
           info.exprs.boundCondition, info.exprs.numFirstConditionTableColumns,
-          gpuBatchSizeBytes, isSMJOptAllowed, info.buildSide, info.exprs.compareNullsEqual,
-          opTime, joinTime)
+          joinOptions, info.buildSide,
+          info.exprs.compareNullsEqual, opTime, joinTime)
       case RightOuter if info.buildSide == GpuBuildRight =>
         new HashOuterJoinIterator(RightOuter, spillableBuiltBatch, info.exprs.boundBuildKeys,
           info.buildStats, None, lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
           info.exprs.boundCondition, info.exprs.numFirstConditionTableColumns,
-          gpuBatchSizeBytes, isSMJOptAllowed, info.buildSide, info.exprs.compareNullsEqual,
-          opTime, joinTime)
+          joinOptions, info.buildSide,
+          info.exprs.compareNullsEqual, opTime, joinTime)
       case _ if info.exprs.boundCondition.isDefined =>
         // ConditionalHashJoinIterator will close the compiled condition
         val compiledCondition = info.exprs.boundCondition.get.convertToAst(
           info.exprs.numFirstConditionTableColumns).compile()
         new ConditionalHashJoinIterator(spillableBuiltBatch, info.exprs.boundBuildKeys,
           info.buildStats, lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
-          compiledCondition, gpuBatchSizeBytes, isSMJOptAllowed, info.joinType, info.buildSide,
-          info.exprs.compareNullsEqual, opTime, joinTime)
+          compiledCondition, joinOptions, info.joinType,
+          info.buildSide, info.exprs.compareNullsEqual, opTime, joinTime)
       case _ =>
         new HashJoinIterator(spillableBuiltBatch, info.exprs.boundBuildKeys, info.buildStats,
           lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
-          gpuBatchSizeBytes, isSMJOptAllowed, info.joinType, info.buildSide,
+          joinOptions, info.joinType, info.buildSide,
           info.exprs.compareNullsEqual, opTime, joinTime)
     }
   }
@@ -367,7 +364,6 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
   def right: SparkPlan
   def isGpuShuffle: Boolean
   def gpuBatchSizeBytes: Long
-  def isSMJOptAllowed: Boolean
   def partitionNumAmplification: Double
   def isSkewJoin: Boolean
   def cpuLeftKeys: Seq[Expression]
@@ -420,7 +416,7 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
     val isRightHost = isHostBatchProducer(right)
     val localCondition = condition
     val localGpuBatchSizeBytes = gpuBatchSizeBytes
-    val localIsSMJOptAllowed = isSMJOptAllowed
+    val localJoinOptions = RapidsConf.getJoinOptions(conf, localGpuBatchSizeBytes)
     val localMetrics = allMetrics.withDefaultValue(NoopMetric)
     val localReadOption = readOption
     left.executeColumnar().zipPartitions(right.executeColumnar()) { case (leftIter, rightIter) =>
@@ -428,28 +424,28 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
         case (true, true) =>
           getHostHostJoinInfo(localJoinType, localLeftKeys, leftOutput, leftIter,
             localRightKeys, rightOutput, rightIter, localCondition,
-            localGpuBatchSizeBytes, localIsSMJOptAllowed, localReadOption, localMetrics)
+            localGpuBatchSizeBytes, localReadOption, localMetrics)
         case (true, false) =>
           getHostGpuJoinInfo(localJoinType, localLeftKeys, leftOutput, leftIter,
             localRightKeys, rightOutput, rightIter, localCondition,
-            localGpuBatchSizeBytes, localIsSMJOptAllowed, localReadOption, localMetrics)
+            localGpuBatchSizeBytes, localReadOption, localMetrics)
         case (false, true) =>
           getGpuHostJoinInfo(localJoinType, localLeftKeys, leftOutput, leftIter,
             localRightKeys, rightOutput, rightIter, localCondition,
-            localGpuBatchSizeBytes, localIsSMJOptAllowed, localReadOption, localMetrics)
+            localGpuBatchSizeBytes, localReadOption, localMetrics)
         case (false, false) =>
           getGpuGpuJoinInfo(localJoinType, localLeftKeys, leftOutput, leftIter,
             localRightKeys, rightOutput, rightIter,
-            localCondition, localGpuBatchSizeBytes, localIsSMJOptAllowed, localMetrics)
+            localCondition, localGpuBatchSizeBytes, localMetrics)
       }
       val joinIterator = if (joinInfo.buildSize <= localGpuBatchSizeBytes) {
         if (localJoinType.isInstanceOf[InnerLike] && joinInfo.buildSize == 0) {
           Iterator.empty
         } else {
-          doSmallBuildJoin(joinInfo, localGpuBatchSizeBytes, localIsSMJOptAllowed, localMetrics)
+          doSmallBuildJoin(joinInfo, localJoinOptions, localMetrics)
         }
       } else {
-        doBigBuildJoin(joinInfo, localGpuBatchSizeBytes, localIsSMJOptAllowed,
+        doBigBuildJoin(joinInfo, localJoinOptions,
           partitionNumAmplification, localMetrics)
       }
       val numOutputRows = localMetrics(NUM_OUTPUT_ROWS)
@@ -466,14 +462,13 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
    * Perform a join where the build side fits in a single GPU batch.
    *
    * @param info join information from the probing phase
-   * @param gpuBatchSizeBytes target GPU batch size
+   * @param joinOptions options for the join operation including target size and strategy
    * @param metricsMap metrics to update
    * @return iterator to produce the results of the join
    */
   private def doSmallBuildJoin(
       info: JoinInfo,
-      gpuBatchSizeBytes: Long,
-      isSMLOptAllowed: Boolean,
+      joinOptions: JoinOptions,
       metricsMap: Map[String, GpuMetric]): Iterator[ColumnarBatch] = {
     val opTime = metricsMap(OP_TIME_LEGACY)
     val lazyStream = new Iterator[LazySpillableColumnarBatch]() {
@@ -506,7 +501,7 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
       assert(!buildIter.hasNext, "build side should have a single batch")
       LazySpillableColumnarBatch(batch, "built")
     }
-    createJoinIterator(info, spillableBuiltBatch, lazyStream, gpuBatchSizeBytes, isSMLOptAllowed,
+    createJoinIterator(info, spillableBuiltBatch, lazyStream, joinOptions,
       opTime, metricsMap(JOIN_TIME))
   }
 
@@ -514,18 +509,17 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
    * Perform a join where the build side does not fit in a single GPU batch.
    *
    * @param info join information from the probing phase
-   * @param gpuBatchSizeBytes target GPU batch size
+   * @param joinOptions options for the join operation including target size and strategy
    * @param metricsMap metrics to update
    * @param partitionNumAmplification boost number of partitions for build size by this times
    * @return iterator to produce the results of the join
    */
   private def doBigBuildJoin(
       info: JoinInfo,
-      gpuBatchSizeBytes: Long,
-      allowSorted: Boolean,
+      joinOptions: JoinOptions,
       partitionNumAmplification: Double,
       metricsMap: Map[String, GpuMetric]): Iterator[ColumnarBatch] = {
-    new BigSizedJoinIterator(info, gpuBatchSizeBytes, allowSorted,
+    new BigSizedJoinIterator(info, joinOptions,
       partitionNumAmplification, metricsMap)
   }
 
@@ -543,12 +537,11 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
       rightIter: Iterator[ColumnarBatch],
       condition: Option[Expression],
       gpuBatchSizeBytes: Long,
-      allowSorted: Boolean,
       readOption: CoalesceReadOption,
       metrics: Map[String, GpuMetric]): JoinInfo = {
     val sizer = createHostHostSizer(readOption)
     sizer.getJoinInfo(joinType, leftKeys, leftOutput, leftIter, rightKeys, rightOutput, rightIter,
-      condition, gpuBatchSizeBytes, allowSorted, metrics)
+      condition, gpuBatchSizeBytes, metrics)
   }
 
   /**
@@ -565,7 +558,6 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
       rightIter: Iterator[ColumnarBatch],
       condition: Option[Expression],
       gpuBatchSizeBytes: Long,
-      allowSorted: Boolean,
       readOption: CoalesceReadOption,
       metrics: Map[String, GpuMetric]): JoinInfo = {
     val sizer = createSpillableColumnarBatchSizer(startWithLeftSide = true)
@@ -577,7 +569,7 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
       readOption,
       concatMetrics)
     sizer.getJoinInfo(joinType, leftKeys, leftOutput, leftIter, rightKeys, rightOutput, rightIter,
-      condition, gpuBatchSizeBytes, allowSorted, metrics)
+      condition, gpuBatchSizeBytes, metrics)
   }
 
   /**
@@ -594,7 +586,6 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
       rawRightIter: Iterator[ColumnarBatch],
       condition: Option[Expression],
       gpuBatchSizeBytes: Long,
-      allowSorted: Boolean,
       readOption: CoalesceReadOption,
       metrics: Map[String, GpuMetric]): JoinInfo = {
     val sizer = createSpillableColumnarBatchSizer(startWithLeftSide = false)
@@ -606,7 +597,7 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
       readOption,
       concatMetrics)
     sizer.getJoinInfo(joinType, leftKeys, leftOutput, leftIter, rightKeys, rightOutput, rightIter,
-      condition, gpuBatchSizeBytes, allowSorted, metrics)
+      condition, gpuBatchSizeBytes, metrics)
   }
 
   /**
@@ -622,11 +613,10 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
       rightIter: Iterator[ColumnarBatch],
       condition: Option[Expression],
       gpuBatchSizeBytes: Long,
-      allowSorted: Boolean,
       metrics: Map[String, GpuMetric]): JoinInfo = {
     val sizer = createSpillableColumnarBatchSizer(startWithLeftSide = true)
     sizer.getJoinInfo(joinType, leftKeys, leftOutput, leftIter, rightKeys, rightOutput, rightIter,
-      condition, gpuBatchSizeBytes, allowSorted, metrics)
+      condition, gpuBatchSizeBytes, metrics)
   }
 
   /**
@@ -679,7 +669,6 @@ object GpuShuffledSymmetricHashJoinExec {
         rawRightIter: Iterator[ColumnarBatch],
         condition: Option[Expression],
         gpuBatchSizeBytes: Long,
-        allowSorted: Boolean,
         metrics: Map[String, GpuMetric]): JoinInfo = {
       val leftTime = new LocalGpuMetric
       val rightTime = new LocalGpuMetric
@@ -783,7 +772,6 @@ case class GpuShuffledSymmetricHashJoinExec(
                                              override val right: SparkPlan,
                                              override val isGpuShuffle: Boolean,
                                              override val gpuBatchSizeBytes: Long,
-                                             override val isSMJOptAllowed: Boolean,
                                              override val partitionNumAmplification: Double,
                                              override val readOption: CoalesceReadOption,
                                              override val isSkewJoin: Boolean)(
@@ -826,7 +814,6 @@ object GpuShuffledAsymmetricHashJoinExec {
         rawRightIter: Iterator[ColumnarBatch],
         condition: Option[Expression],
         gpuBatchSizeBytes: Long,
-        allowSorted: Boolean,
         metrics: Map[String, GpuMetric]): JoinInfo = {
       val (probeBuildIter, rawBuildIter, probeStreamIter, rawStreamIter, buildSide) =
         joinType match {
@@ -853,7 +840,7 @@ object GpuShuffledAsymmetricHashJoinExec {
       if (buildRows <= Int.MaxValue && buildSize <= gpuBatchSizeBytes) {
         getJoinInfoSmallBuildSide(joinType, buildSide, condition, exprs,
           baseBuildIter, buildRows, buildSize,
-          rawStreamIter, gpuBatchSizeBytes, allowSorted, metrics)
+          rawStreamIter, gpuBatchSizeBytes, metrics)
       } else {
         // The natural build side does not fit in a single batch, so use the stream side
         // as the hash table if we can fit it in a single batch.
@@ -891,7 +878,6 @@ object GpuShuffledAsymmetricHashJoinExec {
         buildSize: Long,
         rawStreamIter: Iterator[ColumnarBatch],
         gpuBatchSizeBytes: Long,
-        allowSorted: Boolean,
         metrics: Map[String, GpuMetric]) = {
       val streamIter = setupForJoin(mutable.Queue.empty, rawStreamIter, exprs.streamTypes,
         gpuBatchSizeBytes, metrics)
@@ -907,8 +893,7 @@ object GpuShuffledAsymmetricHashJoinExec {
       } else {
         val buildBatch = getAsSingleBuildBatch(baseBuildIter, exprs, metrics)
         val buildIter = new SingleGpuColumnarBatchIterator(buildBatch)
-        val buildStats = JoinBuildSideStats.fromBatch(buildBatch, allowSorted,
-          exprs.boundBuildKeys)
+        val buildStats = JoinBuildSideStats.fromBatch(buildBatch, exprs.boundBuildKeys)
         if (buildStats.streamMagnificationFactor < magnificationThreshold) {
           metrics(BUILD_DATA_SIZE).set(buildSize)
           JoinInfo(joinType, buildSide, buildIter, buildSize, Some(buildStats), streamIter,
@@ -939,8 +924,7 @@ object GpuShuffledAsymmetricHashJoinExec {
                 val streamBatch = streamBatchIter.next()
                 val singleStreamIter = new SingleGpuColumnarBatchIterator(streamBatch)
                 assert(!streamBatchIter.hasNext, "stream side not exhausted")
-                val streamStats = JoinBuildSideStats.fromBatch(streamBatch, allowSorted,
-                  exprs.boundStreamKeys)
+                val streamStats = JoinBuildSideStats.fromBatch(streamBatch, exprs.boundStreamKeys)
                 if (buildStats.streamMagnificationFactor <
                     streamStats.streamMagnificationFactor) {
                   metrics(BUILD_DATA_SIZE).set(buildSize)
@@ -1106,7 +1090,6 @@ case class GpuShuffledAsymmetricHashJoinExec(
                                               override val right: SparkPlan,
                                               override val isGpuShuffle: Boolean,
                                               override val gpuBatchSizeBytes: Long,
-                                              override val isSMJOptAllowed: Boolean,
                                               override val partitionNumAmplification: Double,
                                               override val readOption: CoalesceReadOption,
                                               override val isSkewJoin: Boolean)(
@@ -1607,24 +1590,23 @@ class StreamSidePartitioner(
  * are processed against the build side join groups. Repeat until the stream side is exhausted.
  *
  * @param info join information from input probing phase
- * @param gpuBatchSizeBytes target GPU batch size
+ * @param joinOptions options for the join operation including target size and strategy
  * @param partitionNumAmplification boost number of partitions for build size by this times
  * @param metrics metrics to update
  */
 class BigSizedJoinIterator(
     info: JoinInfo,
-    gpuBatchSizeBytes: Long,
-    allowSorted: Boolean,
+    joinOptions: JoinOptions,
     partitionNumAmplification: Double,
     metrics: Map[String, GpuMetric])
   extends Iterator[ColumnarBatch] with TaskAutoCloseableResource {
 
   private val buildPartitioner = {
     val numPartitions =
-      (((info.buildSize / gpuBatchSizeBytes) + 1) * partitionNumAmplification).toLong
+      (((info.buildSize / joinOptions.targetSize) + 1) * partitionNumAmplification).toLong
     require(numPartitions <= Int.MaxValue, "too many build partitions")
     new BuildSidePartitioner(info.joinType, numPartitions.toInt, info.buildIter,
-      info.exprs.buildTypes, info.exprs.boundBuildKeys, gpuBatchSizeBytes, metrics)
+      info.exprs.buildTypes, info.exprs.boundBuildKeys, joinOptions.targetSize, metrics)
   }
   use(buildPartitioner)
 
@@ -1727,8 +1709,8 @@ class BigSizedJoinIterator(
             subIter = Some(new HashOuterJoinIterator(info.joinType,
               buildPartitioner.getBuildBatch(currentJoinGroupIndex), info.exprs.boundBuildKeys,
               info.buildStats, tracker, Iterator.empty, info.exprs.boundStreamKeys,
-              info.exprs.streamOutput, None, 0, gpuBatchSizeBytes, allowSorted, info.buildSide,
-              info.exprs.compareNullsEqual, opTime, joinTime))
+              info.exprs.streamOutput, None, 0, joinOptions,
+              info.buildSide, info.exprs.compareNullsEqual, opTime, joinTime))
           }
         } else {
           isExhausted = true
@@ -1773,11 +1755,11 @@ class BigSizedJoinIterator(
       new HashJoinStreamSideIterator(info.joinType,
         builtBatch, info.exprs.boundBuildKeys, info.buildStats, buildRowTracker,
         lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput, compiledCondition,
-        gpuBatchSizeBytes, allowSorted, info.buildSide, info.exprs.compareNullsEqual,
-        opTime, joinTime)
+        joinOptions, info.buildSide,
+        info.exprs.compareNullsEqual, opTime, joinTime)
     } else {
       GpuShuffledSizedHashJoinExec.createJoinIterator(info, builtBatch, lazyStream,
-        gpuBatchSizeBytes, allowSorted, opTime, joinTime)
+        joinOptions, opTime, joinTime)
     }
   }
 }

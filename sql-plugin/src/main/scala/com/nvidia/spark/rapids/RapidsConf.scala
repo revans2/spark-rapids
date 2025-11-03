@@ -689,14 +689,17 @@ val GPU_COREDUMP_PIPE_PATTERN = conf("spark.rapids.gpu.coreDump.pipePattern")
     .booleanConf
     .createWithDefault(false)
 
-  val ALLOW_SORT_MERGE_JOIN_OPTIMIZATION =
-    conf("spark.rapids.sql.allowSortMergeJoinInternally")
-      .doc("Internally RAPIDS can use a hash based join or a sort based join. " +
-        "When this is true the sort join can be used. When this is false only the " +
-        "hash based join will be used.")
-      .internal()
-      .booleanConf
-      .createWithDefault(true)
+  val JOIN_STRATEGY = conf("spark.rapids.sql.join.strategy")
+    .doc("Specifies the join strategy to use for GPU joins. Options are: " +
+      "AUTO (default) - automatically determine the best join strategy using heuristics; " +
+      "INNER_HASH_WITH_POST - use inner hash join with post-processing to convert to other " +
+      "join types and apply join filtering; " +
+      "HASH_ONLY - use traditional hash join only.")
+    .internal()
+    .stringConf
+    .transform(_.toUpperCase(java.util.Locale.ROOT))
+    .checkValues(org.apache.spark.sql.rapids.execution.JoinStrategy.values.map(_.toString))
+    .createWithDefault(org.apache.spark.sql.rapids.execution.JoinStrategy.AUTO.toString)
 
   val SHUFFLED_HASH_JOIN_OPTIMIZE_SHUFFLE =
     conf("spark.rapids.sql.shuffledHashJoin.optimizeShuffle")
@@ -2964,6 +2967,20 @@ val SHUFFLE_COMPRESSION_LZ4_CHUNK_SIZE = conf("spark.rapids.shuffle.compression.
       }
     }
   }
+
+  /**
+   * Get join options based on the configuration.
+   * @param conf the SQL configuration
+   * @param targetSize the target batch size in bytes to use for the join
+   * @return JoinOptions configured based on the join strategy and targetSize
+   */
+  def getJoinOptions(
+      conf: SQLConf,
+      targetSize: Long): org.apache.spark.sql.rapids.execution.JoinOptions = {
+    val strategyStr = JOIN_STRATEGY.get(conf)
+    val strategy = org.apache.spark.sql.rapids.execution.JoinStrategy.withName(strategyStr)
+    org.apache.spark.sql.rapids.execution.JoinOptions(strategy, targetSize)
+  }
 }
 
 class RapidsConf(conf: Map[String, String]) extends Logging {
@@ -3045,7 +3062,16 @@ class RapidsConf(conf: Map[String, String]) extends Logging {
 
   lazy val bucketJoinIoPrefetch: Boolean = get(BUCKET_JOIN_IO_PREFETCH)
 
-  lazy val isOptimizationAllowed:Boolean = get(ALLOW_SORT_MERGE_JOIN_OPTIMIZATION)
+  /**
+   * Get join options based on the current configuration.
+   * @param targetSize the target batch size in bytes to use for the join
+   * @return JoinOptions configured based on the join strategy and targetSize
+   */
+  def getJoinOptions(targetSize: Long): org.apache.spark.sql.rapids.execution.JoinOptions = {
+    val strategyStr = get(JOIN_STRATEGY)
+    val strategy = org.apache.spark.sql.rapids.execution.JoinStrategy.withName(strategyStr)
+    org.apache.spark.sql.rapids.execution.JoinOptions(strategy, targetSize)
+  }
 
   lazy val sizedJoinPartitionAmplification: Double = get(SIZED_JOIN_PARTITION_AMPLIFICATION)
 

@@ -564,8 +564,7 @@ trait GpuSubPartitionHashJoin extends Logging { self: GpuHashJoin =>
   def doJoinBySubPartition(
       builtIter: Iterator[ColumnarBatch],
       streamIter: Iterator[ColumnarBatch],
-      targetSize: Long,
-      allowSorted: Boolean,
+      joinOptions: JoinOptions,
       numPartitions: Int,
       numOutputRows: GpuMetric,
       numOutputBatches: GpuMetric,
@@ -577,7 +576,7 @@ trait GpuSubPartitionHashJoin extends Logging { self: GpuHashJoin =>
       s"in task ${TaskContext.get().taskAttemptId()}")
 
     new BaseSubHashJoinIterator(builtIter, boundBuildKeys, streamIter,
-        boundStreamKeys, numPartitions, targetSize, opTime) {
+        boundStreamKeys, numPartitions, joinOptions.targetSize, opTime) {
 
       private[this] def canOptimizeOut(pair: PartitionPair): Boolean = {
         val (build, stream) = pair.get
@@ -606,7 +605,7 @@ trait GpuSubPartitionHashJoin extends Logging { self: GpuHashJoin =>
             }
           }
           // Leverage the original join iterators
-          val joinIter = doJoin(buildCb, streamIter, targetSize, allowSorted,
+          val joinIter = doJoin(buildCb, streamIter, joinOptions,
             numOutputRows, numOutputBatches, opTime, joinTime)
           Some(joinIter)
         }

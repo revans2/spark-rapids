@@ -15,13 +15,13 @@
  */
 package org.apache.spark.sql.rapids.execution
 
-import ai.rapids.cudf.{ColumnView, DType, GatherMap, GroupByAggregation, NullEquality, NullPolicy, NvtxColor, OutOfBoundsPolicy, Scalar, Table}
+import ai.rapids.cudf.{ColumnView, DType, GatherMap, NullEquality, NvtxColor, OutOfBoundsPolicy, Scalar, Table}
 import ai.rapids.cudf.ast.CompiledExpression
 import com.nvidia.spark.rapids._
 import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
 import com.nvidia.spark.rapids.RapidsPluginImplicits.AutoCloseableProducingSeq
 import com.nvidia.spark.rapids.RmmRapidsRetryIterator.{withRestoreOnRetry, withRetryNoSplit}
-import com.nvidia.spark.rapids.jni.{GpuOOM, MixedSortMergeJoin, SortMergeJoin}
+import com.nvidia.spark.rapids.jni.{GpuOOM, JoinPrimitives}
 import com.nvidia.spark.rapids.shims.ShimBinaryExecNode
 
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, NamedExpression}
@@ -291,28 +291,44 @@ object GpuHashJoin {
 }
 
 /**
+ * Enumeration of join strategies that can be used for join operations.
+ */
+object JoinStrategy extends Enumeration {
+  type JoinStrategy = Value
+  /**
+   * AUTO: Use heuristics to automatically determine the best join strategy.
+   * This is the default and will evolve over time as we add more heuristics.
+   */
+  val AUTO = Value("AUTO")
+  /**
+   * INNER_HASH_WITH_POST: Force inner hash join with post-processing to convert to other
+   * join types and apply join filtering. This performs an inner hash join first, then
+   * applies post-processing transformations to produce the desired join type (e.g., left outer,
+   * semi, anti) and applies any conditional filters.
+   */
+  val INNER_HASH_WITH_POST = Value("INNER_HASH_WITH_POST")
+  /**
+   * HASH_ONLY: Force the use of traditional hash join only.
+   */
+  val HASH_ONLY = Value("HASH_ONLY")
+}
+
+/**
+ * Options to control join behavior.
+ * @param strategy the join strategy to use (AUTO, INNER_HASH_WITH_POST, or HASH_ONLY)
+ * @param targetSize the target batch size in bytes for the join operation
+ */
+case class JoinOptions(strategy: JoinStrategy.JoinStrategy, targetSize: Long)
+
+/**
  * Class to hold statistics on the build-side batch of a hash join.
  * @param streamMagnificationFactor estimated magnification of a stream batch during join
  * @param isDistinct true if all build-side join keys are distinct
- * @param sortNeeded true if a sort merge join would be better than a hash based join.
  */
-case class JoinBuildSideStats(streamMagnificationFactor: Double, isDistinct: Boolean,
-                              sortNeeded: Boolean)
+case class JoinBuildSideStats(streamMagnificationFactor: Double, isDistinct: Boolean)
 
 object JoinBuildSideStats {
-  def isSortMergeJoinSupported(boundBuildKeys: Seq[GpuExpression]): Boolean = {
-    // We cannot support sort merge join in all cases
-    // https://github.com/rapidsai/cudf/issues/20317
-    boundBuildKeys.forall { expr =>
-      expr.dataType match {
-        // Just being extra careful for now and not going to support any nested types
-        case _: StructType | _: ArrayType | _: MapType => false
-        case _ => true
-      }
-    }
-  }
-
-  def fromBatch(batch: ColumnarBatch, isSMLOptAllowed: Boolean,
+  def fromBatch(batch: ColumnarBatch,
                 boundBuildKeys: Seq[GpuExpression]): JoinBuildSideStats = {
     // This is okay because the build keys must be deterministic
     withResource(GpuProjectExec.project(batch, boundBuildKeys)) { buildKeys =>
@@ -320,33 +336,10 @@ object JoinBuildSideStats {
       // will be for each input row on the stream side. This does not take into account
       // the join type, data skew or even if the keys actually match.
       withResource(GpuColumnVector.from(buildKeys)) { keysTable =>
-        if (isSMLOptAllowed && isSortMergeJoinSupported(boundBuildKeys)) {
-          val indices = 0 until keysTable.getNumberOfColumns
-          val counts = withResource(keysTable.groupBy(indices: _*).aggregate(
-            GroupByAggregation.count(NullPolicy.INCLUDE).onColumn(0))) { everything =>
-            everything.getColumn(everything.getNumberOfColumns() - 1).incRefCount()
-          }
-          withResource(counts) { _ =>
-            val builtCount = counts.getRowCount
-            val maxSize = withResource(counts.max()) { maxCount =>
-              if (maxCount.isValid) {
-                maxCount.getInt
-              } else {
-                0
-              }
-            }
-            val isDistinct = builtCount == buildKeys.numRows()
-            val sortNeeded = maxSize >= 10000
-            val magnificationFactor = buildKeys.numRows().toDouble / builtCount
-            JoinBuildSideStats(magnificationFactor, isDistinct, sortNeeded)
-          }
-        } else {
-          val builtCount = keysTable.distinctCount(NullEquality.EQUAL)
-          val isDistinct = builtCount == buildKeys.numRows()
-          val
-          magnificationFactor = buildKeys.numRows().toDouble / builtCount
-          JoinBuildSideStats(magnificationFactor, isDistinct, sortNeeded = false)
-        }
+        val builtCount = keysTable.distinctCount(NullEquality.EQUAL)
+        val isDistinct = builtCount == buildKeys.numRows()
+        val magnificationFactor = buildKeys.numRows().toDouble / builtCount
+        JoinBuildSideStats(magnificationFactor, isDistinct)
       }
     }
   }
@@ -359,8 +352,7 @@ abstract class BaseHashJoinIterator(
     stream: Iterator[LazySpillableColumnarBatch],
     boundStreamKeys: Seq[GpuExpression],
     streamAttributes: Seq[Attribute],
-    targetSize: Long,
-    isSMJOptAllowed: Boolean,
+    joinOptions: JoinOptions,
     joinType: JoinType,
     buildSide: GpuBuildSide,
     opTime: GpuMetric,
@@ -370,7 +362,7 @@ abstract class BaseHashJoinIterator(
       stream,
       streamAttributes,
       built,
-      targetSize,
+      joinOptions.targetSize,
       opTime = opTime,
       joinTime = joinTime) {
   // We can cache this because the build side is not changing
@@ -380,13 +372,12 @@ abstract class BaseHashJoinIterator(
         built.checkpoint()
         withRetryNoSplit {
           withRestoreOnRetry(built) {
-            JoinBuildSideStats.fromBatch(built.getBatch, isSMJOptAllowed, boundBuiltKeys)
+            JoinBuildSideStats.fromBatch(built.getBatch, boundBuiltKeys)
           }
         }
       case _ =>
         // existence joins don't change size
-        // TODO not sure if sort is needed or not???
-        JoinBuildSideStats(1.0, isDistinct = false, sortNeeded = false)
+        JoinBuildSideStats(1.0, isDistinct = false)
     }
   }
 
@@ -501,7 +492,7 @@ abstract class BaseHashJoinIterator(
       // We want the gather map size to be around the target size. There are two gather maps
       // that are made up of ints, so estimate how many rows per batch on the stream side
       // will produce the desired gather map size.
-      val approximateStreamRowCount = ((targetSize.toDouble / 2) /
+      val approximateStreamRowCount = ((joinOptions.targetSize.toDouble / 2) /
           DType.INT32.getSizeInBytes) / buildStats.streamMagnificationFactor
       val estimatedRowsPerStreamBatch = Math.min(Int.MaxValue, approximateStreamRowCount)
       Math.ceil(cb.numRows / estimatedRowsPerStreamBatch).toInt
@@ -519,8 +510,7 @@ class HashJoinIterator(
     private val stream: Iterator[LazySpillableColumnarBatch],
     val boundStreamKeys: Seq[GpuExpression],
     val streamAttributes: Seq[Attribute],
-    val targetSize: Long,
-    val isSMJOptAllowed: Boolean,
+    joinOptions: JoinOptions,
     val joinType: JoinType,
     val buildSide: GpuBuildSide,
     val compareNullsEqual: Boolean, // This is a workaround to how cudf support joins for structs
@@ -533,8 +523,7 @@ class HashJoinIterator(
       stream,
       boundStreamKeys,
       streamAttributes,
-      targetSize,
-      isSMJOptAllowed,
+      joinOptions,
       joinType,
       buildSide,
       opTime = opTime,
@@ -550,41 +539,118 @@ class HashJoinIterator(
         (leftKeys.getRowCount == 0 || rightKeys.getRowCount == 0)) {
         None
       } else {
-        val maps = joinType match {
-          case LeftOuter if buildStats.isDistinct =>
-            Array(leftKeys.leftDistinctJoinGatherMap(rightKeys, compareNullsEqual))
-          case LeftOuter if buildStats.sortNeeded =>
-            SortMergeJoin.leftJoin(leftKeys, rightKeys, false, false, compareNullsEqual)
-          case LeftOuter => leftKeys.leftJoinGatherMaps(rightKeys, compareNullsEqual)
-          case RightOuter if buildStats.isDistinct =>
-            Array(rightKeys.leftDistinctJoinGatherMap(leftKeys, compareNullsEqual))
-          case RightOuter if buildStats.sortNeeded =>
-            SortMergeJoin.leftJoin(rightKeys, leftKeys, false, false, compareNullsEqual).reverse
-          case RightOuter =>
-            // Reverse the output of the join, because we expect the right gather map to
-            // always be on the right
-            rightKeys.leftJoinGatherMaps(leftKeys, compareNullsEqual).reverse
-          case _: InnerLike if buildStats.isDistinct =>
-            if (buildSide == GpuBuildRight) {
-              leftKeys.innerDistinctJoinGatherMaps(rightKeys, compareNullsEqual)
-            } else {
-              rightKeys.innerDistinctJoinGatherMaps(leftKeys, compareNullsEqual).reverse
-            }
-          case _: InnerLike if buildStats.sortNeeded =>
-            SortMergeJoin.innerJoin(leftKeys, rightKeys, false, false, compareNullsEqual)
-          case _: InnerLike => leftKeys.innerJoinGatherMaps(rightKeys, compareNullsEqual)
-          case LeftSemi if buildStats.sortNeeded =>
-            Array(SortMergeJoin.leftSemiJoin(leftKeys, rightKeys, false, false, compareNullsEqual))
-          case LeftSemi => Array(leftKeys.leftSemiJoinGatherMap(rightKeys, compareNullsEqual))
-          case LeftAnti if buildStats.sortNeeded =>
-            Array(SortMergeJoin.leftAntiJoin(leftKeys, rightKeys, false, false, compareNullsEqual))
-          case LeftAnti => Array(leftKeys.leftAntiJoinGatherMap(rightKeys, compareNullsEqual))
-          case _ =>
-            throw new NotImplementedError(s"Joint Type ${joinType.getClass} is not currently" +
-              s" supported")
+        // Join strategy dispatching:
+        // PRIORITY 1: Distinct join optimization (overrides all strategies)
+        // PRIORITY 2: Strategy-based dispatching for non-distinct joins
+        val maps = if (buildStats.isDistinct) {
+          // Distinct join optimizations (highest priority, overrides strategy)
+          joinType match {
+            case LeftOuter =>
+              Array(leftKeys.leftDistinctJoinGatherMap(rightKeys, compareNullsEqual))
+            case RightOuter =>
+              Array(rightKeys.leftDistinctJoinGatherMap(leftKeys, compareNullsEqual))
+            case _: InnerLike =>
+              if (buildSide == GpuBuildRight) {
+                leftKeys.innerDistinctJoinGatherMaps(rightKeys, compareNullsEqual)
+              } else {
+                rightKeys.innerDistinctJoinGatherMaps(leftKeys, compareNullsEqual).reverse
+              }
+            case _ =>
+              // Fall through to strategy-based dispatching for non-outer joins
+              computeNonDistinctJoin(leftKeys, rightKeys, leftData, rightData)
+          }
+        } else {
+          // Non-distinct joins: use strategy-based dispatching
+          computeNonDistinctJoin(leftKeys, rightKeys, leftData, rightData)
         }
         makeGatherer(maps, leftData, rightData, joinType)
       }
+    }
+  }
+
+  private def computeNonDistinctJoin(
+      leftKeys: Table,
+      rightKeys: Table,
+      leftData: LazySpillableColumnarBatch,
+      rightData: LazySpillableColumnarBatch): Array[GatherMap] = {
+    joinOptions.strategy match {
+      case JoinStrategy.INNER_HASH_WITH_POST =>
+        // Use composable JNI APIs: inner join -> convert to target join type
+        computeNonCondInnerHashWithPost(leftKeys, rightKeys)
+      case _ =>
+        // Use existing hash join methods (for AUTO and HASH_ONLY strategies)
+        computeWithHashJoin(leftKeys, rightKeys)
+    }
+  }
+
+  private def computeNonCondInnerHashWithPost(
+      leftKeys: Table,
+      rightKeys: Table): Array[GatherMap] = {
+    // Perform inner hash join with smaller table on the left for better performance
+    val leftRowCount = leftKeys.getRowCount
+    val rightRowCount = rightKeys.getRowCount
+    
+    // innerMaps(0) is always the left table and innerMaps(1) is always the right table
+    val innerMaps = if (rightRowCount < leftRowCount) {
+      JoinPrimitives.hashInnerJoin(rightKeys, leftKeys, compareNullsEqual).reverse
+    } else {
+      JoinPrimitives.hashInnerJoin(leftKeys, rightKeys, compareNullsEqual)
+    }
+
+    try {      
+      joinType match {
+        case _: InnerLike =>
+          // Already have inner join maps
+          Array(innerMaps(0), innerMaps(1))
+        case LeftOuter =>
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            innerMaps(0), innerMaps(1), leftKeys.getRowCount, rightKeys.getRowCount)
+          innerMaps.foreach(_.close())
+          outerMaps
+        case RightOuter =>
+          // Right outer is left outer with sides swapped
+          val rightOuterMaps = JoinPrimitives.makeLeftOuter(
+            innerMaps(1), innerMaps(0), rightKeys.getRowCount, leftKeys.getRowCount)
+          innerMaps.foreach(_.close())
+          Array(rightOuterMaps(1), rightOuterMaps(0))
+        case LeftSemi =>
+          val semiMap = JoinPrimitives.makeSemi(innerMaps(0), leftKeys.getRowCount)
+          innerMaps.foreach(_.close())
+          Array(semiMap)
+        case LeftAnti =>
+          val semiMap = JoinPrimitives.makeSemi(innerMaps(0), leftKeys.getRowCount)
+          val antiMap = withResource(semiMap) { semi =>
+            JoinPrimitives.makeAnti(semi, leftKeys.getRowCount)
+          }
+          innerMaps.foreach(_.close())
+          Array(antiMap)
+        case _ =>
+          innerMaps.foreach(_.close())
+          throw new NotImplementedError(
+            s"Join $joinType with INNER_HASH_WITH_POST strategy is not currently supported")
+      }
+    } catch {
+      case e: Throwable =>
+        innerMaps.foreach(_.close())
+        throw e
+    }
+  }
+
+  private def computeWithHashJoin(
+      leftKeys: Table,
+      rightKeys: Table): Array[GatherMap] = {
+    joinType match {
+      case LeftOuter => leftKeys.leftJoinGatherMaps(rightKeys, compareNullsEqual)
+      case RightOuter =>
+        // Reverse the output of the join, because we expect the right gather map to
+        // always be on the right
+        rightKeys.leftJoinGatherMaps(leftKeys, compareNullsEqual).reverse
+      case _: InnerLike => leftKeys.innerJoinGatherMaps(rightKeys, compareNullsEqual)
+      case LeftSemi => Array(leftKeys.leftSemiJoinGatherMap(rightKeys, compareNullsEqual))
+      case LeftAnti => Array(leftKeys.leftAntiJoinGatherMap(rightKeys, compareNullsEqual))
+      case _ =>
+        throw new NotImplementedError(s"Joint Type ${joinType.getClass} is not currently" +
+          s" supported")
     }
   }
 }
@@ -601,8 +667,7 @@ class ConditionalHashJoinIterator(
     boundStreamKeys: Seq[GpuExpression],
     streamAttributes: Seq[Attribute],
     compiledCondition: CompiledExpression,
-    targetSize: Long,
-    allowSorted: Boolean,
+    joinOptions: JoinOptions,
     joinType: JoinType,
     buildSide: GpuBuildSide,
     compareNullsEqual: Boolean, // This is a workaround to how cudf support joins for structs
@@ -615,8 +680,7 @@ class ConditionalHashJoinIterator(
       stream,
       boundStreamKeys,
       streamAttributes,
-      targetSize,
-      allowSorted,
+      joinOptions,
       joinType,
       buildSide,
       opTime = opTime,
@@ -630,58 +694,136 @@ class ConditionalHashJoinIterator(
     withResource(new NvtxWithMetrics("hash join gather map", NvtxColor.ORANGE, joinTime)) { _ =>
       withResource(GpuColumnVector.from(leftData.getBatch)) { leftTable =>
         withResource(GpuColumnVector.from(rightData.getBatch)) { rightTable =>
-          val maps = joinType match {
-            case _: InnerLike if buildStats.sortNeeded && buildSide == GpuBuildRight =>
-              MixedSortMergeJoin.innerJoin(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, false, false, compareNullsEqual)
-            case _: InnerLike if buildSide == GpuBuildRight =>
-              Table.mixedInnerJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, nullEquality)
-            case _: InnerLike if buildStats.sortNeeded && buildSide == GpuBuildLeft =>
-              MixedSortMergeJoin.innerJoin(rightKeys, leftKeys, rightTable, leftTable,
-                compiledCondition, false, false, compareNullsEqual).reverse
-            case _: InnerLike if buildSide == GpuBuildLeft =>
-              // Even though it's an inner join, we need to switch the join order since the
-              // condition has been compiled to expect the build side on the left and the stream
-              // side on the right.
-              // Reverse the output of the join, because we expect the right gather map to
-              // always be on the right.
-              Table.mixedInnerJoinGatherMaps(rightKeys, leftKeys, rightTable, leftTable,
-                compiledCondition, nullEquality).reverse
-            case LeftOuter if buildStats.sortNeeded =>
-              MixedSortMergeJoin.leftJoin(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, false, false, compareNullsEqual)
-            case LeftOuter =>
-              Table.mixedLeftJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, nullEquality)
-            case RightOuter if buildStats.sortNeeded =>
-              // Reverse the output of the join, because we expect the right gather map to
-              // always be on the right
-              MixedSortMergeJoin.leftJoin(rightKeys, leftKeys, rightTable, leftTable,
-                compiledCondition, false, false, compareNullsEqual).reverse
-            case RightOuter =>
-              // Reverse the output of the join, because we expect the right gather map to
-              // always be on the right
-              Table.mixedLeftJoinGatherMaps(rightKeys, leftKeys, rightTable, leftTable,
-                compiledCondition, nullEquality).reverse
-            case LeftSemi if buildStats.sortNeeded =>
-              Array(MixedSortMergeJoin.leftSemiJoin(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, false, false, compareNullsEqual))
-            case LeftSemi =>
-              Array(Table.mixedLeftSemiJoinGatherMap(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, nullEquality))
-            case LeftAnti if buildStats.sortNeeded =>
-              Array(MixedSortMergeJoin.leftAntiJoin(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, false, false, compareNullsEqual))
-            case LeftAnti =>
-              Array(Table.mixedLeftAntiJoinGatherMap(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, nullEquality))
+          // Join strategy dispatching for conditional joins:
+          val maps = joinOptions.strategy match {
+            case JoinStrategy.INNER_HASH_WITH_POST =>
+              // Use composable JNI APIs: inner join -> filter -> convert to target join type
+              computeInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
             case _ =>
-              throw new NotImplementedError(s"Join $joinType $buildSide is not currently supported")
+              // Use existing mixed join methods (for AUTO and HASH_ONLY strategies)
+              computeWithMixedJoin(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
           }
           makeGatherer(maps, leftData, rightData, joinType)
         }
       }
+    }
+  }
+
+  private def computeInnerHashWithPost(
+      leftKeys: Table,
+      rightKeys: Table,
+      leftTable: Table,
+      rightTable: Table,
+      nullEquality: NullEquality): Array[GatherMap] = {
+    // Perform inner hash join with smaller table on the left for better performance
+    val leftRowCount = leftKeys.getRowCount
+    val rightRowCount = rightKeys.getRowCount
+
+    // innerMaps(0) is always the left table and innerMaps(1) is always the right table
+    val innerMaps = if (rightRowCount < leftRowCount) {
+      JoinPrimitives.hashInnerJoin(rightKeys, leftKeys, nullEquality == NullEquality.EQUAL).reverse
+    } else {
+      JoinPrimitives.hashInnerJoin(leftKeys, rightKeys, nullEquality == NullEquality.EQUAL)
+    }
+
+    // Filter by AST condition
+    val filteredMaps = try {
+      // For the AST to work properly we have to match the rules that the condition was compiled for
+      // InnerLike && GpuBuildRight | LeftOuter | LeftSemi | LeftAnti =>
+      //   LEFT, RIGHT
+      // InnerLike && GpuBuildLeft | RightOuter=>
+      //   RIGHT, LEFT
+      val conditionCompiledRightLeft = joinType match {
+        case _: InnerLike if buildSide == GpuBuildLeft => true
+        case RightOuter => true
+        case _ => false
+      }
+      if (conditionCompiledRightLeft) {
+        JoinPrimitives.filterGatherMapsByAST(
+          innerMaps(1), innerMaps(0), rightTable, leftTable, compiledCondition).reverse
+      } else {
+        JoinPrimitives.filterGatherMapsByAST(
+          innerMaps(0), innerMaps(1), leftTable, rightTable, compiledCondition)
+      }
+    } finally {
+      // Close innerMaps immediately to reduce peak memory usage
+      innerMaps.foreach(_.close())
+    }
+
+    try {
+      // Convert to target join type
+      joinType match {
+        case _: InnerLike =>
+          // Already have filtered inner join maps
+          Array(filteredMaps(0), filteredMaps(1))
+        case LeftOuter =>
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            filteredMaps(0), filteredMaps(1), leftRowCount, rightRowCount)
+          filteredMaps.foreach(_.close())
+          outerMaps
+        case RightOuter =>
+          // Right outer is left outer with sides swapped
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            filteredMaps(1), filteredMaps(0), rightRowCount, leftRowCount).reverse
+          filteredMaps.foreach(_.close())
+          outerMaps
+        case LeftSemi =>
+          val semiMap = JoinPrimitives.makeSemi(filteredMaps(0), leftRowCount)
+          filteredMaps.foreach(_.close())
+          Array(semiMap)
+        case LeftAnti =>
+          val semiMap = JoinPrimitives.makeSemi(filteredMaps(0), leftRowCount)
+          val antiMap = withResource(semiMap) { semi =>
+            JoinPrimitives.makeAnti(semi, leftRowCount)
+          }
+          filteredMaps.foreach(_.close())
+          Array(antiMap)
+        case _ =>
+          filteredMaps.foreach(_.close())
+          throw new NotImplementedError(
+            s"Join $joinType with INNER_HASH_WITH_POST strategy is not currently supported")
+      }
+    } catch {
+      case e: Throwable =>
+        filteredMaps.foreach(_.close())
+        throw e
+    }
+  }
+
+  private def computeWithMixedJoin(
+      leftKeys: Table,
+      rightKeys: Table,
+      leftTable: Table,
+      rightTable: Table,
+      nullEquality: NullEquality): Array[GatherMap] = {
+    joinType match {
+      case _: InnerLike if buildSide == GpuBuildRight =>
+        Table.mixedInnerJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
+          compiledCondition, nullEquality)
+      case _: InnerLike if buildSide == GpuBuildLeft =>
+        // Even though it's an inner join, we need to switch the join order since the
+        // condition has been compiled to expect the build side on the left and the stream
+        // side on the right.
+        // Reverse the output of the join, because we expect the right gather map to
+        // always be on the right.
+        Table.mixedInnerJoinGatherMaps(rightKeys, leftKeys, rightTable, leftTable,
+          compiledCondition, nullEquality).reverse
+      case LeftOuter =>
+        Table.mixedLeftJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
+          compiledCondition, nullEquality)
+      case RightOuter =>
+        // Reverse the output of the join, because we expect the right gather map to
+        // always be on the right
+        Table.mixedLeftJoinGatherMaps(rightKeys, leftKeys, rightTable, leftTable,
+          compiledCondition, nullEquality).reverse
+      case LeftSemi =>
+        Array(Table.mixedLeftSemiJoinGatherMap(leftKeys, rightKeys, leftTable, rightTable,
+          compiledCondition, nullEquality))
+      case LeftAnti =>
+        Array(Table.mixedLeftAntiJoinGatherMap(leftKeys, rightKeys, leftTable, rightTable,
+          compiledCondition, nullEquality))
+      case _ =>
+        throw new NotImplementedError(s"Join $joinType $buildSide is not currently supported")
     }
   }
 
@@ -728,8 +870,7 @@ class HashJoinStreamSideIterator(
     boundStreamKeys: Seq[GpuExpression],
     streamAttributes: Seq[Attribute],
     compiledCondition: Option[CompiledExpression],
-    targetSize: Long,
-    allowSorted: Boolean,
+    joinOptions: JoinOptions,
     buildSide: GpuBuildSide,
     compareNullsEqual: Boolean, // This is a workaround to how cudf support joins for structs
     opTime: GpuMetric,
@@ -741,8 +882,7 @@ class HashJoinStreamSideIterator(
       stream,
       boundStreamKeys,
       streamAttributes,
-      targetSize,
-      allowSorted,
+      joinOptions,
       joinType,
       buildSide,
       opTime = opTime,
@@ -769,6 +909,59 @@ class HashJoinStreamSideIterator(
 
   private def unconditionalJoinGatherMaps(
       leftKeys: Table, rightKeys: Table): Array[GatherMap] = {
+    joinOptions.strategy match {
+      case JoinStrategy.INNER_HASH_WITH_POST =>
+        // Use composable JNI APIs
+        computeUnconditionalInnerHashWithPost(leftKeys, rightKeys)
+      case _ =>
+        // Use existing hash join methods
+        computeUnconditionalHashJoin(leftKeys, rightKeys)
+    }
+  }
+
+  private def computeUnconditionalInnerHashWithPost(
+      leftKeys: Table, rightKeys: Table): Array[GatherMap] = {
+    // Perform inner hash join with smaller table on the left for better performance
+    val leftRowCount = leftKeys.getRowCount
+    val rightRowCount = rightKeys.getRowCount
+    
+    // innerMaps(0) is always the left table and innerMaps(1) is always the right table
+    val innerMaps = if (rightRowCount < leftRowCount) {
+      JoinPrimitives.hashInnerJoin(rightKeys, leftKeys, compareNullsEqual).reverse
+    } else {
+      JoinPrimitives.hashInnerJoin(leftKeys, rightKeys, compareNullsEqual)
+    }
+
+    try {
+      // Convert to target sub-join type
+      subJoinType match {
+        case Inner =>
+          // Already have inner join maps
+          Array(innerMaps(0), innerMaps(1))
+        case LeftOuter =>
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            innerMaps(0), innerMaps(1), leftRowCount, rightRowCount)
+          innerMaps.foreach(_.close())
+          outerMaps
+        case RightOuter =>
+          // Right outer is left outer with sides swapped
+          val rightOuterMaps = JoinPrimitives.makeLeftOuter(
+            innerMaps(1), innerMaps(0), rightRowCount, leftRowCount)
+          innerMaps.foreach(_.close())
+          Array(rightOuterMaps(1), rightOuterMaps(0))
+        case t =>
+          innerMaps.foreach(_.close())
+          throw new IllegalStateException(s"unsupported join type: $t")
+      }
+    } catch {
+      case e: Throwable =>
+        innerMaps.foreach(_.close())
+        throw e
+    }
+  }
+
+  private def computeUnconditionalHashJoin(
+      leftKeys: Table, rightKeys: Table): Array[GatherMap] = {
     subJoinType match {
       case LeftOuter =>
         leftKeys.leftJoinGatherMaps(rightKeys, compareNullsEqual)
@@ -791,22 +984,103 @@ class HashJoinStreamSideIterator(
       compiledCondition: CompiledExpression): Array[GatherMap] = {
     withResource(GpuColumnVector.from(leftData.getBatch)) { leftTable =>
       withResource(GpuColumnVector.from(rightData.getBatch)) { rightTable =>
-        subJoinType match {
-          case LeftOuter =>
-            Table.mixedLeftJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
-              compiledCondition, nullEquality)
-          case RightOuter =>
-            // Reverse the output of the join, because we expect the right gather map to
-            // always be on the right
-            Table.mixedLeftJoinGatherMaps(rightKeys, leftKeys, rightTable, leftTable,
-              compiledCondition, nullEquality).reverse
-          case Inner =>
-            Table.mixedInnerJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
-              compiledCondition, nullEquality)
-          case t =>
-            throw new IllegalStateException(s"unsupported join type: $t")
+        joinOptions.strategy match {
+          case JoinStrategy.INNER_HASH_WITH_POST =>
+            // Use composable JNI APIs
+            computeConditionalInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable,
+              compiledCondition)
+          case _ =>
+            // Use existing mixed join methods
+            computeConditionalMixedJoin(leftKeys, rightKeys, leftTable, rightTable,
+              compiledCondition)
         }
       }
+    }
+  }
+
+  private def computeConditionalInnerHashWithPost(
+      leftKeys: Table,
+      rightKeys: Table,
+      leftTable: Table,
+      rightTable: Table,
+      compiledCondition: CompiledExpression): Array[GatherMap] = {
+    // Perform inner hash join with smaller table on the left for better performance
+    val leftRowCount = leftTable.getRowCount
+    val rightRowCount = rightTable.getRowCount
+    
+    // innerMaps(0) is always the left table and innerMaps(1) is always the right table
+    val innerMaps = if (rightRowCount < leftRowCount) {
+      JoinPrimitives.hashInnerJoin(rightKeys, leftKeys, compareNullsEqual).reverse
+    } else {
+      JoinPrimitives.hashInnerJoin(leftKeys, rightKeys, compareNullsEqual)
+    }
+
+    // Filter by AST condition
+    val filteredMaps = try {
+      // For AST to work we have to match the order of the left and right tables
+      // that it was compiled for
+      // subJoinType == LeftOuter | Inner => LEFT, RIGHT
+      // subJoinType == RightOuter => RIGHT, LEFT
+      if (subJoinType == RightOuter) {
+        JoinPrimitives.filterGatherMapsByAST(
+          innerMaps(1), innerMaps(0), rightTable, leftTable, compiledCondition).reverse
+      } else {
+        JoinPrimitives.filterGatherMapsByAST(
+          innerMaps(0), innerMaps(1), leftTable, rightTable, compiledCondition)
+      }
+    } finally {
+      // Close innerMaps immediately to reduce peak memory usage
+      innerMaps.foreach(_.close())
+    }
+
+    try {
+      // Convert to target sub-join type
+      subJoinType match {
+        case Inner =>
+          // Already have filtered inner join maps
+          Array(filteredMaps(0), filteredMaps(1))
+        case LeftOuter =>
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            filteredMaps(0), filteredMaps(1), leftRowCount, rightRowCount)
+          filteredMaps.foreach(_.close())
+          outerMaps
+        case RightOuter =>
+          // Right outer is left outer with sides swapped
+          val outerMaps = JoinPrimitives.makeLeftOuter(
+            filteredMaps(1), filteredMaps(0), rightRowCount, leftRowCount).reverse
+          filteredMaps.foreach(_.close())
+          outerMaps
+        case t =>
+          filteredMaps.foreach(_.close())
+          throw new IllegalStateException(s"unsupported join type: $t")
+      }
+    } catch {
+      case e: Throwable =>
+        filteredMaps.foreach(_.close())
+        throw e
+    }
+  }
+
+  private def computeConditionalMixedJoin(
+      leftKeys: Table,
+      rightKeys: Table,
+      leftTable: Table,
+      rightTable: Table,
+      compiledCondition: CompiledExpression): Array[GatherMap] = {
+    subJoinType match {
+      case LeftOuter =>
+        Table.mixedLeftJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
+          compiledCondition, nullEquality)
+      case RightOuter =>
+        // Reverse the output of the join, because we expect the right gather map to
+        // always be on the right
+        Table.mixedLeftJoinGatherMaps(rightKeys, leftKeys, rightTable, leftTable,
+          compiledCondition, nullEquality).reverse
+      case Inner =>
+        Table.mixedInnerJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
+          compiledCondition, nullEquality)
+      case t =>
+        throw new IllegalStateException(s"unsupported join type: $t")
     }
   }
 
@@ -970,8 +1244,7 @@ class HashOuterJoinIterator(
     streamAttributes: Seq[Attribute],
     boundCondition: Option[GpuExpression],
     numFirstConditionTableColumns: Int,
-    targetSize: Long,
-    allowSorted: Boolean,
+    joinOptions: JoinOptions,
     buildSide: GpuBuildSide,
     compareNullsEqual: Boolean, // This is a workaround to how cudf support joins for structs
     opTime: GpuMetric,
@@ -983,7 +1256,7 @@ class HashOuterJoinIterator(
 
   private val streamJoinIter = new HashJoinStreamSideIterator(joinType, built, boundBuiltKeys,
     buildStats, buildSideTrackerInit, stream, boundStreamKeys, streamAttributes, compiledCondition,
-    targetSize, allowSorted, buildSide, compareNullsEqual, opTime, joinTime)
+    joinOptions, buildSide, compareNullsEqual, opTime, joinTime)
 
   private var finalBatch: Option[ColumnarBatch] = None
 
@@ -1249,8 +1522,7 @@ trait GpuHashJoin extends GpuJoinExec {
   def doJoin(
       builtBatch: ColumnarBatch,
       stream: Iterator[ColumnarBatch],
-      targetSize: Long,
-      isSMJOptAllowed: Boolean,
+      joinOptions: JoinOptions,
       numOutputRows: GpuMetric,
       numOutputBatches: GpuMetric,
       opTime: GpuMetric,
@@ -1294,7 +1566,7 @@ trait GpuHashJoin extends GpuJoinExec {
       case FullOuter =>
         new HashOuterJoinIterator(joinType, spillableBuiltBatch, boundBuildKeys, None, None,
           lazyStream, boundStreamKeys, streamedPlan.output,
-          boundCondition, numFirstConditionTableColumns, targetSize, isSMJOptAllowed, buildSide,
+          boundCondition, numFirstConditionTableColumns, joinOptions, buildSide,
           compareNullsEqual, opTime, joinTime)
       case _ =>
         if (boundCondition.isDefined) {
@@ -1303,10 +1575,11 @@ trait GpuHashJoin extends GpuJoinExec {
             boundCondition.get.convertToAst(numFirstConditionTableColumns).compile()
           new ConditionalHashJoinIterator(spillableBuiltBatch, boundBuildKeys, None,
             lazyStream, boundStreamKeys, streamedPlan.output, compiledCondition,
-            targetSize, isSMJOptAllowed, joinType, buildSide, compareNullsEqual, opTime, joinTime)
+            joinOptions, joinType, buildSide,
+            compareNullsEqual, opTime, joinTime)
         } else {
           new HashJoinIterator(spillableBuiltBatch, boundBuildKeys, None,
-            lazyStream, boundStreamKeys, streamedPlan.output, targetSize, isSMJOptAllowed,
+            lazyStream, boundStreamKeys, streamedPlan.output, joinOptions,
             joinType, buildSide, compareNullsEqual, opTime, joinTime)
         }
     }
