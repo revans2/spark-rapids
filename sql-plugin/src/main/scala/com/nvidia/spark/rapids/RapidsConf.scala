@@ -703,6 +703,16 @@ val GPU_COREDUMP_PIPE_PATTERN = conf("spark.rapids.gpu.coreDump.pipePattern")
     .checkValues(org.apache.spark.sql.rapids.execution.JoinStrategy.values.map(_.toString))
     .createWithDefault(org.apache.spark.sql.rapids.execution.JoinStrategy.AUTO.toString)
 
+  val LOG_JOIN_CARDINALITY = conf("spark.rapids.sql.join.logCardinality")
+    .doc("Enable logging of join cardinality statistics to help diagnose performance issues. " +
+      "When enabled, logs task context, key data types, join condition, row counts, and " +
+      "distinct key counts for both left and right sides of joins. This can help identify " +
+      "problematic join patterns but may impact performance due to the additional computation " +
+      "required to calculate distinct counts.")
+    .internal()
+    .booleanConf
+    .createWithDefault(false)
+
   val SHUFFLED_HASH_JOIN_OPTIMIZE_SHUFFLE =
     conf("spark.rapids.sql.shuffledHashJoin.optimizeShuffle")
       .doc("Enable or disable an optimization where shuffled build side batches are kept " +
@@ -2981,7 +2991,8 @@ val SHUFFLE_COMPRESSION_LZ4_CHUNK_SIZE = conf("spark.rapids.shuffle.compression.
       targetSize: Long): org.apache.spark.sql.rapids.execution.JoinOptions = {
     val strategyStr = JOIN_STRATEGY.get(conf)
     val strategy = org.apache.spark.sql.rapids.execution.JoinStrategy.withName(strategyStr)
-    org.apache.spark.sql.rapids.execution.JoinOptions(strategy, targetSize)
+    val logCardinality = LOG_JOIN_CARDINALITY.get(conf)
+    org.apache.spark.sql.rapids.execution.JoinOptions(strategy, targetSize, logCardinality)
   }
 }
 
@@ -3064,6 +3075,8 @@ class RapidsConf(conf: Map[String, String]) extends Logging {
 
   lazy val bucketJoinIoPrefetch: Boolean = get(BUCKET_JOIN_IO_PREFETCH)
 
+  lazy val logJoinCardinality: Boolean = get(LOG_JOIN_CARDINALITY)
+
   /**
    * Get join options based on the current configuration.
    * @param targetSize the target batch size in bytes to use for the join
@@ -3072,7 +3085,8 @@ class RapidsConf(conf: Map[String, String]) extends Logging {
   def getJoinOptions(targetSize: Long): org.apache.spark.sql.rapids.execution.JoinOptions = {
     val strategyStr = get(JOIN_STRATEGY)
     val strategy = org.apache.spark.sql.rapids.execution.JoinStrategy.withName(strategyStr)
-    org.apache.spark.sql.rapids.execution.JoinOptions(strategy, targetSize)
+    val logCardinality = get(LOG_JOIN_CARDINALITY)
+    org.apache.spark.sql.rapids.execution.JoinOptions(strategy, targetSize, logCardinality)
   }
 
   lazy val sizedJoinPartitionAmplification: Double = get(SIZED_JOIN_PARTITION_AMPLIFICATION)

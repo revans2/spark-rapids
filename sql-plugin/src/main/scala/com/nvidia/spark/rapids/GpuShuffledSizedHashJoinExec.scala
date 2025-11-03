@@ -319,6 +319,7 @@ object GpuShuffledSizedHashJoinExec {
       spillableBuiltBatch: LazySpillableColumnarBatch,
       lazyStream: Iterator[LazySpillableColumnarBatch],
       joinOptions: JoinOptions,
+      conditionForLogging: Option[Expression],
       opTime: GpuMetric,
       joinTime: GpuMetric): Iterator[ColumnarBatch] = {
     info.joinType match {
@@ -327,19 +328,19 @@ object GpuShuffledSizedHashJoinExec {
           info.buildStats, None, lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
           info.exprs.boundCondition, info.exprs.numFirstConditionTableColumns,
           joinOptions, info.buildSide,
-          info.exprs.compareNullsEqual, opTime, joinTime)
+          info.exprs.compareNullsEqual, conditionForLogging, opTime, joinTime)
       case LeftOuter if info.buildSide == GpuBuildLeft =>
         new HashOuterJoinIterator(LeftOuter, spillableBuiltBatch, info.exprs.boundBuildKeys,
           info.buildStats, None, lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
           info.exprs.boundCondition, info.exprs.numFirstConditionTableColumns,
           joinOptions, info.buildSide,
-          info.exprs.compareNullsEqual, opTime, joinTime)
+          info.exprs.compareNullsEqual, conditionForLogging, opTime, joinTime)
       case RightOuter if info.buildSide == GpuBuildRight =>
         new HashOuterJoinIterator(RightOuter, spillableBuiltBatch, info.exprs.boundBuildKeys,
           info.buildStats, None, lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
           info.exprs.boundCondition, info.exprs.numFirstConditionTableColumns,
           joinOptions, info.buildSide,
-          info.exprs.compareNullsEqual, opTime, joinTime)
+          info.exprs.compareNullsEqual, conditionForLogging, opTime, joinTime)
       case _ if info.exprs.boundCondition.isDefined =>
         // ConditionalHashJoinIterator will close the compiled condition
         val compiledCondition = info.exprs.boundCondition.get.convertToAst(
@@ -347,12 +348,12 @@ object GpuShuffledSizedHashJoinExec {
         new ConditionalHashJoinIterator(spillableBuiltBatch, info.exprs.boundBuildKeys,
           info.buildStats, lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
           compiledCondition, joinOptions, info.joinType,
-          info.buildSide, info.exprs.compareNullsEqual, opTime, joinTime)
+          info.buildSide, info.exprs.compareNullsEqual, conditionForLogging, opTime, joinTime)
       case _ =>
         new HashJoinIterator(spillableBuiltBatch, info.exprs.boundBuildKeys, info.buildStats,
           lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput,
           joinOptions, info.joinType, info.buildSide,
-          info.exprs.compareNullsEqual, opTime, joinTime)
+          info.exprs.compareNullsEqual, conditionForLogging, opTime, joinTime)
     }
   }
 }
@@ -502,7 +503,7 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
       LazySpillableColumnarBatch(batch, "built")
     }
     createJoinIterator(info, spillableBuiltBatch, lazyStream, joinOptions,
-      opTime, metricsMap(JOIN_TIME))
+      condition, opTime, metricsMap(JOIN_TIME))
   }
 
   /**
@@ -519,7 +520,7 @@ abstract class GpuShuffledSizedHashJoinExec[HOST_BATCH_TYPE <: AutoCloseable] ex
       joinOptions: JoinOptions,
       partitionNumAmplification: Double,
       metricsMap: Map[String, GpuMetric]): Iterator[ColumnarBatch] = {
-    new BigSizedJoinIterator(info, joinOptions,
+    new BigSizedJoinIterator(info, joinOptions, condition,
       partitionNumAmplification, metricsMap)
   }
 
@@ -1597,6 +1598,7 @@ class StreamSidePartitioner(
 class BigSizedJoinIterator(
     info: JoinInfo,
     joinOptions: JoinOptions,
+    conditionForLogging: Option[Expression],
     partitionNumAmplification: Double,
     metrics: Map[String, GpuMetric])
   extends Iterator[ColumnarBatch] with TaskAutoCloseableResource {
@@ -1710,7 +1712,7 @@ class BigSizedJoinIterator(
               buildPartitioner.getBuildBatch(currentJoinGroupIndex), info.exprs.boundBuildKeys,
               info.buildStats, tracker, Iterator.empty, info.exprs.boundStreamKeys,
               info.exprs.streamOutput, None, 0, joinOptions,
-              info.buildSide, info.exprs.compareNullsEqual, opTime, joinTime))
+              info.buildSide, info.exprs.compareNullsEqual, conditionForLogging, opTime, joinTime))
           }
         } else {
           isExhausted = true
@@ -1756,10 +1758,10 @@ class BigSizedJoinIterator(
         builtBatch, info.exprs.boundBuildKeys, info.buildStats, buildRowTracker,
         lazyStream, info.exprs.boundStreamKeys, info.exprs.streamOutput, compiledCondition,
         joinOptions, info.buildSide,
-        info.exprs.compareNullsEqual, opTime, joinTime)
+        info.exprs.compareNullsEqual, conditionForLogging, opTime, joinTime)
     } else {
       GpuShuffledSizedHashJoinExec.createJoinIterator(info, builtBatch, lazyStream,
-        joinOptions, opTime, joinTime)
+        joinOptions, conditionForLogging, opTime, joinTime)
     }
   }
 }

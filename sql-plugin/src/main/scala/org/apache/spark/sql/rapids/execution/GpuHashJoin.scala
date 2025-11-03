@@ -325,8 +325,33 @@ object JoinStrategy extends Enumeration {
  * @param strategy the join strategy to use (AUTO, INNER_HASH_WITH_POST, INNER_SORT_WITH_POST,
  *                 or HASH_ONLY)
  * @param targetSize the target batch size in bytes for the join operation
+ * @param logCardinalityEnabled whether to log cardinality statistics for debugging
  */
-case class JoinOptions(strategy: JoinStrategy.JoinStrategy, targetSize: Long)
+case class JoinOptions(
+    strategy: JoinStrategy.JoinStrategy,
+    targetSize: Long,
+    logCardinalityEnabled: Boolean)
+
+/**
+ * Statistics for join cardinality logging to help diagnose performance issues.
+ * @param leftRowCount number of rows on the left side
+ * @param rightRowCount number of rows on the right side
+ * @param leftDistinctCount distinct count of left join keys
+ * @param rightDistinctCount distinct count of right join keys
+ * @param leftNullCounts null counts for each left key column
+ * @param rightNullCounts null counts for each right key column
+ * @param leftKeyTypes data types of the left join keys
+ * @param rightKeyTypes data types of the right join keys
+ */
+case class JoinCardinalityStats(
+    leftRowCount: Long,
+    rightRowCount: Long,
+    leftDistinctCount: Long,
+    rightDistinctCount: Long,
+    leftNullCounts: Seq[Long],
+    rightNullCounts: Seq[Long],
+    leftKeyTypes: Seq[DataType],
+    rightKeyTypes: Seq[DataType])
 
 /**
  * Class to hold statistics on the build-side batch of a hash join.
@@ -363,6 +388,7 @@ abstract class BaseHashJoinIterator(
     joinOptions: JoinOptions,
     joinType: JoinType,
     buildSide: GpuBuildSide,
+    conditionForLogging: Option[Expression],
     opTime: GpuMetric,
     joinTime: GpuMetric)
     extends SplittableJoinIterator(
@@ -398,6 +424,126 @@ abstract class BaseHashJoinIterator(
       expr.dataType match {
         case _: ArrayType | _: StructType => true
         case _ => false
+      }
+    }
+  }
+
+  /**
+   * Compute cardinality statistics for both sides of the join.
+   * This is used for diagnostic logging when logJoinCardinality is enabled.
+   */
+  protected def computeCardinalityStats(
+      leftKeys: Table,
+      rightKeys: Table): JoinCardinalityStats = {
+    val leftRowCount = leftKeys.getRowCount
+    val rightRowCount = rightKeys.getRowCount
+    val leftDistinctCount = leftKeys.distinctCount(NullEquality.EQUAL)
+    val rightDistinctCount = rightKeys.distinctCount(NullEquality.EQUAL)
+    
+    // Compute null counts for each key column
+    val leftNullCounts = (0 until leftKeys.getNumberOfColumns).map { i =>
+      leftKeys.getColumn(i).getNullCount
+    }
+    val rightNullCounts = (0 until rightKeys.getNumberOfColumns).map { i =>
+      rightKeys.getColumn(i).getNullCount
+    }
+    
+    val leftKeyTypes = boundBuiltKeys.map(_.dataType)
+    val rightKeyTypes = boundStreamKeys.map(_.dataType)
+    
+    JoinCardinalityStats(
+      leftRowCount,
+      rightRowCount,
+      leftDistinctCount,
+      rightDistinctCount,
+      leftNullCounts,
+      rightNullCounts,
+      leftKeyTypes,
+      rightKeyTypes)
+  }
+
+  /**
+   * Log join cardinality information if logging is enabled.
+   * This helps diagnose performance issues by showing key statistics about the join.
+   * @param leftKeys the left side join keys
+   * @param rightKeys the right side join keys
+   * @param implementation the actual join implementation being used
+   * @param originalJoinType the original join type before any transformations (None if unchanged)
+   */
+  protected def logJoinCardinality(
+      leftKeys: Table,
+      rightKeys: Table,
+      implementation: String,
+      originalJoinType: Option[JoinType] = None): Unit = {
+    if (joinOptions.logCardinalityEnabled) {
+      try {
+        val stats = computeCardinalityStats(leftKeys, rightKeys)
+        val taskContext = org.apache.spark.TaskContext.get()
+        val taskInfo = if (taskContext != null) {
+          s"Task: stageId=${taskContext.stageId()}, " +
+          s"partitionId=${taskContext.partitionId()}, " +
+          s"attemptNumber=${taskContext.attemptNumber()}"
+        } else {
+          "Task: No TaskContext available"
+        }
+        
+        val conditionStr = conditionForLogging.map(_.toString).getOrElse("None")
+        
+        val joinTypeStr = originalJoinType match {
+          case Some(origType) if origType != joinType =>
+            s"$origType (transformed to $joinType)"
+          case _ => joinType.toString
+        }
+        
+        // Format null counts with column types
+        val leftNullInfo = stats.leftKeyTypes.zip(stats.leftNullCounts).map {
+          case (dtype, nullCount) =>
+            s"$dtype: $nullCount nulls"
+        }.mkString(", ")
+        
+        val rightNullInfo = stats.rightKeyTypes.zip(stats.rightNullCounts).map {
+          case (dtype, nullCount) =>
+            s"$dtype: $nullCount nulls"
+        }.mkString(", ")
+        
+        logWarning(s"Join Starting - $taskInfo\n" +
+          s"  JoinType: $joinTypeStr\n" +
+          s"  BuildSide: $buildSide\n" +
+          s"  Implementation: $implementation\n" +
+          s"  Condition: $conditionStr\n" +
+          s"  Left keys: ${stats.leftKeyTypes.mkString(", ")}\n" +
+          s"  Left nulls: $leftNullInfo\n" +
+          s"  Right keys: ${stats.rightKeyTypes.mkString(", ")}\n" +
+          s"  Right nulls: $rightNullInfo\n" +
+          s"  Left rows: ${stats.leftRowCount}, distinct: ${stats.leftDistinctCount}\n" +
+          s"  Right rows: ${stats.rightRowCount}, distinct: ${stats.rightDistinctCount}")
+      } catch {
+        case e: Exception =>
+          logWarning(s"Failed to compute join cardinality statistics: ${e.getMessage}")
+      }
+    }
+  }
+
+  /**
+   * Log join completion if logging is enabled.
+   * This helps identify if a join has hung or completed successfully.
+   */
+  protected def logJoinCompletion(): Unit = {
+    if (joinOptions.logCardinalityEnabled) {
+      try {
+        val taskContext = org.apache.spark.TaskContext.get()
+        val taskInfo = if (taskContext != null) {
+          s"Task: stageId=${taskContext.stageId()}, " +
+          s"partitionId=${taskContext.partitionId()}, " +
+          s"attemptNumber=${taskContext.attemptNumber()}"
+        } else {
+          "Task: No TaskContext available"
+        }
+        
+        logWarning(s"Join Gather Maps Completed - $taskInfo")
+      } catch {
+        case e: Exception =>
+          logWarning(s"Failed to log join completion: ${e.getMessage}")
       }
     }
   }
@@ -535,6 +681,7 @@ class HashJoinIterator(
     val joinType: JoinType,
     val buildSide: GpuBuildSide,
     val compareNullsEqual: Boolean, // This is a workaround to how cudf support joins for structs
+    conditionForLogging: Option[Expression],
     opTime: GpuMetric,
     private val joinTime: GpuMetric)
     extends BaseHashJoinIterator(
@@ -547,6 +694,7 @@ class HashJoinIterator(
       joinOptions,
       joinType,
       buildSide,
+      conditionForLogging,
       opTime = opTime,
       joinTime = joinTime) {
   override protected def joinGathererLeftRight(
@@ -563,9 +711,11 @@ class HashJoinIterator(
         // Join strategy dispatching:
         // PRIORITY 1: Distinct join optimization (overrides all strategies)
         // PRIORITY 2: Strategy-based dispatching for non-distinct joins
+        
         val maps = if (buildStats.isDistinct) {
           // Distinct join optimizations (highest priority, overrides strategy)
-          joinType match {
+          logJoinCardinality(leftKeys, rightKeys, "distinct")
+          val result = joinType match {
             case LeftOuter =>
               Array(leftKeys.leftDistinctJoinGatherMap(rightKeys, compareNullsEqual))
             case RightOuter =>
@@ -580,10 +730,13 @@ class HashJoinIterator(
               // Fall through to strategy-based dispatching for non-outer joins
               computeNonDistinctJoin(leftKeys, rightKeys, leftData, rightData)
           }
+          logJoinCompletion()
+          result
         } else {
           // Non-distinct joins: use strategy-based dispatching
           computeNonDistinctJoin(leftKeys, rightKeys, leftData, rightData)
         }
+        
         makeGatherer(maps, leftData, rightData, joinType)
       }
     }
@@ -611,7 +764,7 @@ class HashJoinIterator(
               s"ARRAY or STRUCT types which are not supported for sort joins. " +
               s"Falling back to INNER_HASH_WITH_POST strategy.")
           }
-          computeNonCondInnerHashWithPost(leftKeys, rightKeys)
+          computeNonCondInnerHashWithPost(leftKeys, rightKeys, isFallback = true)
         }
       case _ =>
         // Use existing hash join methods (for AUTO and HASH_ONLY strategies)
@@ -621,7 +774,15 @@ class HashJoinIterator(
 
   private def computeNonCondInnerHashWithPost(
       leftKeys: Table,
-      rightKeys: Table): Array[GatherMap] = {
+      rightKeys: Table,
+      isFallback: Boolean = false): Array[GatherMap] = {
+    val implName = if (isFallback) {
+      "INNER_HASH_WITH_POST (fallback from INNER_SORT_WITH_POST)"
+    } else {
+      "INNER_HASH_WITH_POST"
+    }
+    logJoinCardinality(leftKeys, rightKeys, implName)
+    
     // Perform inner hash join with smaller table on the left for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
@@ -634,7 +795,7 @@ class HashJoinIterator(
     }
 
     try {      
-      joinType match {
+      val result = joinType match {
         case _: InnerLike =>
           // Already have inner join maps
           Array(innerMaps(0), innerMaps(1))
@@ -665,6 +826,8 @@ class HashJoinIterator(
           throw new NotImplementedError(
             s"Join $joinType with INNER_HASH_WITH_POST strategy is not currently supported")
       }
+      logJoinCompletion()
+      result
     } catch {
       case e: Throwable =>
         innerMaps.foreach(_.close())
@@ -675,6 +838,8 @@ class HashJoinIterator(
   private def computeNonCondInnerSortWithPost(
       leftKeys: Table,
       rightKeys: Table): Array[GatherMap] = {
+    logJoinCardinality(leftKeys, rightKeys, "INNER_SORT_WITH_POST")
+    
     // Perform inner sort-merge join with smaller table on the left for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
@@ -688,7 +853,7 @@ class HashJoinIterator(
     }
 
     try {      
-      joinType match {
+      val result = joinType match {
         case _: InnerLike =>
           // Already have inner join maps
           Array(innerMaps(0), innerMaps(1))
@@ -719,6 +884,8 @@ class HashJoinIterator(
           throw new NotImplementedError(
             s"Join $joinType with INNER_SORT_WITH_POST strategy is not currently supported")
       }
+      logJoinCompletion()
+      result
     } catch {
       case e: Throwable =>
         innerMaps.foreach(_.close())
@@ -729,7 +896,9 @@ class HashJoinIterator(
   private def computeWithHashJoin(
       leftKeys: Table,
       rightKeys: Table): Array[GatherMap] = {
-    joinType match {
+    logJoinCardinality(leftKeys, rightKeys, "hash join")
+    
+    val result = joinType match {
       case LeftOuter => leftKeys.leftJoinGatherMaps(rightKeys, compareNullsEqual)
       case RightOuter =>
         // Reverse the output of the join, because we expect the right gather map to
@@ -742,6 +911,8 @@ class HashJoinIterator(
         throw new NotImplementedError(s"Joint Type ${joinType.getClass} is not currently" +
           s" supported")
     }
+    logJoinCompletion()
+    result
   }
 }
 
@@ -761,6 +932,7 @@ class ConditionalHashJoinIterator(
     joinType: JoinType,
     buildSide: GpuBuildSide,
     compareNullsEqual: Boolean, // This is a workaround to how cudf support joins for structs
+    conditionForLogging: Option[Expression],
     opTime: GpuMetric,
     joinTime: GpuMetric)
     extends BaseHashJoinIterator(
@@ -773,6 +945,7 @@ class ConditionalHashJoinIterator(
       joinOptions,
       joinType,
       buildSide,
+      conditionForLogging,
       opTime = opTime,
       joinTime = joinTime) {
   override protected def joinGathererLeftRight(
@@ -800,12 +973,13 @@ class ConditionalHashJoinIterator(
                 logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
                   s"ARRAY or STRUCT types which are not supported for sort joins. " +
                   s"Falling back to INNER_HASH_WITH_POST strategy.")
-                computeInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
+                computeInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable, nullEquality, 
+                  isFallback = true)
               }
             case _ =>
               // Use existing mixed join methods (for AUTO and HASH_ONLY strategies)
               computeWithMixedJoin(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
-          }
+          }          
           makeGatherer(maps, leftData, rightData, joinType)
         }
       }
@@ -817,7 +991,15 @@ class ConditionalHashJoinIterator(
       rightKeys: Table,
       leftTable: Table,
       rightTable: Table,
-      nullEquality: NullEquality): Array[GatherMap] = {
+      nullEquality: NullEquality,
+      isFallback: Boolean = false): Array[GatherMap] = {
+    val implName = if (isFallback) {
+      "INNER_HASH_WITH_POST (conditional, fallback from INNER_SORT_WITH_POST)"
+    } else {
+      "INNER_HASH_WITH_POST (conditional)"
+    }
+    logJoinCardinality(leftKeys, rightKeys, implName)
+    
     // Perform inner hash join with smaller table on the left for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
@@ -855,7 +1037,7 @@ class ConditionalHashJoinIterator(
 
     try {
       // Convert to target join type
-      joinType match {
+      val result = joinType match {
         case _: InnerLike =>
           // Already have filtered inner join maps
           Array(filteredMaps(0), filteredMaps(1))
@@ -886,6 +1068,8 @@ class ConditionalHashJoinIterator(
           throw new NotImplementedError(
             s"Join $joinType with INNER_HASH_WITH_POST strategy is not currently supported")
       }
+      logJoinCompletion()
+      result
     } catch {
       case e: Throwable =>
         filteredMaps.foreach(_.close())
@@ -899,6 +1083,8 @@ class ConditionalHashJoinIterator(
       leftTable: Table,
       rightTable: Table,
       nullEquality: NullEquality): Array[GatherMap] = {
+    logJoinCardinality(leftKeys, rightKeys, "INNER_SORT_WITH_POST (conditional)")
+    
     // Perform inner sort-merge join with smaller table on the left for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
@@ -938,7 +1124,7 @@ class ConditionalHashJoinIterator(
 
     try {
       // Convert to target join type
-      joinType match {
+      val result = joinType match {
         case _: InnerLike =>
           // Already have filtered inner join maps
           Array(filteredMaps(0), filteredMaps(1))
@@ -969,6 +1155,8 @@ class ConditionalHashJoinIterator(
           throw new NotImplementedError(
             s"Join $joinType with INNER_SORT_WITH_POST strategy is not currently supported")
       }
+      logJoinCompletion()
+      result
     } catch {
       case e: Throwable =>
         filteredMaps.foreach(_.close())
@@ -982,7 +1170,9 @@ class ConditionalHashJoinIterator(
       leftTable: Table,
       rightTable: Table,
       nullEquality: NullEquality): Array[GatherMap] = {
-    joinType match {
+    logJoinCardinality(leftKeys, rightKeys, "mixed join (conditional)")
+    
+    val result = joinType match {
       case _: InnerLike if buildSide == GpuBuildRight =>
         Table.mixedInnerJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
           compiledCondition, nullEquality)
@@ -1011,6 +1201,8 @@ class ConditionalHashJoinIterator(
       case _ =>
         throw new NotImplementedError(s"Join $joinType $buildSide is not currently supported")
     }
+    logJoinCompletion()
+    result
   }
 
   override def close(): Unit = {
@@ -1059,6 +1251,7 @@ class HashJoinStreamSideIterator(
     joinOptions: JoinOptions,
     buildSide: GpuBuildSide,
     compareNullsEqual: Boolean, // This is a workaround to how cudf support joins for structs
+    conditionForLogging: Option[Expression],
     opTime: GpuMetric,
     joinTime: GpuMetric)
     extends BaseHashJoinIterator(
@@ -1071,6 +1264,7 @@ class HashJoinStreamSideIterator(
       joinOptions,
       joinType,
       buildSide,
+      conditionForLogging,
       opTime = opTime,
       joinTime = joinTime) {
   // Determine the type of join to use as we iterate through the stream-side batches.
@@ -1095,31 +1289,45 @@ class HashJoinStreamSideIterator(
 
   private def unconditionalJoinGatherMaps(
       leftKeys: Table, rightKeys: Table): Array[GatherMap] = {
+    // Pass the original joinType if it was transformed to subJoinType
+    val originalJoinType = if (joinType != subJoinType) Some(joinType) else None
+    
     joinOptions.strategy match {
       case JoinStrategy.INNER_HASH_WITH_POST =>
         // Use composable JNI APIs
-        computeUnconditionalInnerHashWithPost(leftKeys, rightKeys)
+        computeUnconditionalInnerHashWithPost(leftKeys, rightKeys, originalJoinType)
       case JoinStrategy.INNER_SORT_WITH_POST =>
         // Check if sort join is supported (no ARRAY/STRUCT types)
         val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
         val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
         if (leftKeysSupported && rightKeysSupported) {
-          computeUnconditionalInnerSortWithPost(leftKeys, rightKeys)
+          computeUnconditionalInnerSortWithPost(leftKeys, rightKeys, originalJoinType)
         } else {
           // Log warning and fall back to hash join
           logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
             s"ARRAY or STRUCT types which are not supported for sort joins. " +
             s"Falling back to INNER_HASH_WITH_POST strategy.")
-          computeUnconditionalInnerHashWithPost(leftKeys, rightKeys)
+          computeUnconditionalInnerHashWithPost(leftKeys, rightKeys, originalJoinType, 
+            isFallback = true)
         }
       case _ =>
         // Use existing hash join methods
-        computeUnconditionalHashJoin(leftKeys, rightKeys)
+        computeUnconditionalHashJoin(leftKeys, rightKeys, originalJoinType)
     }
   }
 
   private def computeUnconditionalInnerHashWithPost(
-      leftKeys: Table, rightKeys: Table): Array[GatherMap] = {
+      leftKeys: Table,
+      rightKeys: Table,
+      originalJoinType: Option[JoinType],
+      isFallback: Boolean = false): Array[GatherMap] = {
+    val implName = if (isFallback) {
+      s"INNER_HASH_WITH_POST (outer: $joinType, fallback from INNER_SORT_WITH_POST)"
+    } else {
+      s"INNER_HASH_WITH_POST (outer: $joinType)"
+    }
+    logJoinCardinality(leftKeys, rightKeys, implName, originalJoinType)
+    
     // Perform inner hash join with smaller table on the left for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
@@ -1133,7 +1341,7 @@ class HashJoinStreamSideIterator(
 
     try {
       // Convert to target sub-join type
-      subJoinType match {
+      val result = subJoinType match {
         case Inner =>
           // Already have inner join maps
           Array(innerMaps(0), innerMaps(1))
@@ -1152,6 +1360,8 @@ class HashJoinStreamSideIterator(
           innerMaps.foreach(_.close())
           throw new IllegalStateException(s"unsupported join type: $t")
       }
+      logJoinCompletion()
+      result
     } catch {
       case e: Throwable =>
         innerMaps.foreach(_.close())
@@ -1160,7 +1370,12 @@ class HashJoinStreamSideIterator(
   }
 
   private def computeUnconditionalInnerSortWithPost(
-      leftKeys: Table, rightKeys: Table): Array[GatherMap] = {
+      leftKeys: Table,
+      rightKeys: Table,
+      originalJoinType: Option[JoinType]): Array[GatherMap] = {
+    logJoinCardinality(leftKeys, rightKeys, s"INNER_SORT_WITH_POST (outer: $joinType)", 
+      originalJoinType)
+    
     // Perform inner sort-merge join with smaller table on the left for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
@@ -1175,7 +1390,7 @@ class HashJoinStreamSideIterator(
 
     try {      
       // Convert to target sub-join type
-      subJoinType match {
+      val result = subJoinType match {
         case Inner =>
           // Already have inner join maps
           Array(innerMaps(0), innerMaps(1))
@@ -1194,6 +1409,8 @@ class HashJoinStreamSideIterator(
           innerMaps.foreach(_.close())
           throw new IllegalStateException(s"unsupported join type: $t")
       }
+      logJoinCompletion()
+      result
     } catch {
       case e: Throwable =>
         innerMaps.foreach(_.close())
@@ -1202,8 +1419,12 @@ class HashJoinStreamSideIterator(
   }
 
   private def computeUnconditionalHashJoin(
-      leftKeys: Table, rightKeys: Table): Array[GatherMap] = {
-    subJoinType match {
+      leftKeys: Table,
+      rightKeys: Table,
+      originalJoinType: Option[JoinType]): Array[GatherMap] = {
+    logJoinCardinality(leftKeys, rightKeys, s"hash join (outer: $joinType)", originalJoinType)
+    
+    val result = subJoinType match {
       case LeftOuter =>
         leftKeys.leftJoinGatherMaps(rightKeys, compareNullsEqual)
       case RightOuter =>
@@ -1215,6 +1436,8 @@ class HashJoinStreamSideIterator(
       case t =>
         throw new IllegalStateException(s"unsupported join type: $t")
     }
+    logJoinCompletion()
+    result
   }
 
   private def conditionalJoinGatherMaps(
@@ -1223,32 +1446,35 @@ class HashJoinStreamSideIterator(
       rightKeys: Table,
       rightData: LazySpillableColumnarBatch,
       compiledCondition: CompiledExpression): Array[GatherMap] = {
+    // Pass the original joinType if it was transformed to subJoinType
+    val originalJoinType = if (joinType != subJoinType) Some(joinType) else None
+    
     withResource(GpuColumnVector.from(leftData.getBatch)) { leftTable =>
       withResource(GpuColumnVector.from(rightData.getBatch)) { rightTable =>
         joinOptions.strategy match {
           case JoinStrategy.INNER_HASH_WITH_POST =>
             // Use composable JNI APIs
             computeConditionalInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable,
-              compiledCondition)
+              compiledCondition, originalJoinType)
           case JoinStrategy.INNER_SORT_WITH_POST =>
             // Check if sort join is supported (no ARRAY/STRUCT types)
             val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
             val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
             if (leftKeysSupported && rightKeysSupported) {
               computeConditionalInnerSortWithPost(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition)
+                compiledCondition, originalJoinType)
             } else {
               // Log warning and fall back to hash join
               logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
                 s"ARRAY or STRUCT types which are not supported for sort joins. " +
                 s"Falling back to INNER_HASH_WITH_POST strategy.")
               computeConditionalInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition)
+                compiledCondition, originalJoinType, isFallback = true)
             }
           case _ =>
             // Use existing mixed join methods
             computeConditionalMixedJoin(leftKeys, rightKeys, leftTable, rightTable,
-              compiledCondition)
+              compiledCondition, originalJoinType)
         }
       }
     }
@@ -1259,7 +1485,16 @@ class HashJoinStreamSideIterator(
       rightKeys: Table,
       leftTable: Table,
       rightTable: Table,
-      compiledCondition: CompiledExpression): Array[GatherMap] = {
+      compiledCondition: CompiledExpression,
+      originalJoinType: Option[JoinType],
+      isFallback: Boolean = false): Array[GatherMap] = {
+    val implName = if (isFallback) {
+      s"INNER_HASH_WITH_POST (outer: $joinType, conditional, fallback from INNER_SORT_WITH_POST)"
+    } else {
+      s"INNER_HASH_WITH_POST (outer: $joinType, conditional)"
+    }
+    logJoinCardinality(leftKeys, rightKeys, implName, originalJoinType)
+    
     // Perform inner hash join with smaller table on the left for better performance
     val leftRowCount = leftTable.getRowCount
     val rightRowCount = rightTable.getRowCount
@@ -1291,7 +1526,7 @@ class HashJoinStreamSideIterator(
 
     try {
       // Convert to target sub-join type
-      subJoinType match {
+      val result = subJoinType match {
         case Inner =>
           // Already have filtered inner join maps
           Array(filteredMaps(0), filteredMaps(1))
@@ -1310,6 +1545,8 @@ class HashJoinStreamSideIterator(
           filteredMaps.foreach(_.close())
           throw new IllegalStateException(s"unsupported join type: $t")
       }
+      logJoinCompletion()
+      result
     } catch {
       case e: Throwable =>
         filteredMaps.foreach(_.close())
@@ -1322,7 +1559,11 @@ class HashJoinStreamSideIterator(
       rightKeys: Table,
       leftTable: Table,
       rightTable: Table,
-      compiledCondition: CompiledExpression): Array[GatherMap] = {
+      compiledCondition: CompiledExpression,
+      originalJoinType: Option[JoinType]): Array[GatherMap] = {
+    logJoinCardinality(leftKeys, rightKeys, s"INNER_SORT_WITH_POST (outer: $joinType, conditional)",
+      originalJoinType)
+    
     // Perform inner sort-merge join with smaller table on the left for better performance
     val leftRowCount = leftTable.getRowCount
     val rightRowCount = rightTable.getRowCount
@@ -1355,7 +1596,7 @@ class HashJoinStreamSideIterator(
 
     try {
       // Convert to target sub-join type
-      subJoinType match {
+      val result = subJoinType match {
         case Inner =>
           // Already have filtered inner join maps
           Array(filteredMaps(0), filteredMaps(1))
@@ -1374,6 +1615,8 @@ class HashJoinStreamSideIterator(
           filteredMaps.foreach(_.close())
           throw new IllegalStateException(s"unsupported join type: $t")
       }
+      logJoinCompletion()
+      result
     } catch {
       case e: Throwable =>
         filteredMaps.foreach(_.close())
@@ -1386,8 +1629,12 @@ class HashJoinStreamSideIterator(
       rightKeys: Table,
       leftTable: Table,
       rightTable: Table,
-      compiledCondition: CompiledExpression): Array[GatherMap] = {
-    subJoinType match {
+      compiledCondition: CompiledExpression,
+      originalJoinType: Option[JoinType]): Array[GatherMap] = {
+    logJoinCardinality(leftKeys, rightKeys, s"mixed join (outer: $joinType, conditional)",
+      originalJoinType)
+    
+    val result = subJoinType match {
       case LeftOuter =>
         Table.mixedLeftJoinGatherMaps(leftKeys, rightKeys, leftTable, rightTable,
           compiledCondition, nullEquality)
@@ -1402,6 +1649,8 @@ class HashJoinStreamSideIterator(
       case t =>
         throw new IllegalStateException(s"unsupported join type: $t")
     }
+    logJoinCompletion()
+    result
   }
 
   override protected def joinGathererLeftRight(
@@ -1416,6 +1665,7 @@ class HashJoinStreamSideIterator(
       }.getOrElse {
         unconditionalJoinGatherMaps(leftKeys, rightKeys)
       }
+      
       assert(maps.length == 2)
       try {
         val lazyLeftMap = LazySpillableGatherMap(maps(0), "left_map")
@@ -1567,6 +1817,7 @@ class HashOuterJoinIterator(
     joinOptions: JoinOptions,
     buildSide: GpuBuildSide,
     compareNullsEqual: Boolean, // This is a workaround to how cudf support joins for structs
+    conditionForLogging: Option[Expression],
     opTime: GpuMetric,
     joinTime: GpuMetric) extends Iterator[ColumnarBatch] with TaskAutoCloseableResource {
 
@@ -1576,7 +1827,7 @@ class HashOuterJoinIterator(
 
   private val streamJoinIter = new HashJoinStreamSideIterator(joinType, built, boundBuiltKeys,
     buildStats, buildSideTrackerInit, stream, boundStreamKeys, streamAttributes, compiledCondition,
-    joinOptions, buildSide, compareNullsEqual, opTime, joinTime)
+    joinOptions, buildSide, compareNullsEqual, conditionForLogging, opTime, joinTime)
 
   private var finalBatch: Option[ColumnarBatch] = None
 
@@ -1887,7 +2138,7 @@ trait GpuHashJoin extends GpuJoinExec {
         new HashOuterJoinIterator(joinType, spillableBuiltBatch, boundBuildKeys, None, None,
           lazyStream, boundStreamKeys, streamedPlan.output,
           boundCondition, numFirstConditionTableColumns, joinOptions, buildSide,
-          compareNullsEqual, opTime, joinTime)
+          compareNullsEqual, condition, opTime, joinTime)
       case _ =>
         if (boundCondition.isDefined) {
           // ConditionalHashJoinIterator will close the compiled condition
@@ -1896,11 +2147,11 @@ trait GpuHashJoin extends GpuJoinExec {
           new ConditionalHashJoinIterator(spillableBuiltBatch, boundBuildKeys, None,
             lazyStream, boundStreamKeys, streamedPlan.output, compiledCondition,
             joinOptions, joinType, buildSide,
-            compareNullsEqual, opTime, joinTime)
+            compareNullsEqual, condition, opTime, joinTime)
         } else {
           new HashJoinIterator(spillableBuiltBatch, boundBuildKeys, None,
             lazyStream, boundStreamKeys, streamedPlan.output, joinOptions,
-            joinType, buildSide, compareNullsEqual, opTime, joinTime)
+            joinType, buildSide, compareNullsEqual, condition, opTime, joinTime)
         }
     }
 
