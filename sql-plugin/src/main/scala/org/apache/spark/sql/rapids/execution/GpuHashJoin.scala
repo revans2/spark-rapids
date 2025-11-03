@@ -783,12 +783,12 @@ class HashJoinIterator(
     }
     logJoinCardinality(leftKeys, rightKeys, implName)
     
-    // Perform inner hash join with smaller table on the left for better performance
+    // Perform inner hash join with smaller table on the right for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
     
     // innerMaps(0) is always the left table and innerMaps(1) is always the right table
-    val innerMaps = if (rightRowCount < leftRowCount) {
+    val innerMaps = if (rightRowCount > leftRowCount) {
       JoinPrimitives.hashInnerJoin(rightKeys, leftKeys, compareNullsEqual).reverse
     } else {
       JoinPrimitives.hashInnerJoin(leftKeys, rightKeys, compareNullsEqual)
@@ -840,13 +840,13 @@ class HashJoinIterator(
       rightKeys: Table): Array[GatherMap] = {
     logJoinCardinality(leftKeys, rightKeys, "INNER_SORT_WITH_POST")
     
-    // Perform inner sort-merge join with smaller table on the left for better performance
+    // Perform inner sort-merge join with smaller table on the right for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
     
     // innerMaps(0) is always the left table and innerMaps(1) is always the right table
     // Note: isLeftKeySorted=false, isRightKeySorted=false since keys are not pre-sorted
-    val innerMaps = if (rightRowCount < leftRowCount) {
+    val innerMaps = if (rightRowCount > leftRowCount) {
       JoinPrimitives.sortMergeInnerJoin(rightKeys, leftKeys, compareNullsEqual, false, false).reverse
     } else {
       JoinPrimitives.sortMergeInnerJoin(leftKeys, rightKeys, compareNullsEqual, false, false)
@@ -1000,12 +1000,12 @@ class ConditionalHashJoinIterator(
     }
     logJoinCardinality(leftKeys, rightKeys, implName)
     
-    // Perform inner hash join with smaller table on the left for better performance
+    // Perform inner hash join with smaller table on the right for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
 
     // innerMaps(0) is always the left table and innerMaps(1) is always the right table
-    val innerMaps = if (rightRowCount < leftRowCount) {
+    val innerMaps = if (rightRowCount > leftRowCount) {
       JoinPrimitives.hashInnerJoin(rightKeys, leftKeys, nullEquality == NullEquality.EQUAL).reverse
     } else {
       JoinPrimitives.hashInnerJoin(leftKeys, rightKeys, nullEquality == NullEquality.EQUAL)
@@ -1085,13 +1085,13 @@ class ConditionalHashJoinIterator(
       nullEquality: NullEquality): Array[GatherMap] = {
     logJoinCardinality(leftKeys, rightKeys, "INNER_SORT_WITH_POST (conditional)")
     
-    // Perform inner sort-merge join with smaller table on the left for better performance
+    // Perform inner sort-merge join with smaller table on the right for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
 
     // innerMaps(0) is always the left table and innerMaps(1) is always the right table
     // Note: isLeftKeySorted=false, isRightKeySorted=false since keys are not pre-sorted
-    val innerMaps = if (rightRowCount < leftRowCount) {
+    val innerMaps = if (rightRowCount > leftRowCount) {
       JoinPrimitives.sortMergeInnerJoin(rightKeys, leftKeys, nullEquality == NullEquality.EQUAL, false, false).reverse
     } else {
       JoinPrimitives.sortMergeInnerJoin(leftKeys, rightKeys, nullEquality == NullEquality.EQUAL, false, false)
@@ -1328,12 +1328,12 @@ class HashJoinStreamSideIterator(
     }
     logJoinCardinality(leftKeys, rightKeys, implName, originalJoinType)
     
-    // Perform inner hash join with smaller table on the left for better performance
+    // Perform inner hash join with smaller table on the right for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
     
     // innerMaps(0) is always the left table and innerMaps(1) is always the right table
-    val innerMaps = if (rightRowCount < leftRowCount) {
+    val innerMaps = if (rightRowCount > leftRowCount) {
       JoinPrimitives.hashInnerJoin(rightKeys, leftKeys, compareNullsEqual).reverse
     } else {
       JoinPrimitives.hashInnerJoin(leftKeys, rightKeys, compareNullsEqual)
@@ -1376,13 +1376,13 @@ class HashJoinStreamSideIterator(
     logJoinCardinality(leftKeys, rightKeys, s"INNER_SORT_WITH_POST (outer: $joinType)", 
       originalJoinType)
     
-    // Perform inner sort-merge join with smaller table on the left for better performance
+    // Perform inner sort-merge join with smaller table on the right for better performance
     val leftRowCount = leftKeys.getRowCount
     val rightRowCount = rightKeys.getRowCount
     
     // innerMaps(0) is always the left table and innerMaps(1) is always the right table
     // Note: isLeftKeySorted=false, isRightKeySorted=false since keys are not pre-sorted
-    val innerMaps = if (rightRowCount < leftRowCount) {
+    val innerMaps = if (rightRowCount > leftRowCount) {
       JoinPrimitives.sortMergeInnerJoin(rightKeys, leftKeys, compareNullsEqual, false, false).reverse
     } else {
       JoinPrimitives.sortMergeInnerJoin(leftKeys, rightKeys, compareNullsEqual, false, false)
@@ -1495,12 +1495,12 @@ class HashJoinStreamSideIterator(
     }
     logJoinCardinality(leftKeys, rightKeys, implName, originalJoinType)
     
-    // Perform inner hash join with smaller table on the left for better performance
+    // Perform inner hash join with smaller table on the right for better performance
     val leftRowCount = leftTable.getRowCount
     val rightRowCount = rightTable.getRowCount
     
     // innerMaps(0) is always the left table and innerMaps(1) is always the right table
-    val innerMaps = if (rightRowCount < leftRowCount) {
+    val innerMaps = if (rightRowCount > leftRowCount) {
       JoinPrimitives.hashInnerJoin(rightKeys, leftKeys, compareNullsEqual).reverse
     } else {
       JoinPrimitives.hashInnerJoin(leftKeys, rightKeys, compareNullsEqual)
@@ -1564,13 +1564,13 @@ class HashJoinStreamSideIterator(
     logJoinCardinality(leftKeys, rightKeys, s"INNER_SORT_WITH_POST (outer: $joinType, conditional)",
       originalJoinType)
     
-    // Perform inner sort-merge join with smaller table on the left for better performance
+    // Perform inner sort-merge join with smaller table on the right for better performance
     val leftRowCount = leftTable.getRowCount
     val rightRowCount = rightTable.getRowCount
     
     // innerMaps(0) is always the left table and innerMaps(1) is always the right table
     // Note: isLeftKeySorted=false, isRightKeySorted=false since keys are not pre-sorted
-    val innerMaps = if (rightRowCount < leftRowCount) {
+    val innerMaps = if (rightRowCount > leftRowCount) {
       JoinPrimitives.sortMergeInnerJoin(rightKeys, leftKeys, compareNullsEqual, false, false).reverse
     } else {
       JoinPrimitives.sortMergeInnerJoin(leftKeys, rightKeys, compareNullsEqual, false, false)
