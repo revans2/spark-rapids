@@ -31,6 +31,7 @@ This will create:
 
 ```bash
 spark-shell \
+  --conf 'spark.rapids.sql.allowMultipleJars=ALWAYS' \
   --jars ../datagen/target/datagen_2.12-25.12.0-SNAPSHOT-spark353.jar,\
 target/spark353/microbenchmarks_2.12-25.12.0-SNAPSHOT-spark353.jar,\
 ~/.m2/repository/com/nvidia/spark-rapids-jni/25.12.0-SNAPSHOT/spark-rapids-jni-25.12.0-SNAPSHOT-cuda12.jar

@@ -21,7 +21,9 @@
 // 1. Build the microbenchmarks module:
 //    cd microbenchmarks && mvn clean package -Dbuildver=353
 // 2. Launch spark-shell with the JARs (note: spark-rapids-jni required for HashJoin/SortMergeJoin):
-//    spark-shell --jars \
+//    spark-shell \
+//      --conf 'spark.rapids.sql.allowMultipleJars=ALWAYS' \
+//      --jars \
 //      ../datagen/target/datagen_2.12-25.12.0-SNAPSHOT-spark353.jar,\
 //      target/spark353/microbenchmarks_2.12-25.12.0-SNAPSHOT-spark353.jar,\
 //      ~/.m2/repository/com/nvidia/spark-rapids-jni/25.12.0-SNAPSHOT/spark-rapids-jni-25.12.0-SNAPSHOT-cuda12.jar
@@ -126,7 +128,8 @@ try {
       normalAst,
       Some(swappedAst)
     )),
-    iterations = benchmarkIterations
+    iterations = benchmarkIterations,
+    printHeader = false
   )
   
   // Test 1: Hash join with direct mixed API (keys + AST)

@@ -25,6 +25,15 @@ import org.apache.spark.sql.SparkSession
 
 object JoinBenchmarkRunner {
   
+  @volatile private var tsvHeaderPrinted = false
+  
+  private def ensureTSVHeaderPrinted(printHeader: Boolean): Unit = {
+    if (printHeader && !tsvHeaderPrinted) {
+      printTSVHeader()
+      tsvHeaderPrinted = true
+    }
+  }
+  
   /**
    * Configuration for join benchmark execution
    */
@@ -160,6 +169,7 @@ object JoinBenchmarkRunner {
     config: JoinBenchmarkConfig,
     spark: SparkSession
   ): BenchmarkResults = {
+    ensureTSVHeaderPrinted(config.printHeader)
     try {
       // Load Parquet files into GPU memory
       val (leftTable, rightTable) = loadTables(config.leftParquetPath, config.rightParquetPath)
