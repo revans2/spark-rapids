@@ -21,6 +21,28 @@ import ai.rapids.cudf.ast.CompiledExpression
 import com.nvidia.spark.rapids.benchmarks.JoinBenchmarkRunner._
 import com.nvidia.spark.rapids.jni.{DistinctHashJoin, HashJoin, JoinPrimitives, SortMergeJoin}
 
+/*
+ * JOIN EXECUTOR IMPLEMENTATION NOTES:
+ * 
+ * SEMI/ANTI JOIN STRATEGY:
+ * This implementation uses the post-processing approach for semi/anti joins rather than
+ * the FilteredJoin API from spark-rapids-jni. While FilteredJoin provides direct semi/anti
+ * join operations, the post-processing approach has advantages for benchmarking:
+ * 
+ * 1. CONSISTENT CACHING: All join types (inner, outer, semi, anti) use the same caching
+ *    infrastructure (HashJoin/DistinctHashJoin/SortMergeJoin), making benchmarks comparable.
+ * 
+ * 2. POST-PROCESSING COST VISIBILITY: The post-processing approach (inner join + makeSemi/makeAnti)
+ *    allows us to measure the cost of post-processing operations separately, providing more
+ *    detailed performance insights.
+ * 
+ * 3. FLEXIBILITY: HashWithPostStrategy and SortWithPostStrategy work uniformly across all join
+ *    types without special-casing semi/anti joins.
+ * 
+ * The FilteredJoin API remains available in spark-rapids-jni for production use cases where
+ * direct semi/anti joins may be more efficient than post-processing.
+ */
+
 /**
  * Build holder for non-conditional (key-only) joins.
  * 

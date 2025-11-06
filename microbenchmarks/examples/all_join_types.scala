@@ -101,8 +101,10 @@ println(s"Distinct keys: $distinctKeys (enables distinct join optimization)")
 // ============================================================================
 
 println("\n" + "="*80)
-println("Running Comprehensive Join Type Benchmarks")
+println("PART 1: CACHING PERFORMANCE DEMONSTRATION")
 println("="*80 + "\n")
+println("This section demonstrates the performance impact of join object caching.")
+println("With more iterations, the benefit of caching becomes more pronounced.\n")
 
 // Print TSV header
 printTSVHeader()
@@ -120,6 +122,170 @@ val baseConfig = JoinBenchmarkConfig(
   iterations = benchmarkIterations,
   printHeader = false
 )
+
+// Use more iterations for caching tests to show the performance benefit clearly
+val cachingIterations = 20
+
+println("\n--- CACHING PERFORMANCE TESTS (Inner Join) ---")
+println("Testing with " + cachingIterations + " iterations to demonstrate caching benefit")
+
+// Test 0.1: Baseline - no optimizations at all
+val r0_1 = runBenchmark(baseConfig.copy(
+  testName = "baseline_no_opt",
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    allowBuildSideSwap = false,
+    useDistinctJoin = false,
+    cacheJoinObject = false,
+    cacheDistinctFlag = false,
+    cacheRemapping = false
+  )
+), spark)
+printResultsTSV(r0_1)
+
+// Test 0.2: Just useDistinctJoin (check distinctness every iteration)
+val r0_2 = runBenchmark(baseConfig.copy(
+  testName = "distinct_no_cache",
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    useDistinctJoin = true,
+    cacheDistinctFlag = false,
+    cacheJoinObject = false
+  )
+), spark)
+printResultsTSV(r0_2)
+
+// Test 0.3: useDistinctJoin + cacheDistinctFlag (check once, reuse result)
+val r0_3 = runBenchmark(baseConfig.copy(
+  testName = "distinct_cache_flag",
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    useDistinctJoin = true,
+    cacheDistinctFlag = true,
+    cacheJoinObject = false
+  )
+), spark)
+printResultsTSV(r0_3)
+
+// Test 0.4: cacheJoinObject only (build hash table once)
+val r0_4 = runBenchmark(baseConfig.copy(
+  testName = "cache_join_object",
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    useDistinctJoin = false,
+    cacheJoinObject = true
+  )
+), spark)
+printResultsTSV(r0_4)
+
+// Test 0.5: useDistinctJoin + cacheJoinObject (check distinct, build once)
+val r0_5 = runBenchmark(baseConfig.copy(
+  testName = "distinct_cache_object",
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    useDistinctJoin = true,
+    cacheDistinctFlag = false,
+    cacheJoinObject = true
+  )
+), spark)
+printResultsTSV(r0_5)
+
+// Test 0.6: ALL CACHING OPTIMIZATIONS (best performance)
+val r0_6 = runBenchmark(baseConfig.copy(
+  testName = "all_caching_opts",
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    useDistinctJoin = true,
+    cacheDistinctFlag = true,
+    cacheJoinObject = true
+  )
+), spark)
+printResultsTSV(r0_6)
+
+println("\n--- CACHING PERFORMANCE TESTS (Left Outer Join) ---")
+
+// Test 0.7: Left Outer - baseline
+val r0_7 = runBenchmark(baseConfig.copy(
+  testName = "left_outer_baseline",
+  joinType = LeftOuterJoin,
+  buildSide = LeftBuild,
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    useDistinctJoin = false,
+    cacheJoinObject = false
+  )
+), spark)
+printResultsTSV(r0_7)
+
+// Test 0.8: Left Outer - with caching
+val r0_8 = runBenchmark(baseConfig.copy(
+  testName = "left_outer_cached",
+  joinType = LeftOuterJoin,
+  buildSide = LeftBuild,
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    useDistinctJoin = true,
+    cacheDistinctFlag = true,
+    cacheJoinObject = true
+  )
+), spark)
+printResultsTSV(r0_8)
+
+println("\n--- CACHING PERFORMANCE TESTS (Semi Join) ---")
+
+// Test 0.9: Semi - baseline
+val r0_9 = runBenchmark(baseConfig.copy(
+  testName = "semi_baseline",
+  joinType = LeftSemiJoin,
+  buildSide = LeftBuild,
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    useDistinctJoin = false,
+    cacheJoinObject = false
+  )
+), spark)
+printResultsTSV(r0_9)
+
+// Test 0.10: Semi - with caching
+val r0_10 = runBenchmark(baseConfig.copy(
+  testName = "semi_cached",
+  joinType = LeftSemiJoin,
+  buildSide = LeftBuild,
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    useDistinctJoin = false,  // DistinctHashJoin not applicable for semi/anti
+    cacheJoinObject = true
+  )
+), spark)
+printResultsTSV(r0_10)
+
+println("\n--- CACHING WITH SORT-MERGE STRATEGY ---")
+
+// Test 0.11: Sort-merge baseline
+val r0_11 = runBenchmark(baseConfig.copy(
+  testName = "sortmerge_baseline",
+  joinStrategy = SortWithPostStrategy,
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    cacheJoinObject = false
+  )
+), spark)
+printResultsTSV(r0_11)
+
+// Test 0.12: Sort-merge with caching
+val r0_12 = runBenchmark(baseConfig.copy(
+  testName = "sortmerge_cached",
+  joinStrategy = SortWithPostStrategy,
+  iterations = cachingIterations,
+  optimizations = JoinOptimizations(
+    cacheJoinObject = true
+  )
+), spark)
+printResultsTSV(r0_12)
+
+println("\n" + "="*80)
+println("PART 2: COMPREHENSIVE JOIN TYPE TESTS")
+println("="*80 + "\n")
 
 println("\n--- INNER JOIN TESTS ---")
 
@@ -404,11 +570,21 @@ printResultsTSV(r29)
 println("\n" + "="*80)
 println("Comprehensive Join Type Benchmark Complete!")
 println("="*80)
-println(s"\nTotal tests executed: 29")
-println(s"Join types tested: Inner, LeftOuter, RightOuter, FullOuter, LeftSemi, LeftAnti")
-println(s"Build side modes: LeftBuild, RightBuild, AutoPickSmallerIfAllowed, AutoMeetJoinRequirement")
-println(s"Strategies tested: HashJoinStrategy, HashWithPostStrategy, SortWithPostStrategy")
-println(s"Optimizations tested: useDistinctJoin, cacheDistinctFlag, cacheJoinObject, allowBuildSideSwap")
+println(s"\nTotal tests executed: 41")
+println(s"\nPart 1 - Caching Performance Tests (12 tests):")
+println(s"  - Demonstrates performance impact of cacheDistinctFlag and cacheJoinObject")
+println(s"  - Tests with $cachingIterations iterations to show caching benefit clearly")
+println(s"  - Covers: Inner, LeftOuter, Semi joins with Hash and SortMerge strategies")
+println(s"\nPart 2 - Comprehensive Join Type Tests (29 tests):")
+println(s"  - Join types: Inner, LeftOuter, RightOuter, FullOuter, LeftSemi, LeftAnti")
+println(s"  - Build side modes: LeftBuild, RightBuild, AutoPickSmallerIfAllowed")
+println(s"  - Strategies: HashJoinStrategy, HashWithPostStrategy, SortWithPostStrategy")
+println(s"  - Optimizations: useDistinctJoin, cacheDistinctFlag, cacheJoinObject, allowBuildSideSwap")
+println(s"\nKEY INSIGHTS TO LOOK FOR:")
+println(s"  1. Compare baseline_no_opt vs all_caching_opts to see total caching benefit")
+println(s"  2. Compare distinct_no_cache vs distinct_cache_flag to see cacheDistinctFlag benefit")
+println(s"  3. Compare baseline_no_opt vs cache_join_object to see cacheJoinObject benefit")
+println(s"  4. Look at mean time reduction across multiple iterations with caching enabled")
 println("\nYou can copy the TSV output above and paste into a spreadsheet for analysis.")
 
 
