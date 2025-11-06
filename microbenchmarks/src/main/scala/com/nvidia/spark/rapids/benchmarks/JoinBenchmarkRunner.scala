@@ -159,7 +159,12 @@ object JoinBenchmarkRunner {
     medianMs: Double,
     minMs: Double,
     maxMs: Double,
-    stdDevMs: Double
+    stdDevMs: Double,
+    optimizations: JoinOptimizations,
+    joinType: JoinTypeSpec,
+    joinStrategy: JoinStrategySpec,
+    buildSideConfig: BuildSideSpec,
+    actualBuildSide: Option[String]  // "Left" or "Right"
   )
   
   /**
@@ -200,6 +205,7 @@ object JoinBenchmarkRunner {
           // Run benchmark iterations
           val timings = ArrayBuffer[Double]()
           var totalOutputRows = 0L
+          var actualBuildSide: Option[String] = None
           val wallClockStart = System.nanoTime()
           
           (1 to config.iterations).foreach { i =>
@@ -213,9 +219,10 @@ object JoinBenchmarkRunner {
             val timingMs = (endTime - startTime) / 1e6
             timings += timingMs
             
-            // Track output rows from first iteration
+            // Track output rows and actual build side from first iteration
             if (i == 1) {
               totalOutputRows = gatherMaps(0).getRowCount
+              actualBuildSide = executor.getActualBuildSide
             }
             
             // Close gather maps
@@ -253,7 +260,12 @@ object JoinBenchmarkRunner {
             medianMs = median,
             minMs = min,
             maxMs = max,
-            stdDevMs = stdDev
+            stdDevMs = stdDev,
+            optimizations = config.optimizations,
+            joinType = config.joinType,
+            joinStrategy = config.joinStrategy,
+            buildSideConfig = config.buildSide,
+            actualBuildSide = actualBuildSide
           )
         } finally {
           executor.clearCache()
@@ -279,7 +291,12 @@ object JoinBenchmarkRunner {
           medianMs = 0.0,
           minMs = 0.0,
           maxMs = 0.0,
-          stdDevMs = 0.0
+          stdDevMs = 0.0,
+          optimizations = config.optimizations,
+          joinType = config.joinType,
+          joinStrategy = config.joinStrategy,
+          buildSideConfig = config.buildSide,
+          actualBuildSide = None
         )
       case e: IllegalArgumentException =>
         BenchmarkResults(
@@ -297,7 +314,12 @@ object JoinBenchmarkRunner {
           medianMs = 0.0,
           minMs = 0.0,
           maxMs = 0.0,
-          stdDevMs = 0.0
+          stdDevMs = 0.0,
+          optimizations = config.optimizations,
+          joinType = config.joinType,
+          joinStrategy = config.joinStrategy,
+          buildSideConfig = config.buildSide,
+          actualBuildSide = None
         )
       case e: Exception =>
         BenchmarkResults(
@@ -315,7 +337,12 @@ object JoinBenchmarkRunner {
           medianMs = 0.0,
           minMs = 0.0,
           maxMs = 0.0,
-          stdDevMs = 0.0
+          stdDevMs = 0.0,
+          optimizations = config.optimizations,
+          joinType = config.joinType,
+          joinStrategy = config.joinStrategy,
+          buildSideConfig = config.buildSide,
+          actualBuildSide = None
         )
     }
   }
@@ -357,12 +384,17 @@ object JoinBenchmarkRunner {
   def printResultsTSV(results: BenchmarkResults): Unit = {
     if (results.status == SUCCESS) {
       val optimizations = formatOptimizations(results)
+      val joinType = formatJoinType(results.joinType)
+      val strategy = formatJoinStrategy(results.joinStrategy)
+      val buildSideConfig = formatBuildSideConfig(results.buildSideConfig)
+      val actualBuild = results.actualBuildSide.getOrElse("N/A")
       println(s"${results.testName}\t${results.status}\t" +
         s"${results.leftRows}\t${results.rightRows}\t${results.outputRows}\t" +
         s"${results.numThreads}\t${results.iterations}\t" +
         s"${f"${results.wallClockMs}%.2f"}\t${f"${results.averageMs}%.2f"}\t" +
         s"${f"${results.medianMs}%.2f"}\t${f"${results.minMs}%.2f"}\t" +
-        s"${f"${results.maxMs}%.2f"}\t${f"${results.stdDevMs}%.2f"}\t$optimizations")
+        s"${f"${results.maxMs}%.2f"}\t${f"${results.stdDevMs}%.2f"}\t" +
+        s"$joinType\t$strategy\t$buildSideConfig\t$actualBuild\t$optimizations")
     } else {
       println(s"${results.testName}\t${results.status}\t" +
         s"ERROR\t${results.errorMessage.getOrElse("Unknown error")}")
@@ -375,12 +407,44 @@ object JoinBenchmarkRunner {
   def printTSVHeader(): Unit = {
     println("TestName\tStatus\tLeftRows\tRightRows\tOutputRows\t" +
       "NumThreads\tIterations\tWallClockMs\tAvgTimeMs\tMedianTimeMs\t" +
-      "MinTimeMs\tMaxTimeMs\tStdDevMs\tOptimizations")
+      "MinTimeMs\tMaxTimeMs\tStdDevMs\tJoinType\tStrategy\t" +
+      "BuildSideConfig\tActualBuildSide\tOptimizations")
   }
   
   private def formatOptimizations(results: BenchmarkResults): String = {
-    // TODO: Track actual optimizations used
-    "none"
+    val opts = results.optimizations
+    val parts = scala.collection.mutable.ArrayBuffer[String]()
+    
+    if (opts.allowBuildSideSwap) parts += "swap"
+    if (opts.remapComplexKeysToInts) parts += "remap"
+    if (opts.useDistinctJoin) parts += "distinct"
+    if (opts.cacheJoinObject) parts += "cache"
+    if (opts.cacheRemapping) parts += "cache-remap"
+    if (opts.cacheDistinctFlag) parts += "cache-distinct"
+    
+    if (parts.isEmpty) "none" else parts.mkString(",")
+  }
+  
+  private def formatBuildSideConfig(buildSide: BuildSideSpec): String = buildSide match {
+    case LeftBuild => "Left"
+    case RightBuild => "Right"
+    case AutoPickSmallerIfAllowed => "Auto(Smaller)"
+    case AutoMeetJoinRequirement => "Auto(Required)"
+  }
+  
+  private def formatJoinType(joinType: JoinTypeSpec): String = joinType match {
+    case InnerJoin => "Inner"
+    case LeftOuterJoin => "LeftOuter"
+    case RightOuterJoin => "RightOuter"
+    case FullOuterJoin => "FullOuter"
+    case LeftSemiJoin => "LeftSemi"
+    case LeftAntiJoin => "LeftAnti"
+  }
+  
+  private def formatJoinStrategy(strategy: JoinStrategySpec): String = strategy match {
+    case HashJoinStrategy => "Hash"
+    case HashWithPostStrategy => "HashPost"
+    case SortWithPostStrategy => "SortPost"
   }
 }
 
