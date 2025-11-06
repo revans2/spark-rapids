@@ -1,6 +1,6 @@
 # Join Micro-Benchmarks
 
-Phase 1 implementation of the join micro-benchmark framework for measuring GPU join performance at the lowest level.
+Phase 1 & 2 implementation of the join micro-benchmark framework for measuring GPU join performance at the lowest level.
 
 ## Building
 
@@ -54,16 +54,29 @@ Or manually paste the code from `examples/simple_inner_join.scala`.
 :load examples/conditional_join.scala
 ```
 
-## Phase 1 Features
+### Run All Join Types Example (Phase 2 - Comprehensive Tests)
 
-### Implemented
+```bash
+:load examples/all_join_types.scala
+```
+
+This comprehensive example runs 29 test cases covering:
+- All 6 join types (Inner, LeftOuter, RightOuter, FullOuter, LeftSemi, LeftAnti)
+- Multiple build side configurations
+- All 3 join strategies
+- Various optimization combinations
+
+## Implemented Features (Phase 1 & 2)
+
+### Core Functionality
 - ✅ Data generation using datagen APIs (Int, Long key types)
 - ✅ Multi-column composite keys
-- ✅ Inner join support only (other join types in Phase 2)
+- ✅ **All join types supported:**
+  - Inner, LeftOuter, RightOuter, FullOuter, LeftSemi, LeftAnti
 - ✅ Three join strategies:
-  - `HashJoinStrategy` - Direct hash join
-  - `HashWithPostStrategy` - Hash join with post-processing
-  - `SortWithPostStrategy` - Sort-merge join with post-processing
+  - `HashJoinStrategy` - Direct hash join (inner join only)
+  - `HashWithPostStrategy` - Hash join with post-processing (all join types)
+  - `SortWithPostStrategy` - Sort-merge join with post-processing (all join types)
 - ✅ All build side selection modes:
   - `LeftBuild` / `RightBuild` - Explicit build side
   - `AutoPickSmallerIfAllowed` - Pick smaller side when allowed
@@ -73,10 +86,14 @@ Or manually paste the code from `examples/simple_inner_join.scala`.
 - ✅ TSV output for spreadsheet analysis
 - ✅ Single-threaded execution (Phase 4 will add multi-threading)
 
+### Optimizations
+- ✅ **Distinct join optimization** - Uses `DistinctHashJoin` when build side has distinct keys
+- ✅ **Distinct flag caching** - Avoids repeated `distinctCount()` checks
+- ✅ **Join object caching** - Reuses hash tables across iterations
+- ✅ **Build side swapping** - Automatically picks smaller side when allowed
+
 ### Not Yet Implemented (Future Phases)
-- ❌ Other join types (left/right/full outer, semi, anti) - Phase 2
 - ❌ Key remapping optimization - Phase 5
-- ❌ Distinct join optimization - Phase 2
 - ❌ Multi-threaded execution - Phase 4
 - ❌ String/Decimal key types - Phase 4
 
@@ -111,10 +128,16 @@ The framework follows a three-layer architecture:
 
 ## Next Steps
 
-Phase 2 will add:
-- All join types (left/right/full outer, semi, anti)
-- Distinct join optimization
-- Basic caching optimizations
+Phase 3 (Join Object APIs - Completed):
+- HashJoin, DistinctHashJoin, SortMergeJoin, FilteredJoin APIs
+
+Phase 4 will add:
+- Multi-threaded execution support
+- Advanced strategies and threading
+- String/Decimal key types
+
+Phase 5 will add:
+- Key remapping optimization for complex types
 
 See `JOIN_MICROBENCHMARK_PLAN.md` for the complete roadmap.
 
