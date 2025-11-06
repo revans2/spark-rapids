@@ -152,9 +152,10 @@ private class InnerHashBuildHolder(
         case Right(dhj) => dhj.innerJoin(probeKeys)
       }
     } else {
-      // Non-cached path: check distinctness if optimization enabled
-      if (optimizations.useDistinctJoin) {
-        val isDistinct = if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
+      // Non-cached path: manually create+probe+destroy each time
+      // Check if build keys are distinct (use cached result if available)
+      val isDistinct = if (optimizations.useDistinctJoin) {
+        if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
           cachedIsDistinct.get
         } else {
           val distinct = buildKeys.getRowCount == buildKeys.distinctCount()
@@ -163,14 +164,25 @@ private class InnerHashBuildHolder(
           }
           distinct
         }
-        
-        if (isDistinct) {
-          buildKeys.innerDistinctJoinGatherMaps(probeKeys, compareNullsEqual)
-        } else {
-          buildKeys.innerJoinGatherMaps(probeKeys, compareNullsEqual)
+      } else {
+        false
+      }
+      
+      // Create appropriate join object based on distinctness
+      if (isDistinct) {
+        val tempDistinctHashJoin = DistinctHashJoin.create(buildKeys, compareNullsEqual)
+        try {
+          tempDistinctHashJoin.innerJoin(probeKeys)
+        } finally {
+          tempDistinctHashJoin.close()
         }
       } else {
-        buildKeys.innerJoinGatherMaps(probeKeys, compareNullsEqual)
+        val tempHashJoin = HashJoin.create(buildKeys, compareNullsEqual)
+        try {
+          tempHashJoin.innerJoin(probeKeys)
+        } finally {
+          tempHashJoin.close()
+        }
       }
     }
   }
@@ -272,11 +284,12 @@ private class PostProcessingBuildHolder(
         case Right(smj) => smj.innerJoin(probeKeys, false /* isProbeSorted */)
       }
     } else {
+      // Non-cached path: create+probe+destroy join object each time
       strategy match {
         case HashWithPostStrategy =>
           // Check distinctness for non-cached path if optimization enabled
-          if (optimizations.useDistinctJoin) {
-            val isDistinct = if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
+          val isDistinct = if (optimizations.useDistinctJoin) {
+            if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
               cachedIsDistinct.get
             } else {
               val canUseDistinct = joinType match {
@@ -293,23 +306,36 @@ private class PostProcessingBuildHolder(
                 false
               }
             }
-            
-            if (isDistinct) {
-              buildKeys.innerDistinctJoinGatherMaps(probeKeys, compareNullsEqual)
-            } else {
-              buildKeys.innerJoinGatherMaps(probeKeys, compareNullsEqual)
+          } else {
+            false
+          }
+          
+          // Use HashJoin or DistinctHashJoin API (not Table one-shot)
+          if (isDistinct) {
+            val dhj = DistinctHashJoin.create(buildKeys, compareNullsEqual)
+            try {
+              dhj.innerJoin(probeKeys)
+            } finally {
+              dhj.close()
             }
           } else {
-            buildKeys.innerJoinGatherMaps(probeKeys, compareNullsEqual)
+            val hj = HashJoin.create(buildKeys, compareNullsEqual)
+            try {
+              hj.innerJoin(probeKeys)
+            } finally {
+              hj.close()
+            }
           }
+          
         case SortWithPostStrategy =>
-          // Use JNI SortMergeJoin for consistency (not cached)
+          // Use SortMergeJoin API (not cached)
           val smj = SortMergeJoin.create(buildKeys, false /* isBuildSorted */, compareNullsEqual)
           try {
             smj.innerJoin(probeKeys, false /* isProbeSorted */)
           } finally {
             smj.close()
           }
+          
         case _ =>
           throw new IllegalArgumentException(
             s"Unsupported strategy for post-processing: $strategy")
