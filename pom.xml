@@ -64,6 +64,7 @@
     <modules>
         <module>aggregator</module>
         <module>datagen</module>
+        <module>microbenchmarks</module>
         <module>dist</module>
         <module>integration_tests</module>
         <module>shuffle-plugin</module>
