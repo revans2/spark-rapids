@@ -19,7 +19,7 @@ package com.nvidia.spark.rapids.benchmarks
 import ai.rapids.cudf._
 import ai.rapids.cudf.ast.CompiledExpression
 import com.nvidia.spark.rapids.benchmarks.JoinBenchmarkRunner._
-import com.nvidia.spark.rapids.jni.{DistinctHashJoin, HashJoin, JoinPrimitives, SortMergeJoin}
+import com.nvidia.spark.rapids.jni.{DistinctHashJoin, FilteredJoin, HashJoin, JoinPrimitives, SortMergeJoin}
 
 /*
  * JOIN EXECUTOR IMPLEMENTATION NOTES:
@@ -192,6 +192,232 @@ private class InnerHashBuildHolder(
       case Left(hj) => hj.close()
       case Right(dhj) => dhj.close()
     }
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
+ * Non-conditional build holder for left outer hash joins.
+ * Uses HashJoin (can be cached if cacheJoinObject is enabled).
+ * Note: DistinctHashJoin.leftJoin() returns a single GatherMap (for remapping only),
+ * not two maps, so it cannot be used for left outer joins. Always use HashJoin.
+ */
+private class LeftOuterHashBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  tablesWereSwapped: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder {
+  
+  private var cachedJoinObject: Option[HashJoin] = None
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      if (optimizations.cacheJoinObject) {
+        // Left outer join always uses HashJoin (DistinctHashJoin.leftJoin() is only for remapping)
+        cachedJoinObject = Some(HashJoin.create(buildKeys, compareNullsEqual))
+      }
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    if (cachedJoinObject.isDefined) {
+      cachedJoinObject.get.leftJoin(probeKeys)
+    } else {
+      // Non-cached path: manually create+probe+destroy each time
+      val tempHashJoin = HashJoin.create(buildKeys, compareNullsEqual)
+      try {
+        tempHashJoin.leftJoin(probeKeys)
+      } finally {
+        tempHashJoin.close()
+      }
+    }
+  }
+  
+  def close(): Unit = {
+    cachedJoinObject.foreach(_.close())
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
+ * Non-conditional build holder for right outer hash joins.
+ * Right outer join is implemented as left outer join with swapped sides.
+ * Uses HashJoin (can be cached if cacheJoinObject is enabled).
+ * Note: DistinctHashJoin.leftJoin() returns a single GatherMap (for remapping only),
+ * not two maps, so it cannot be used for right outer joins. Always use HashJoin.
+ */
+private class RightOuterHashBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  tablesWereSwapped: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder {
+  
+  private var cachedJoinObject: Option[HashJoin] = None
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      if (optimizations.cacheJoinObject) {
+        // Right outer join always uses HashJoin (DistinctHashJoin.leftJoin() is only for remapping)
+        cachedJoinObject = Some(HashJoin.create(buildKeys, compareNullsEqual))
+      }
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    // Right outer join is implemented as left outer join with swapped sides
+    // Build the left outer, then swap the result gather maps
+    val result = if (cachedJoinObject.isDefined) {
+      cachedJoinObject.get.leftJoin(probeKeys)
+    } else {
+      // Non-cached path: manually create+probe+destroy each time
+      val tempHashJoin = HashJoin.create(buildKeys, compareNullsEqual)
+      try {
+        tempHashJoin.leftJoin(probeKeys)
+      } finally {
+        tempHashJoin.close()
+      }
+    }
+    
+    // Swap the gather maps to convert left outer to right outer
+    Array(result(1), result(0))
+  }
+  
+  def close(): Unit = {
+    cachedJoinObject.foreach(_.close())
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
+ * Non-conditional build holder for full outer hash joins.
+ * Uses HashJoin (can be cached if cacheJoinObject is enabled).
+ * Does NOT support distinct join optimization (FullOuter doesn't support DistinctHashJoin).
+ */
+private class FullOuterHashBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  tablesWereSwapped: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder {
+  
+  private var cachedJoinObject: Option[HashJoin] = None
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      if (optimizations.cacheJoinObject) {
+        // Full outer join doesn't support DistinctHashJoin, so always use HashJoin
+        cachedJoinObject = Some(HashJoin.create(buildKeys, compareNullsEqual))
+      }
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    if (cachedJoinObject.isDefined) {
+      cachedJoinObject.get.fullJoin(probeKeys)
+    } else {
+      // Non-cached path: manually create+probe+destroy each time
+      val tempHashJoin = HashJoin.create(buildKeys, compareNullsEqual)
+      try {
+        tempHashJoin.fullJoin(probeKeys)
+      } finally {
+        tempHashJoin.close()
+      }
+    }
+  }
+  
+  def close(): Unit = {
+    cachedJoinObject.foreach(_.close())
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
+ * Non-conditional build holder for semi and anti hash joins.
+ * Uses FilteredJoin API for direct semi/anti join operations.
+ * Supports join object caching (FilteredJoin can be built once and probed multiple times).
+ * Does NOT support distinct join optimization (FilteredJoin doesn't have a distinct variant).
+ */
+private class SemiAntiHashBuildHolder(
+  joinType: JoinTypeSpec,
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder {
+  
+  private var cachedJoinObject: Option[FilteredJoin] = None
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      if (optimizations.cacheJoinObject) {
+        // Create FilteredJoin object once for reuse
+        cachedJoinObject = Some(FilteredJoin.create(buildKeys, compareNullsEqual))
+      }
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    if (cachedJoinObject.isDefined) {
+      // Use cached FilteredJoin object
+      joinType match {
+        case LeftSemiJoin =>
+          Array(cachedJoinObject.get.semiJoin(probeKeys))
+        
+        case LeftAntiJoin =>
+          Array(cachedJoinObject.get.antiJoin(probeKeys))
+        
+        case _ =>
+          throw new IllegalArgumentException(
+            s"SemiAntiHashBuildHolder only supports LeftSemiJoin and LeftAntiJoin, got $joinType")
+      }
+    } else {
+      // Non-cached path: create+probe+destroy each time
+      val tempFilteredJoin = FilteredJoin.create(buildKeys, compareNullsEqual)
+      try {
+        joinType match {
+          case LeftSemiJoin =>
+            Array(tempFilteredJoin.semiJoin(probeKeys))
+          
+          case LeftAntiJoin =>
+            Array(tempFilteredJoin.antiJoin(probeKeys))
+          
+          case _ =>
+            throw new IllegalArgumentException(
+              s"SemiAntiHashBuildHolder only supports LeftSemiJoin and LeftAntiJoin, got $joinType")
+        }
+      } finally {
+        tempFilteredJoin.close()
+      }
+    }
+  }
+  
+  def close(): Unit = {
+    cachedJoinObject.foreach(_.close())
     buildKeys.close()
     buildTable.close()
   }
@@ -756,6 +982,22 @@ private[benchmarks] class JoinExecutor(
             new InnerHashBuildHolder(buildTable, buildKeys, compareNullsEqual,
               tablesWereSwapped, optimizations)
           
+          case (LeftOuterJoin, HashJoinStrategy) =>
+            new LeftOuterHashBuildHolder(buildTable, buildKeys, compareNullsEqual,
+              tablesWereSwapped, optimizations)
+          
+          case (RightOuterJoin, HashJoinStrategy) =>
+            new RightOuterHashBuildHolder(buildTable, buildKeys, compareNullsEqual,
+              tablesWereSwapped, optimizations)
+          
+          case (FullOuterJoin, HashJoinStrategy) =>
+            new FullOuterHashBuildHolder(buildTable, buildKeys, compareNullsEqual,
+              tablesWereSwapped, optimizations)
+          
+          case (LeftSemiJoin | LeftAntiJoin, HashJoinStrategy) =>
+            new SemiAntiHashBuildHolder(joinType, buildTable, buildKeys, compareNullsEqual,
+              optimizations)
+          
           case (_, HashWithPostStrategy | SortWithPostStrategy) =>
             // All join types supported with post-processing
             new PostProcessingBuildHolder(joinType, strategy, buildTable, buildKeys,
@@ -764,8 +1006,7 @@ private[benchmarks] class JoinExecutor(
           
           case _ =>
             throw new UnsupportedOperationException(
-              s"Join type $joinType only supported with " +
-              s"HashWithPostStrategy or SortWithPostStrategy")
+              s"Join type $joinType with strategy $strategy not supported")
         }
         Left(holder)
     }
@@ -853,10 +1094,17 @@ private[benchmarks] class JoinExecutor(
         // Post-processing strategies can swap for all join types
         true
       case HashJoinStrategy =>
-        // Direct hash join strategy can only swap for inner joins
+        // Direct hash join strategy can only swap for join types with symmetric semantics
         joinType match {
-          case InnerJoin => true
-          case _ => false
+          case InnerJoin | FullOuterJoin =>
+            // Inner and Full Outer joins are symmetric and can swap build sides
+            true
+          case LeftOuterJoin | RightOuterJoin | LeftSemiJoin | LeftAntiJoin =>
+            // These join types have asymmetric semantics and CANNOT swap build sides
+            // - LeftOuter: must preserve left side
+            // - RightOuter: must preserve right side
+            // - Semi/Anti: return only left side rows
+            false
         }
       case _ =>
         false
