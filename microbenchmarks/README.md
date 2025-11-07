@@ -140,11 +140,11 @@ val cfg = JoinBenchmarkConfig(
 
 ## Example Output
 
-The benchmarks output TSV format that can be pasted into a spreadsheet:
+The benchmarks output TSV format that can be pasted into a spreadsheet. Header and a sample row are shown below (fields match the implementation in `printTSVHeader` and `printResultsTSV`):
 
 ```
-TestName	Status	LeftRows	RightRows	OutputRows	NumThreads	Iterations	WallClockMs	AvgTimeMs	MedianTimeMs	MinTimeMs	MaxTimeMs	StdDevMs	Optimizations
-hash_inner_1M_1M	SUCCESS	1000000	1000000	1000000	1	10	152.45	15.12	14.98	14.23	17.45	0.89	none
+TestName	Status	LeftRows	RightRows	OutputRows	NumThreads	Iterations	WallClockMs	AvgTimeMs	MedianTimeMs	MinTimeMs	MaxTimeMs	StdDevMs	JoinType	Strategy	BuildSideConfig	ActualBuildSide	Optimizations
+hash_inner_1M_1M	SUCCESS	1000000	1000000	1000000	1	10	152.45	15.12	14.98	14.23	17.45	0.89	Inner	HashObject	Right	Right	none
 ```
 
 ## Architecture

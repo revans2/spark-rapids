@@ -67,7 +67,6 @@ object JoinBenchmarkRunner {
     rightKeyIndices: Seq[Int] = Seq(0),
     iterations: Int = 10,
     numThreads: Int = 1,
-    enableCaching: Boolean = false,
     printHeader: Boolean = true
   )
   
