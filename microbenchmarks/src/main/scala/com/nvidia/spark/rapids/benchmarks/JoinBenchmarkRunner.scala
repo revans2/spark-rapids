@@ -18,8 +18,8 @@ package com.nvidia.spark.rapids.benchmarks
 
 import java.util.concurrent.{Callable, Executors, ThreadFactory, TimeUnit}
 
+import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
-import scala.jdk.CollectionConverters._
 
 import ai.rapids.cudf._
 import ai.rapids.cudf.ast.{BinaryOperation, BinaryOperator, ColumnReference, CompiledExpression, TableReference}

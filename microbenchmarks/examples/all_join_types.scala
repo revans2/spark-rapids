@@ -756,4 +756,208 @@ println(s"  7. Note that LeftOuter/RightOuter with HashJoinStrategy don't benefi
 println(s"  8. Semi/Anti joins with FilteredJoin now support caching - compare cached vs non-cached!")
 println("\nYou can copy the TSV output above and paste into a spreadsheet for analysis.")
 
+// ============================================================================
+// STEP 3: Key Remapping Tests with Different Key Types
+// ============================================================================
+
+println("\n" + "="*80)
+println("PART 3: KEY REMAPPING PERFORMANCE TESTS")
+println("="*80 + "\n")
+println("This section tests key remapping performance with different key types.")
+println("Key remapping converts complex keys to integers for faster joins.")
+println("Testing with: int, long, decimal(38,0), and string keys\n")
+
+// Function to generate data with different key types
+def generateKeyTypeData(keyType: String, basePath: String): (String, String) = {
+  val leftPath = s"$basePath/left_$keyType"
+  val rightPath = s"$basePath/right_$keyType"
+  
+  println(s"Generating data with $keyType keys...")
+  
+  val leftCfg = TableGenConfig(
+    numRows = leftNumRows,
+    keyColumns = Seq(
+      KeyColumnSpec(
+        name = "key1",
+        dataType = keyType,
+        minSeed = 0,
+        maxSeed = distinctKeys - 1,
+        distribution = DistinctDistribution()
+      )
+    ),
+    payloadColumns = Seq(
+      PayloadColumnSpec("payload1", "int", minSeed = 0, maxSeed = 1000),
+      PayloadColumnSpec("payload2", "long", minSeed = 0, maxSeed = 1000)
+    ),
+    outputPath = leftPath
+  )
+  
+  val rightCfg = TableGenConfig(
+    numRows = rightNumRows,
+    keyColumns = Seq(
+      KeyColumnSpec("key1", keyType, minSeed = 0, maxSeed = distinctKeys - 1,
+        distribution = DistinctDistribution())
+    ),
+    payloadColumns = Seq(
+      PayloadColumnSpec("payload1", "int", minSeed = 0, maxSeed = 1000)
+    ),
+    outputPath = rightPath
+  )
+  
+  generateJoinTables(leftCfg, rightCfg, keyGroupId, spark)
+  println(s"  Data generated: $leftPath and $rightPath")
+  
+  (leftPath, rightPath)
+}
+
+val keyTypesBasePath = "/data/tmp/join_bench/key_types"
+
+// Test key types: int, long, decimal(38,0), string
+val keyTypes = Seq("int", "long", "decimal(38,0)", "string")
+
+// Generate data for each key type
+val keyTypeDataPaths = keyTypes.map { keyType =>
+  keyType -> generateKeyTypeData(keyType, keyTypesBasePath)
+}.toMap
+
+println("\n--- KEY REMAPPING PERFORMANCE TESTS ---")
+println("Testing HashWithPostStrategy and SortWithPostStrategy")
+println("Comparing: no remapping vs remapped (cached) vs remapped (non-cached)\n")
+
+val remappingIterations = 10
+
+// Test each key type with different remapping configurations
+for (keyType <- keyTypes) {
+  val (leftPath, rightPath) = keyTypeDataPaths(keyType)
+  
+  println(s"\n=== Testing $keyType keys ===")
+  
+  val remapBaseConfig = JoinBenchmarkConfig(
+    testName = s"remap_${keyType}_base",
+    leftParquetPath = leftPath,
+    rightParquetPath = rightPath,
+    joinType = InnerJoin,
+    joinStrategy = HashWithPostStrategy,
+    buildSide = RightBuild,
+    optimizations = JoinOptimizations(),
+    conditionalFilter = None,
+    iterations = remappingIterations,
+    printHeader = false
+  )
+  
+  // Test 1: HashWithPostStrategy - No remapping
+  val r1 = runBenchmark(remapBaseConfig.copy(
+    testName = s"${keyType}_hash_no_remap",
+    optimizations = JoinOptimizations(
+      remapComplexKeysToInts = false,
+      cacheRemapping = false,
+      cacheJoinObject = false
+    )
+  ), spark)
+  printResultsTSV(r1)
+  
+  // Test 2: HashWithPostStrategy - Remapping with caching
+  val r2 = runBenchmark(remapBaseConfig.copy(
+    testName = s"${keyType}_hash_remap_cached",
+    optimizations = JoinOptimizations(
+      remapComplexKeysToInts = true,
+      cacheRemapping = true,
+      cacheJoinObject = false
+    )
+  ), spark)
+  printResultsTSV(r2)
+  
+  // Test 3: HashWithPostStrategy - Remapping without caching
+  val r3 = runBenchmark(remapBaseConfig.copy(
+    testName = s"${keyType}_hash_remap_nocache",
+    optimizations = JoinOptimizations(
+      remapComplexKeysToInts = true,
+      cacheRemapping = false,
+      cacheJoinObject = false
+    )
+  ), spark)
+  printResultsTSV(r3)
+  
+  // Test 4: HashWithPostStrategy - Remapping + join object caching
+  val r4 = runBenchmark(remapBaseConfig.copy(
+    testName = s"${keyType}_hash_both_cached",
+    optimizations = JoinOptimizations(
+      remapComplexKeysToInts = true,
+      cacheRemapping = true,
+      cacheJoinObject = true
+    )
+  ), spark)
+  printResultsTSV(r4)
+  
+  // Test 5: SortWithPostStrategy - No remapping
+  val r5 = runBenchmark(remapBaseConfig.copy(
+    testName = s"${keyType}_sort_no_remap",
+    joinStrategy = SortWithPostStrategy,
+    optimizations = JoinOptimizations(
+      remapComplexKeysToInts = false,
+      cacheRemapping = false,
+      cacheJoinObject = false
+    )
+  ), spark)
+  printResultsTSV(r5)
+  
+  // Test 6: SortWithPostStrategy - Remapping with caching
+  val r6 = runBenchmark(remapBaseConfig.copy(
+    testName = s"${keyType}_sort_remap_cached",
+    joinStrategy = SortWithPostStrategy,
+    optimizations = JoinOptimizations(
+      remapComplexKeysToInts = true,
+      cacheRemapping = true,
+      cacheJoinObject = false
+    )
+  ), spark)
+  printResultsTSV(r6)
+  
+  // Test 7: SortWithPostStrategy - Remapping without caching
+  val r7 = runBenchmark(remapBaseConfig.copy(
+    testName = s"${keyType}_sort_remap_nocache",
+    joinStrategy = SortWithPostStrategy,
+    optimizations = JoinOptimizations(
+      remapComplexKeysToInts = true,
+      cacheRemapping = false,
+      cacheJoinObject = false
+    )
+  ), spark)
+  printResultsTSV(r7)
+  
+  // Test 8: SortWithPostStrategy - Remapping + join object caching
+  val r8 = runBenchmark(remapBaseConfig.copy(
+    testName = s"${keyType}_sort_both_cached",
+    joinStrategy = SortWithPostStrategy,
+    optimizations = JoinOptimizations(
+      remapComplexKeysToInts = true,
+      cacheRemapping = true,
+      cacheJoinObject = true
+    )
+  ), spark)
+  printResultsTSV(r8)
+}
+
+println("\n" + "="*80)
+println("Key Remapping Performance Tests Complete!")
+println("="*80)
+println(s"\nTested key types: ${keyTypes.mkString(", ")}")
+println(s"Total key remapping tests: ${keyTypes.size * 8} (8 tests per key type)")
+println(s"\nFor each key type, tested:")
+println(s"  1. HashWithPostStrategy - no remapping (baseline)")
+println(s"  2. HashWithPostStrategy - remapping with caching")
+println(s"  3. HashWithPostStrategy - remapping without caching")
+println(s"  4. HashWithPostStrategy - remapping + join object caching")
+println(s"  5. SortWithPostStrategy - no remapping (baseline)")
+println(s"  6. SortWithPostStrategy - remapping with caching")
+println(s"  7. SortWithPostStrategy - remapping without caching")
+println(s"  8. SortWithPostStrategy - remapping + join object caching")
+println(s"\nKEY INSIGHTS TO LOOK FOR:")
+println(s"  1. Remapping overhead for different key types")
+println(s"  2. Performance benefit of cacheRemapping vs non-cached remapping")
+println(s"  3. String and decimal keys may benefit most from remapping")
+println(s"  4. Int keys should show minimal difference (already integers)")
+println(s"  5. Compare independent caching (remap only vs join object only)")
+println("\nYou can copy the TSV output above and paste into a spreadsheet for analysis.")
+
 
