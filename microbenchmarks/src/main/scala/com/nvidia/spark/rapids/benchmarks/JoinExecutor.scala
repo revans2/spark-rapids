@@ -21,26 +21,17 @@ import ai.rapids.cudf.ast.CompiledExpression
 import com.nvidia.spark.rapids.benchmarks.JoinBenchmarkRunner._
 import com.nvidia.spark.rapids.jni.{DistinctHashJoin, FilteredJoin, HashJoin, JoinPrimitives, KeyRemapping, SortMergeJoin}
 
-/*
- * JOIN EXECUTOR IMPLEMENTATION NOTES:
+/**
+ * Join execution implementation with multiple strategies and optimizations.
  * 
- * SEMI/ANTI JOIN STRATEGY:
- * This implementation uses the post-processing approach for semi/anti joins rather than
- * the FilteredJoin API from spark-rapids-jni. While FilteredJoin provides direct semi/anti
- * join operations, the post-processing approach has advantages for benchmarking:
+ * This module provides build holders for both key-only and mixed (key+AST) joins.
+ * Build holders encapsulate the join object lifecycle and optimization state,
+ * enabling efficient benchmarking with various caching strategies.
  * 
- * 1. CONSISTENT CACHING: All join types (inner, outer, semi, anti) use the same caching
- *    infrastructure (HashJoin/DistinctHashJoin/SortMergeJoin), making benchmarks comparable.
- * 
- * 2. POST-PROCESSING COST VISIBILITY: The post-processing approach (inner join + makeSemi/makeAnti)
- *    allows us to measure the cost of post-processing operations separately, providing more
- *    detailed performance insights.
- * 
- * 3. FLEXIBILITY: HashObjectWithPostStrategy and SortObjectWithPostStrategy work uniformly across all join
- *    types without special-casing semi/anti joins.
- * 
- * The FilteredJoin API remains available in spark-rapids-jni for production use cases where
- * direct semi/anti joins may be more efficient than post-processing.
+ * Key design principles:
+ * - Clean resource ownership: holders own all resources except CompiledExpression references
+ * - Lazy initialization: caching structures created on first use
+ * - Flexible strategies: supports both object-based (cacheable) and direct (one-shot) APIs
  */
 
 /**
@@ -128,6 +119,103 @@ private object KeyRemappingHelper {
 }
 
 /**
+ * Trait providing common key remapping functionality for build holders.
+ * Handles both cached and non-cached remapping of build and probe keys.
+ */
+private trait RemappingSupport {
+  protected var remapStructures: Option[KeyRemapping.RemapStructures] = None
+  protected var remappedBuildKeys: Option[ColumnVector] = None
+  
+  /**
+   * Initialize remapping structures for the build keys.
+   * Call this during holder initialization if remapping is enabled.
+   */
+  protected def initializeRemapping(buildKeys: Table, optimizations: JoinOptimizations): Unit = {
+    if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
+      val remap = KeyRemapping.createRemapStructures(buildKeys)
+      remapStructures = Some(remap)
+      remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
+    }
+  }
+  
+  /**
+   * Remap probe keys using cached or temporary remapping structures.
+   * Returns Some(remappedColumn) if remapping is enabled, None otherwise.
+   * Caller is responsible for closing the returned ColumnVector.
+   */
+  protected def remapProbeKeys(
+      probeKeys: Table, 
+      buildKeys: Table, 
+      optimizations: JoinOptimizations): Option[ColumnVector] = {
+    if (optimizations.remapComplexKeysToInts) {
+      if (remapStructures.isDefined) {
+        // Use cached remapping structures
+        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
+      } else {
+        // Non-cached: create temporary structures
+        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+        try {
+          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
+        } finally {
+          tempRemap.close()
+        }
+      }
+    } else {
+      None
+    }
+  }
+  
+  /**
+   * Get the actual build keys to use for join operations.
+   * Returns a Table wrapping remapped keys if available, otherwise the original keys.
+   * Caller must close the returned Table if it's not the same as buildKeys.
+   */
+  protected def getActualBuildKeys(
+      buildKeys: Table,
+      optimizations: JoinOptimizations): Table = {
+    if (optimizations.remapComplexKeysToInts && remappedBuildKeys.isDefined) {
+      new Table(remappedBuildKeys.get)
+    } else if (optimizations.remapComplexKeysToInts) {
+      // Non-cached: remap build keys now
+      val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+      try {
+        val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
+        try {
+          new Table(remappedCol)
+        } finally {
+          remappedCol.close()
+        }
+      } finally {
+        tempRemap.close()
+      }
+    } else {
+      buildKeys
+    }
+  }
+  
+  /**
+   * Wrap a remapped ColumnVector in a Table, or return the original Table if no remapping.
+   * Caller must close the returned Table if it's different from originalKeys.
+   */
+  protected def wrapRemappedKeys(
+      remappedCol: Option[ColumnVector],
+      originalKeys: Table): Table = {
+    remappedCol match {
+      case Some(col) => new Table(col)
+      case None => originalKeys
+    }
+  }
+  
+  /**
+   * Clean up remapping resources. Call from holder's close() method.
+   */
+  protected def closeRemappingResources(): Unit = {
+    remapStructures.foreach(_.close())
+    remappedBuildKeys.foreach(_.close())
+  }
+}
+
+/**
  * Non-conditional build holder for inner hash joins.
  * Uses HashJoin or DistinctHashJoin (can be cached if cacheJoinObject is enabled).
  * Supports distinct join optimization with cacheDistinctFlag.
@@ -138,24 +226,16 @@ private class InnerHashBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
   private var cachedJoinObject: Option[Either[HashJoin, DistinctHashJoin]] = None
   private var cachedIsDistinct: Option[Boolean] = None
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
-      // Initialize remapping if enabled (independent of join object caching)
-      if (optimizations.remapComplexKeysToInts) {
-        if (optimizations.cacheRemapping) {
-          val remap = KeyRemapping.createRemapStructures(buildKeys)
-          remapStructures = Some(remap)
-          remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-        }
-      }
+      // Initialize remapping if enabled
+      initializeRemapping(buildKeys, optimizations)
       
       if (optimizations.cacheJoinObject) {
         // Determine which keys to use for join object creation
@@ -202,29 +282,11 @@ private class InnerHashBuildHolder(
   def join(probeKeys: Table): Array[GatherMap] = {
     ensureInitialized()
     
-    // Remap probe keys if remapping is enabled
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        // Use cached remapping structures
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        // Non-cached remapping: create structures on-the-fly
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    // Remap probe keys if needed
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         if (cachedJoinObject.isDefined) {
@@ -233,26 +295,8 @@ private class InnerHashBuildHolder(
             case Right(dhj) => dhj.innerJoin(actualProbeKeys)
           }
         } else {
-          // Non-cached join path: determine keys and create join object
-          val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            new Table(remappedBuildKeys.get)
-          } else if (optimizations.remapComplexKeysToInts) {
-            // Remapping enabled but not cached, remap build keys now
-            val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-            try {
-              val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-              try {
-                new Table(remappedCol)
-              } finally {
-                remappedCol.close()
-              }
-            } finally {
-              tempRemap.close()
-            }
-          } else {
-            buildKeys
-          }
+          // Non-cached join path
+          val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
           
           try {
             // Check if build keys are distinct (use cached result if available)
@@ -308,8 +352,7 @@ private class InnerHashBuildHolder(
       case Left(hj) => hj.close()
       case Right(dhj) => dhj.close()
     }
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -327,21 +370,15 @@ private class LeftOuterHashBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
   private var cachedJoinObject: Option[HashJoin] = None
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
       // Initialize remapping if enabled
-      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
-        remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-      }
+      initializeRemapping(buildKeys, optimizations)
       
       if (optimizations.cacheJoinObject) {
         // Determine which keys to use
@@ -370,50 +407,17 @@ private class LeftOuterHashBuildHolder(
     ensureInitialized()
     
     // Remap probe keys if needed
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         if (cachedJoinObject.isDefined) {
           cachedJoinObject.get.leftJoin(actualProbeKeys)
         } else {
           // Non-cached join path
-          val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            new Table(remappedBuildKeys.get)
-          } else if (optimizations.remapComplexKeysToInts) {
-            val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-            try {
-              val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-              try {
-                new Table(remappedCol)
-              } finally {
-                remappedCol.close()
-              }
-            } finally {
-              tempRemap.close()
-            }
-          } else {
-            buildKeys
-          }
+          val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
           
           try {
             val tempHashJoin = HashJoin.create(actualBuildKeys, compareNullsEqual)
@@ -441,8 +445,7 @@ private class LeftOuterHashBuildHolder(
   
   def close(): Unit = {
     cachedJoinObject.foreach(_.close())
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -461,21 +464,15 @@ private class RightOuterHashBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
   private var cachedJoinObject: Option[HashJoin] = None
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
       // Initialize remapping if enabled
-      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
-        remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-      }
+      initializeRemapping(buildKeys, optimizations)
       
       if (optimizations.cacheJoinObject) {
         val keysForJoin = if (optimizations.remapComplexKeysToInts &&
@@ -502,50 +499,17 @@ private class RightOuterHashBuildHolder(
     ensureInitialized()
     
     // Remap probe keys if needed
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         // Right outer join is implemented as left outer join with swapped sides
         val result = if (cachedJoinObject.isDefined) {
           cachedJoinObject.get.leftJoin(actualProbeKeys)
         } else {
-          val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            new Table(remappedBuildKeys.get)
-          } else if (optimizations.remapComplexKeysToInts) {
-            val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-            try {
-              val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-              try {
-                new Table(remappedCol)
-              } finally {
-                remappedCol.close()
-              }
-            } finally {
-              tempRemap.close()
-            }
-          } else {
-            buildKeys
-          }
+          val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
           
           try {
             val tempHashJoin = HashJoin.create(actualBuildKeys, compareNullsEqual)
@@ -576,8 +540,7 @@ private class RightOuterHashBuildHolder(
   
   def close(): Unit = {
     cachedJoinObject.foreach(_.close())
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -594,21 +557,15 @@ private class FullOuterHashBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
   private var cachedJoinObject: Option[HashJoin] = None
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
       // Initialize remapping if enabled
-      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
-        remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-      }
+      initializeRemapping(buildKeys, optimizations)
       
       if (optimizations.cacheJoinObject) {
         val keysForJoin = if (optimizations.remapComplexKeysToInts &&
@@ -635,49 +592,16 @@ private class FullOuterHashBuildHolder(
     ensureInitialized()
     
     // Remap probe keys if needed
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         if (cachedJoinObject.isDefined) {
           cachedJoinObject.get.fullJoin(actualProbeKeys)
         } else {
-          val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            new Table(remappedBuildKeys.get)
-          } else if (optimizations.remapComplexKeysToInts) {
-            val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-            try {
-              val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-              try {
-                new Table(remappedCol)
-              } finally {
-                remappedCol.close()
-              }
-            } finally {
-              tempRemap.close()
-            }
-          } else {
-            buildKeys
-          }
+          val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
           
           try {
             val tempHashJoin = HashJoin.create(actualBuildKeys, compareNullsEqual)
@@ -705,8 +629,7 @@ private class FullOuterHashBuildHolder(
   
   def close(): Unit = {
     cachedJoinObject.foreach(_.close())
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -724,21 +647,15 @@ private class SemiAntiHashBuildHolder(
   val buildKeys: Table,
   compareNullsEqual: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
   private var cachedJoinObject: Option[FilteredJoin] = None
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
       // Initialize remapping if enabled
-      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
-        remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-      }
+      initializeRemapping(buildKeys, optimizations)
       
       if (optimizations.cacheJoinObject) {
         val keysForJoin = if (optimizations.remapComplexKeysToInts &&
@@ -765,26 +682,10 @@ private class SemiAntiHashBuildHolder(
     ensureInitialized()
     
     // Remap probe keys if needed
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         if (cachedJoinObject.isDefined) {
@@ -803,24 +704,7 @@ private class SemiAntiHashBuildHolder(
           }
         } else {
           // Non-cached path
-          val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            new Table(remappedBuildKeys.get)
-          } else if (optimizations.remapComplexKeysToInts) {
-            val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-            try {
-              val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-              try {
-                new Table(remappedCol)
-              } finally {
-                remappedCol.close()
-              }
-            } finally {
-              tempRemap.close()
-            }
-          } else {
-            buildKeys
-          }
+          val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
           
           try {
             val tempFilteredJoin = FilteredJoin.create(actualBuildKeys, compareNullsEqual)
@@ -859,8 +743,7 @@ private class SemiAntiHashBuildHolder(
   
   def close(): Unit = {
     cachedJoinObject.foreach(_.close())
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -877,23 +760,15 @@ private class InnerHashDirectBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
   private var cachedIsDistinct: Option[Boolean] = None
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
-      // Initialize remapping if enabled (independent of join object caching)
-      if (optimizations.remapComplexKeysToInts) {
-        if (optimizations.cacheRemapping) {
-          val remap = KeyRemapping.createRemapStructures(buildKeys)
-          remapStructures = Some(remap)
-          remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-        }
-      }
+      // Initialize remapping if enabled
+      initializeRemapping(buildKeys, optimizations)
       initialized = true
     }
   }
@@ -902,45 +777,11 @@ private class InnerHashDirectBuildHolder(
     ensureInitialized()
     
     // Remap keys if needed
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-          remappedBuildKeys.isDefined) {
-        new Table(remappedBuildKeys.get)
-      } else if (optimizations.remapComplexKeysToInts) {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-          try {
-            new Table(remappedCol)
-          } finally {
-            remappedCol.close()
-          }
-        } finally {
-          tempRemap.close()
-        }
-      } else {
-        buildKeys
-      }
-      
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         // Check if build keys are distinct (use cached result if available)
@@ -979,8 +820,7 @@ private class InnerHashDirectBuildHolder(
   }
   
   def close(): Unit = {
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -997,19 +837,13 @@ private class LeftOuterHashDirectBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
-      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
-        remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-      }
+      initializeRemapping(buildKeys, optimizations)
       initialized = true
     }
   }
@@ -1017,45 +851,11 @@ private class LeftOuterHashDirectBuildHolder(
   def join(probeKeys: Table): Array[GatherMap] = {
     ensureInitialized()
     
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-          remappedBuildKeys.isDefined) {
-        new Table(remappedBuildKeys.get)
-      } else if (optimizations.remapComplexKeysToInts) {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-          try {
-            new Table(remappedCol)
-          } finally {
-            remappedCol.close()
-          }
-        } finally {
-          tempRemap.close()
-        }
-      } else {
-        buildKeys
-      }
-      
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         actualBuildKeys.leftJoinGatherMaps(actualProbeKeys, compareNullsEqual)
@@ -1074,8 +874,7 @@ private class LeftOuterHashDirectBuildHolder(
   }
   
   def close(): Unit = {
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -1093,19 +892,13 @@ private class RightOuterHashDirectBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
-      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
-        remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-      }
+      initializeRemapping(buildKeys, optimizations)
       initialized = true
     }
   }
@@ -1113,45 +906,11 @@ private class RightOuterHashDirectBuildHolder(
   def join(probeKeys: Table): Array[GatherMap] = {
     ensureInitialized()
     
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-          remappedBuildKeys.isDefined) {
-        new Table(remappedBuildKeys.get)
-      } else if (optimizations.remapComplexKeysToInts) {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-          try {
-            new Table(remappedCol)
-          } finally {
-            remappedCol.close()
-          }
-        } finally {
-          tempRemap.close()
-        }
-      } else {
-        buildKeys
-      }
-      
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         // Right outer join is implemented as left outer join with swapped sides
@@ -1173,8 +932,7 @@ private class RightOuterHashDirectBuildHolder(
   }
   
   def close(): Unit = {
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -1191,19 +949,13 @@ private class FullOuterHashDirectBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
-      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
-        remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-      }
+      initializeRemapping(buildKeys, optimizations)
       initialized = true
     }
   }
@@ -1211,45 +963,11 @@ private class FullOuterHashDirectBuildHolder(
   def join(probeKeys: Table): Array[GatherMap] = {
     ensureInitialized()
     
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-          remappedBuildKeys.isDefined) {
-        new Table(remappedBuildKeys.get)
-      } else if (optimizations.remapComplexKeysToInts) {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-          try {
-            new Table(remappedCol)
-          } finally {
-            remappedCol.close()
-          }
-        } finally {
-          tempRemap.close()
-        }
-      } else {
-        buildKeys
-      }
-      
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         actualBuildKeys.fullJoinGatherMaps(actualProbeKeys, compareNullsEqual)
@@ -1268,8 +986,7 @@ private class FullOuterHashDirectBuildHolder(
   }
   
   def close(): Unit = {
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -1291,14 +1008,12 @@ private class PostProcessingBuildHolder(
   buildSide: BuildSideSpec,
   leftRowCount: Long,
   rightRowCount: Long
-) extends NonConditionalBuildHolder {
+) extends NonConditionalBuildHolder with RemappingSupport {
   
   // Either[HashJoin | DistinctHashJoin, SortMergeJoin]
   private var cachedJoinObject:
       Option[Either[Either[HashJoin, DistinctHashJoin], SortMergeJoin]] = None
   private var cachedIsDistinct: Option[Boolean] = None
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
@@ -1310,11 +1025,7 @@ private class PostProcessingBuildHolder(
       }
       
       // Initialize remapping if enabled
-      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
-        remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-      }
+      initializeRemapping(buildKeys, optimizations)
       
       if (optimizations.cacheJoinObject) {
         // Determine which keys to use for join object creation
@@ -1327,7 +1038,8 @@ private class PostProcessingBuildHolder(
         
         try {
           // Check distinctness for hash joins if optimization enabled
-          val isDistinct = if (optimizations.useDistinctJoin && strategy == HashObjectWithPostStrategy) {
+          val isDistinct = if (optimizations.useDistinctJoin &&
+              strategy == HashObjectWithPostStrategy) {
             if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
               cachedIsDistinct.get
             } else {
@@ -1385,26 +1097,10 @@ private class PostProcessingBuildHolder(
     }
     
     // Remap probe keys if needed
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         // Step 1: Do inner join
@@ -1416,24 +1112,7 @@ private class PostProcessingBuildHolder(
           }
         } else {
           // Non-cached path: create+probe+destroy join object each time
-          val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            new Table(remappedBuildKeys.get)
-          } else if (optimizations.remapComplexKeysToInts) {
-            val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-            try {
-              val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-              try {
-                new Table(remappedCol)
-              } finally {
-                remappedCol.close()
-              }
-            } finally {
-              tempRemap.close()
-            }
-          } else {
-            buildKeys
-          }
+          val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
           
           try {
             strategy match {
@@ -1637,8 +1316,7 @@ private class PostProcessingBuildHolder(
       case Left(Right(dhj)) => dhj.close()
       case Right(smj) => smj.close()
     }
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
   }
@@ -1654,20 +1332,13 @@ private class MixedInnerHashBuildHolder(
   val astExpression: CompiledExpression,
   compareNullsEqual: Boolean,
   optimizations: JoinOptimizations
-) extends MixedConditionalBuildHolder {
+) extends MixedConditionalBuildHolder with RemappingSupport {
   
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
     if (!initialized) {
-      // Initialize remapping if enabled
-      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
-        remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
-      }
+      initializeRemapping(buildKeys, optimizations)
       initialized = true
     }
   }
@@ -1676,45 +1347,11 @@ private class MixedInnerHashBuildHolder(
     ensureInitialized()
     
     // Remap keys if needed
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-          remappedBuildKeys.isDefined) {
-        new Table(remappedBuildKeys.get)
-      } else if (optimizations.remapComplexKeysToInts) {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-          try {
-            new Table(remappedCol)
-          } finally {
-            remappedCol.close()
-          }
-        } finally {
-          tempRemap.close()
-        }
-      } else {
-        buildKeys
-      }
-      
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         val nullEq = if (compareNullsEqual) NullEquality.EQUAL else NullEquality.UNEQUAL
@@ -1740,8 +1377,7 @@ private class MixedInnerHashBuildHolder(
   }
   
   def close(): Unit = {
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
     // astExpression is a reference, not owned by holder
@@ -1765,14 +1401,12 @@ private class MixedPostProcessingBuildHolder(
   buildSide: BuildSideSpec,
   leftRowCount: Long,
   rightRowCount: Long
-) extends MixedConditionalBuildHolder {
+) extends MixedConditionalBuildHolder with RemappingSupport {
   
   // Either[HashJoin | DistinctHashJoin, SortMergeJoin]
   private var cachedJoinObject:
       Option[Either[Either[HashJoin, DistinctHashJoin], SortMergeJoin]] = None
   private var cachedIsDistinct: Option[Boolean] = None
-  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
-  private var remappedBuildKeys: Option[ColumnVector] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
@@ -1807,7 +1441,8 @@ private class MixedPostProcessingBuildHolder(
         
         try {
           // Check distinctness for hash joins if optimization enabled
-          val isDistinct = if (optimizations.useDistinctJoin && strategy == HashObjectWithPostStrategy) {
+          val isDistinct = if (optimizations.useDistinctJoin &&
+              strategy == HashObjectWithPostStrategy) {
             if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
               cachedIsDistinct.get
             } else {
@@ -1863,26 +1498,10 @@ private class MixedPostProcessingBuildHolder(
     }
     
     // Remap probe keys if needed
-    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
-      if (remapStructures.isDefined) {
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
-      } else {
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
-      }
-    } else {
-      None
-    }
+    val remappedProbeCol = remapProbeKeys(probeKeys, buildKeys, optimizations)
     
     try {
-      val actualProbeKeys = remappedProbeCol match {
-        case Some(col) => new Table(col)
-        case None => probeKeys
-      }
+      val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
         // Step 1: Do inner join on keys
@@ -1893,24 +1512,7 @@ private class MixedPostProcessingBuildHolder(
             case Right(smj) => smj.innerJoin(actualProbeKeys, false /* isProbeSorted */)
           }
         } else {
-          val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            new Table(remappedBuildKeys.get)
-          } else if (optimizations.remapComplexKeysToInts) {
-            val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-            try {
-              val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
-              try {
-                new Table(remappedCol)
-              } finally {
-                remappedCol.close()
-              }
-            } finally {
-              tempRemap.close()
-            }
-          } else {
-            buildKeys
-          }
+          val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
           
           try {
             strategy match {
@@ -2097,8 +1699,7 @@ private class MixedPostProcessingBuildHolder(
       case Left(Right(dhj)) => dhj.close()
       case Right(smj) => smj.close()
     }
-    remapStructures.foreach(_.close())
-    remappedBuildKeys.foreach(_.close())
+    closeRemappingResources()
     buildKeys.close()
     buildTable.close()
     // astExpression is a reference, not owned by holder
@@ -2170,20 +1771,16 @@ private[benchmarks] class JoinExecutor(
           case (InnerJoin, HashObjectStrategy) =>
             throw new IllegalArgumentException(
               s"HashObjectStrategy does not support mixed (AST) joins. " +
-              s"Use HashDirectStrategy or HashDirectWithPostStrategy for mixed joins.")
+              s"Use HashDirectStrategy, HashObjectWithPostStrategy, SortObjectWithPostStrategy, " +
+              s"HashDirectWithPostStrategy, or SortDirectWithPostStrategy for mixed joins.")
           
           case (InnerJoin, HashDirectStrategy) =>
             new MixedInnerHashBuildHolder(buildTable, buildKeys, ast, compareNullsEqual,
               optimizations)
           
-          case (_, HashObjectWithPostStrategy | SortObjectWithPostStrategy) =>
-            throw new IllegalArgumentException(
-              s"Object-based strategies (HashObjectWithPostStrategy, SortObjectWithPostStrategy) " +
-              s"do not support mixed (AST) joins. " +
-              s"Use HashDirectWithPostStrategy or SortDirectWithPostStrategy for mixed joins.")
-          
-          case (_, HashDirectWithPostStrategy | SortDirectWithPostStrategy) =>
-            // All join types supported with post-processing
+          case (_, HashObjectWithPostStrategy | SortObjectWithPostStrategy |
+                   HashDirectWithPostStrategy | SortDirectWithPostStrategy) =>
+            // All join types supported with post-processing (inner join + AST filter)
             new MixedPostProcessingBuildHolder(joinType, strategy, buildTable, buildKeys,
               ast, compareNullsEqual, tablesWereSwapped, optimizations, buildSide,
               leftTable.getRowCount, rightTable.getRowCount)
@@ -2191,7 +1788,9 @@ private[benchmarks] class JoinExecutor(
           case _ =>
             throw new IllegalArgumentException(
               s"Mixed conditional joins not supported for: $joinType with $strategy. " +
-              s"Use HashDirectStrategy, HashDirectWithPostStrategy, or SortDirectWithPostStrategy for mixed joins.")
+              s"HashObjectStrategy does not support mixed joins. " +
+              s"Use HashDirectStrategy, HashObjectWithPostStrategy, SortObjectWithPostStrategy, " +
+              s"HashDirectWithPostStrategy, or SortDirectWithPostStrategy for mixed joins.")
         }
         Right(holder)
       

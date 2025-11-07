@@ -17,6 +17,16 @@
 // Conditional Join Benchmark Example (Mixed Keys + AST)
 // This example demonstrates mixed joins with key matching + AST filtering.
 //
+// STRATEGIES TESTED:
+// All strategies that support mixed joins are tested:
+// 1. HashDirectStrategy - Direct mixed API (Table.mixedInnerJoinGatherMaps)
+// 2. HashObjectWithPostStrategy - Object API + post-processing (cacheable)
+// 3. SortObjectWithPostStrategy - Object API + post-processing (cacheable)
+// 4. HashDirectWithPostStrategy - Direct API + post-processing
+// 5. SortDirectWithPostStrategy - Direct API + post-processing
+//
+// NOTE: HashObjectStrategy does NOT support mixed joins (no object API available)
+//
 // To run this example:
 // 1. Build the microbenchmarks module:
 //    cd microbenchmarks && mvn clean package -Dbuildver=353
@@ -133,24 +143,45 @@ try {
   )
   
   // Test 1: Hash join with direct mixed API (keys + AST)
+  // Uses Table.mixedInnerJoinGatherMaps() - one-shot API
   val results1 = runBenchmark(baseConfig.copy(
-    testName = "hash_mixed"
+    testName = "hash_direct_mixed"
   ), spark)
   printResultsTSV(results1)
   
-  // Test 2: Hash with post-processing (keys + AST filter)
+  // Test 2: Hash Object with post-processing (keys + AST filter)
+  // Uses HashJoin object (cacheable) + AST filter post-processing
   val results2 = runBenchmark(baseConfig.copy(
-    testName = "hash_with_post_mixed",
-    joinStrategy = HashDirectWithPostStrategy
+    testName = "hash_object_post_mixed",
+    joinStrategy = HashObjectWithPostStrategy,
+    optimizations = JoinOptimizations(cacheJoinObject = true)
   ), spark)
   printResultsTSV(results2)
   
-  // Test 3: Sort-merge with post-processing (keys + AST filter)
+  // Test 3: Sort Object with post-processing (keys + AST filter)
+  // Uses SortMergeJoin object (cacheable) + AST filter post-processing
   val results3 = runBenchmark(baseConfig.copy(
-    testName = "sort_with_post_mixed",
-    joinStrategy = SortDirectWithPostStrategy
+    testName = "sort_object_post_mixed",
+    joinStrategy = SortObjectWithPostStrategy,
+    optimizations = JoinOptimizations(cacheJoinObject = true)
   ), spark)
   printResultsTSV(results3)
+  
+  // Test 4: Hash Direct with post-processing (keys + AST filter)
+  // Uses Table.innerJoinGatherMaps() (direct API) + AST filter post-processing
+  val results4 = runBenchmark(baseConfig.copy(
+    testName = "hash_direct_post_mixed",
+    joinStrategy = HashDirectWithPostStrategy
+  ), spark)
+  printResultsTSV(results4)
+  
+  // Test 5: Sort Direct with post-processing (keys + AST filter)
+  // Uses JoinPrimitives.sortMergeInnerJoin() (direct API) + AST filter post-processing
+  val results5 = runBenchmark(baseConfig.copy(
+    testName = "sort_direct_post_mixed",
+    joinStrategy = SortDirectWithPostStrategy
+  ), spark)
+  printResultsTSV(results5)
   
   println("\n" + "="*80)
   println("Conditional Join Benchmark Complete!")

@@ -1,6 +1,6 @@
 # Join Micro-Benchmarks
 
-Phase 1 & 2 implementation of the join micro-benchmark framework for measuring GPU join performance at the lowest level.
+A comprehensive micro-benchmark framework for measuring GPU join performance at the lowest level.
 
 ## Building
 
@@ -8,7 +8,7 @@ Phase 1 & 2 implementation of the join micro-benchmark framework for measuring G
 1. Build the datagen module first (required dependency):
 ```bash
 cd ../datagen
-mvn clean install -Dbuildver=353  # Use your Spark version (330, 353, 400, etc.)
+mvn clean install -Dbuildver=353  # Use your Spark version (e.g., 330, 353, 400)
 ```
 
 ### Build Microbenchmarks
@@ -54,48 +54,44 @@ Or manually paste the code from `examples/simple_inner_join.scala`.
 :load examples/conditional_join.scala
 ```
 
-### Run All Join Types Example (Phase 2 - Comprehensive Tests)
+### Run All Join Types Example
 
 ```bash
 :load examples/all_join_types.scala
 ```
 
-This comprehensive example runs 29 test cases covering:
+This comprehensive example includes extensive test coverage:
 - All 6 join types (Inner, LeftOuter, RightOuter, FullOuter, LeftSemi, LeftAnti)
 - Multiple build side configurations
-- All 3 join strategies
+- All join strategies (Object and Direct variants)
 - Various optimization combinations
 
-## Implemented Features (Phase 1 & 2)
+## Implemented Features
 
 ### Core Functionality
-- ✅ Data generation using datagen APIs (Int, Long key types)
+- ✅ Data generation using datagen APIs (all types supported via DDL strings)
 - ✅ Multi-column composite keys
-- ✅ **All join types supported:**
+- ✅ All join types:
   - Inner, LeftOuter, RightOuter, FullOuter, LeftSemi, LeftAnti
-- ✅ Three join strategies:
-  - `HashJoinStrategy` - Direct hash join (inner join only)
-  - `HashWithPostStrategy` - Hash join with post-processing (all join types)
-  - `SortWithPostStrategy` - Sort-merge join with post-processing (all join types)
+- ✅ Multiple join strategies:
+  - Object strategies: `HashObjectStrategy`, `HashObjectWithPostStrategy`, `SortObjectWithPostStrategy`
+  - Direct strategies: `HashDirectStrategy`, `HashDirectWithPostStrategy`, `SortDirectWithPostStrategy`
 - ✅ All build side selection modes:
   - `LeftBuild` / `RightBuild` - Explicit build side
   - `AutoPickSmallerIfAllowed` - Pick smaller side when allowed
   - `AutoMeetJoinRequirement` - Always use required side
 - ✅ Build holder pattern with caching support
 - ✅ AST-based conditional joins (keys + filtering)
+- ✅ Multi-threaded execution with per-thread build holders
 - ✅ TSV output for spreadsheet analysis
-- ✅ Single-threaded execution (Phase 4 will add multi-threading)
 
 ### Optimizations
+- ✅ **Key remapping** - Remaps complex types (String, Decimal, composite) to dense integers
 - ✅ **Distinct join optimization** - Uses `DistinctHashJoin` when build side has distinct keys
 - ✅ **Distinct flag caching** - Avoids repeated `distinctCount()` checks
 - ✅ **Join object caching** - Reuses hash tables across iterations
 - ✅ **Build side swapping** - Automatically picks smaller side when allowed
-
-### Not Yet Implemented (Future Phases)
-- ❌ Key remapping optimization - Phase 5
-- ❌ Multi-threaded execution - Phase 4
-- ❌ String/Decimal key types - Phase 4
+- ✅ **Remapping structure caching** - Reuses remapping structures across iterations
 
 ## Example Output
 
@@ -126,18 +122,10 @@ The framework follows a three-layer architecture:
    - Supports key-only and mixed (key+AST) joins
    - Strategy-specific implementations
 
-## Next Steps
+## Future Enhancements
 
-Phase 3 (Join Object APIs - Completed):
-- HashJoin, DistinctHashJoin, SortMergeJoin, FilteredJoin APIs
-
-Phase 4 will add:
-- Multi-threaded execution support
-- Advanced strategies and threading
-- String/Decimal key types
-
-Phase 5 will add:
-- Key remapping optimization for complex types
-
-See `JOIN_MICROBENCHMARK_PLAN.md` for the complete roadmap.
+Potential areas for future development:
+- Automated heuristics for strategy selection based on workload characteristics
+- Additional performance visualizations and analysis tools
+- Support for additional join types or custom join operations
 
