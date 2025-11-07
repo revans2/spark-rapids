@@ -66,6 +66,16 @@ This comprehensive example includes extensive test coverage:
 - All join strategies (Object and Direct variants)
 - Various optimization combinations
 
+### Run Object Creation Overhead Benchmark
+
+Measures the overhead of join object creation (JNI calls) versus direct API calls:
+
+```bash
+:load examples/object_creation_overhead.scala
+```
+
+Tests across different data sizes (10K-5M rows), key types (INT, LONG, STRING), selectivities (10%-100%), and join types to determine if overhead is fixed or data-dependent. Runtime: approximately 1-2 minutes including data generation and warmup.
+
 ## Implemented Features
 
 ### Core Functionality
@@ -173,4 +183,3 @@ Potential areas for future development:
 - Automated heuristics for strategy selection based on workload characteristics
 - Additional performance visualizations and analysis tools
 - Support for additional join types or custom join operations
-
