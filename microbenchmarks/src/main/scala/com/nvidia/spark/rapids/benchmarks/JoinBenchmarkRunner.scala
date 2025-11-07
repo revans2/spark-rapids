@@ -16,7 +16,10 @@
 
 package com.nvidia.spark.rapids.benchmarks
 
+import java.util.concurrent.{Callable, Executors, ThreadFactory, TimeUnit}
+
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters._
 
 import ai.rapids.cudf._
 import ai.rapids.cudf.ast.{BinaryOperation, BinaryOperator, ColumnReference, CompiledExpression, TableReference}
@@ -26,6 +29,20 @@ import org.apache.spark.sql.SparkSession
 object JoinBenchmarkRunner {
   
   @volatile private var tsvHeaderPrinted = false
+  
+  /**
+   * Thread factory for creating daemon threads with descriptive names.
+   * This ensures threads don't block JVM shutdown and are easy to identify in debugging.
+   */
+  private class DaemonThreadFactory(namePrefix: String) extends ThreadFactory {
+    private val threadNumber = new java.util.concurrent.atomic.AtomicInteger(1)
+    
+    override def newThread(r: Runnable): Thread = {
+      val t = new Thread(r, s"$namePrefix-${threadNumber.getAndIncrement()}")
+      t.setDaemon(true)
+      t
+    }
+  }
   
   private def ensureTSVHeaderPrinted(printHeader: Boolean): Unit = {
     if (printHeader && !tsvHeaderPrinted) {
@@ -168,6 +185,75 @@ object JoinBenchmarkRunner {
   )
   
   /**
+   * Result from a single thread's benchmark execution.
+   */
+  private case class ThreadResult(
+    timings: Seq[Double],
+    outputRows: Long,
+    actualBuildSide: Option[String]
+  )
+  
+  /**
+   * Run benchmark iterations on a single thread with its own executor.
+   * Returns timing results for aggregation.
+   */
+  private def runThreadIterations(
+    threadId: Int,
+    iterations: Int,
+    leftTable: Table,
+    rightTable: Table,
+    leftKeyIndices: Array[Int],
+    rightKeyIndices: Array[Int],
+    config: JoinBenchmarkConfig
+  ): ThreadResult = {
+    // Each thread creates its own executor (and thus its own build holder)
+    val executor = new JoinExecutor(
+      leftTable,
+      rightTable,
+      leftKeyIndices,
+      rightKeyIndices,
+      config.joinType,
+      config.joinStrategy,
+      config.buildSide,
+      compareNullsEqual = false,
+      config.optimizations,
+      config.conditionalFilter.map(_.astExpression),
+      config.conditionalFilter.flatMap(_.astExpressionSwapped)
+    )
+    
+    try {
+      val timings = ArrayBuffer[Double]()
+      var totalOutputRows = 0L
+      var actualBuildSide: Option[String] = None
+      
+      (1 to iterations).foreach { i =>
+        val startTime = System.nanoTime()
+        val (gatherMaps, _) = executor.executeJoin()
+        
+        // Synchronize to ensure GPU work completes
+        Cuda.DEFAULT_STREAM.sync()
+        val endTime = System.nanoTime()
+        
+        val timingMs = (endTime - startTime) / 1e6
+        timings += timingMs
+        
+        // Track output rows and actual build side from first iteration
+        if (i == 1) {
+          totalOutputRows = gatherMaps(0).getRowCount
+          actualBuildSide = executor.getActualBuildSide
+        }
+        
+        // Close gather maps
+        gatherMaps.foreach(_.close())
+      }
+      
+      ThreadResult(timings.toSeq, totalOutputRows, actualBuildSide)
+    } finally {
+      executor.clearCache()
+    }
+  }
+  
+  /**
    * Main entry point to run a join benchmark
    */
   def runBenchmark(
@@ -180,96 +266,113 @@ object JoinBenchmarkRunner {
       val (leftTable, rightTable) = loadTables(config.leftParquetPath, config.rightParquetPath)
       
       try {
-        // Determine key column indices (assume all leading columns before first payload column)
-        // For Phase 1, we'll use a simple heuristic: read from config or use first column
-        // In a real implementation, this would be specified in the config
+        // Determine key column indices
         val leftKeyIndices = Array(0)  // TODO: Make configurable
         val rightKeyIndices = Array(0)  // TODO: Make configurable
         
-        // Create join executor
-        val executor = new JoinExecutor(
-          leftTable,
-          rightTable,
-          leftKeyIndices,
-          rightKeyIndices,
-          config.joinType,
-          config.joinStrategy,
-          config.buildSide,
-          compareNullsEqual = false,  // Phase 1: use standard Spark equality
-          config.optimizations,
-          config.conditionalFilter.map(_.astExpression),  // Left build AST
-          config.conditionalFilter.flatMap(_.astExpressionSwapped)  // Right build AST
-        )
+        val wallClockStart = System.nanoTime()
         
-        try {
-          // Run benchmark iterations
-          val timings = ArrayBuffer[Double]()
-          var totalOutputRows = 0L
-          var actualBuildSide: Option[String] = None
-          val wallClockStart = System.nanoTime()
+        // Choose single-threaded or multi-threaded execution
+        val (allTimings, totalOutputRows, actualBuildSide) = if (config.numThreads == 1) {
+          // Single-threaded execution (original path)
+          val result = runThreadIterations(
+            threadId = 0,
+            iterations = config.iterations,
+            leftTable = leftTable,
+            rightTable = rightTable,
+            leftKeyIndices = leftKeyIndices,
+            rightKeyIndices = rightKeyIndices,
+            config = config
+          )
+          (result.timings, result.outputRows, result.actualBuildSide)
           
-          (1 to config.iterations).foreach { i =>
-            val startTime = System.nanoTime()
-            val (gatherMaps, _) = executor.executeJoin()
+        } else {
+          // Multi-threaded execution
+          val executor = Executors.newFixedThreadPool(
+            config.numThreads,
+            new DaemonThreadFactory(s"join-benchmark-${config.testName}")
+          )
+          
+          try {
+            // Distribute iterations across threads
+            val iterationsPerThread = config.iterations / config.numThreads
+            val remainingIterations = config.iterations % config.numThreads
             
-            // Synchronize to ensure GPU work completes
-            Cuda.DEFAULT_STREAM.sync()
-            val endTime = System.nanoTime()
-            
-            val timingMs = (endTime - startTime) / 1e6
-            timings += timingMs
-            
-            // Track output rows and actual build side from first iteration
-            if (i == 1) {
-              totalOutputRows = gatherMaps(0).getRowCount
-              actualBuildSide = executor.getActualBuildSide
+            // Create tasks for each thread
+            val tasks = (0 until config.numThreads).map { threadId =>
+              val extraIteration = if (threadId < remainingIterations) 1 else 0
+              val threadIterations = iterationsPerThread + extraIteration
+              
+              new Callable[ThreadResult] {
+                override def call(): ThreadResult = {
+                  runThreadIterations(
+                    threadId = threadId,
+                    iterations = threadIterations,
+                    leftTable = leftTable,
+                    rightTable = rightTable,
+                    leftKeyIndices = leftKeyIndices,
+                    rightKeyIndices = rightKeyIndices,
+                    config = config
+                  )
+                }
+              }
             }
             
-            // Close gather maps
-            gatherMaps.foreach(_.close())
+            // Execute all tasks and wait for completion
+            val futures = executor.invokeAll(tasks.asJava)
+            
+            // Aggregate results from all threads
+            val results = futures.asScala.map(_.get())
+            val allTimings = results.flatMap(_.timings)
+            val outputRows = results.head.outputRows  // All threads should have same output rows
+            val buildSide = results.head.actualBuildSide  // All threads should have same build side
+            
+            (allTimings, outputRows, buildSide)
+            
+          } finally {
+            executor.shutdown()
+            executor.awaitTermination(60, TimeUnit.SECONDS)
           }
-          
-          val wallClockEnd = System.nanoTime()
-          val wallClockMs = (wallClockEnd - wallClockStart) / 1e6
-          
-          // Calculate statistics
-          val sortedTimings = timings.sorted
-          val average = timings.sum / timings.length
-          val median = if (timings.length % 2 == 0) {
-            (sortedTimings(timings.length / 2 - 1) + sortedTimings(timings.length / 2)) / 2.0
-          } else {
-            sortedTimings(timings.length / 2)
-          }
-          val min = sortedTimings.head
-          val max = sortedTimings.last
-          val variance = timings.map(t => math.pow(t - average, 2)).sum / timings.length
-          val stdDev = math.sqrt(variance)
-          
-          BenchmarkResults(
-            testName = config.testName,
-            status = SUCCESS,
-            errorMessage = None,
-            leftRows = leftTable.getRowCount,
-            rightRows = rightTable.getRowCount,
-            outputRows = totalOutputRows,
-            iterations = config.iterations,
-            numThreads = config.numThreads,
-            timingsMs = timings.toSeq,
-            wallClockMs = wallClockMs,
-            averageMs = average,
-            medianMs = median,
-            minMs = min,
-            maxMs = max,
-            stdDevMs = stdDev,
-            optimizations = config.optimizations,
-            joinType = config.joinType,
-            joinStrategy = config.joinStrategy,
-            buildSideConfig = config.buildSide,
-            actualBuildSide = actualBuildSide
-          )
-        } finally {
-          executor.clearCache()
         }
+        
+        val wallClockEnd = System.nanoTime()
+        val wallClockMs = (wallClockEnd - wallClockStart) / 1e6
+        
+        // Calculate statistics from aggregated timings
+        val sortedTimings = allTimings.sorted
+        val average = allTimings.sum / allTimings.length
+        val median = if (allTimings.length % 2 == 0) {
+          (sortedTimings(allTimings.length / 2 - 1) + sortedTimings(allTimings.length / 2)) / 2.0
+        } else {
+          sortedTimings(allTimings.length / 2)
+        }
+        val min = sortedTimings.head
+        val max = sortedTimings.last
+        val variance = allTimings.map(t => math.pow(t - average, 2)).sum / allTimings.length
+        val stdDev = math.sqrt(variance)
+        
+        BenchmarkResults(
+          testName = config.testName,
+          status = SUCCESS,
+          errorMessage = None,
+          leftRows = leftTable.getRowCount,
+          rightRows = rightTable.getRowCount,
+          outputRows = totalOutputRows,
+          iterations = config.iterations,
+          numThreads = config.numThreads,
+          timingsMs = allTimings,
+          wallClockMs = wallClockMs,
+          averageMs = average,
+          medianMs = median,
+          minMs = min,
+          maxMs = max,
+          stdDevMs = stdDev,
+          optimizations = config.optimizations,
+          joinType = config.joinType,
+          joinStrategy = config.joinStrategy,
+          buildSideConfig = config.buildSide,
+          actualBuildSide = actualBuildSide
+        )
       } finally {
         leftTable.close()
         rightTable.close()
