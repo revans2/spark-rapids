@@ -89,6 +89,48 @@ sealed trait MixedConditionalBuildHolder extends AutoCloseable {
 }
 
 /**
+ * Helper object for creating Tables with explicit ownership semantics.
+ * 
+ * These helpers make it clear that new Tables are being created with incremented
+ * column refcounts, and the caller owns the returned Table and must close it.
+ */
+private object TableCopyHelper {
+  /**
+   * Create a new Table by copying all columns from the source table.
+   * This increments the refcount on each column vector.
+   * 
+   * @param source The source table to copy from
+   * @return A new Table that the caller OWNS and MUST close
+   */
+  def copyTable(source: Table): Table = {
+    new Table((0 until source.getNumberOfColumns).map(source.getColumn): _*)
+  }
+  
+  /**
+   * Create a new Table containing a subset of columns from the source table.
+   * This increments the refcount on the selected column vectors.
+   * 
+   * @param source The source table to extract columns from
+   * @param columnIndices Indices of columns to include in the new table
+   * @return A new Table that the caller OWNS and MUST close
+   */
+  def extractColumns(source: Table, columnIndices: Array[Int]): Table = {
+    new Table(columnIndices.map(source.getColumn): _*)
+  }
+  
+  /**
+   * Create a new Table wrapping a single ColumnVector.
+   * This increments the refcount on the column vector.
+   * 
+   * @param column The column to wrap
+   * @return A new Table that the caller OWNS and MUST close
+   */
+  def wrapColumn(column: ColumnVector): Table = {
+    new Table(column)
+  }
+}
+
+/**
  * Helper object for key remapping operations.
  */
 private object KeyRemappingHelper {
@@ -115,6 +157,56 @@ private object KeyRemappingHelper {
         "Enable key remapping (remapComplexKeysToInts=true) to use these key types " +
         "with SortMergeJoin.")
     }
+  }
+}
+
+/**
+ * Trait providing distinctness checking with optional caching.
+ */
+private trait DistinctnessSupport {
+  protected var cachedIsDistinct: Option[Boolean] = None
+  
+  /**
+   * Check if build keys are distinct, with optional caching.
+   * Returns true if distinct join optimization can be used for this join type.
+   * 
+   * @param keys The keys to check for distinctness
+   * @param joinType The join type (only Inner and LeftOuter support distinct optimization)
+   * @param optimizations Configuration for optimizations
+   * @return true if keys are distinct and distinct join can be used
+   */
+  protected def checkDistinctness(
+      keys: Table,
+      joinType: JoinTypeSpec,
+      optimizations: JoinOptimizations): Boolean = {
+    if (!optimizations.useDistinctJoin) {
+      return false
+    }
+    
+    // Use cached result if available
+    if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
+      return cachedIsDistinct.get
+    }
+    
+    // Only Inner and LeftOuter join types support DistinctHashJoin
+    val canUseDistinct = joinType match {
+      case InnerJoin | LeftOuterJoin => true
+      case _ => false
+    }
+    
+    if (!canUseDistinct) {
+      return false
+    }
+    
+    // Check if keys are actually distinct
+    val distinct = keys.getRowCount == keys.distinctCount()
+    
+    // Cache the result if caching is enabled
+    if (optimizations.cacheDistinctFlag) {
+      cachedIsDistinct = Some(distinct)
+    }
+    
+    distinct
   }
 }
 
@@ -167,21 +259,22 @@ private trait RemappingSupport {
   
   /**
    * Get the actual build keys to use for join operations.
-   * Returns a Table wrapping remapped keys if available, otherwise the original keys.
-   * Caller must close the returned Table if it's not the same as buildKeys.
+   * Returns a new Table (owned by caller) with either remapped or copied keys.
+   * Caller MUST close the returned Table.
    */
   protected def getActualBuildKeys(
       buildKeys: Table,
       optimizations: JoinOptimizations): Table = {
     if (optimizations.remapComplexKeysToInts && remappedBuildKeys.isDefined) {
-      new Table(remappedBuildKeys.get)
+      // Wrap cached remapped column
+      TableCopyHelper.wrapColumn(remappedBuildKeys.get)
     } else if (optimizations.remapComplexKeysToInts) {
       // Non-cached: remap build keys now
       val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
       try {
         val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
         try {
-          new Table(remappedCol)
+          TableCopyHelper.wrapColumn(remappedCol)
         } finally {
           remappedCol.close()
         }
@@ -189,20 +282,37 @@ private trait RemappingSupport {
         tempRemap.close()
       }
     } else {
-      buildKeys
+      // No remapping: return a copy to maintain uniform ownership semantics
+      TableCopyHelper.copyTable(buildKeys)
     }
   }
   
   /**
-   * Wrap a remapped ColumnVector in a Table, or return the original Table if no remapping.
-   * Caller must close the returned Table if it's different from originalKeys.
+   * Wrap a remapped ColumnVector in a Table, or copy the original Table if no remapping.
+   * Always returns a new Table that the caller OWNS and MUST close.
+   * This ensures uniform ownership semantics - caller always closes the result.
    */
   protected def wrapRemappedKeys(
       remappedCol: Option[ColumnVector],
       originalKeys: Table): Table = {
     remappedCol match {
-      case Some(col) => new Table(col)
-      case None => originalKeys
+      case Some(col) => TableCopyHelper.wrapColumn(col)
+      case None => TableCopyHelper.copyTable(originalKeys)
+    }
+  }
+  
+  /**
+   * Get the actual keys to use for join object creation.
+   * Always returns a new Table that the caller OWNS and MUST close.
+   * This ensures uniform ownership semantics - caller always closes the result.
+   */
+  protected def getKeysForJoin(
+      buildKeys: Table,
+      optimizations: JoinOptimizations): Table = {
+    if (optimizations.remapComplexKeysToInts && remappedBuildKeys.isDefined) {
+      TableCopyHelper.wrapColumn(remappedBuildKeys.get)
+    } else {
+      TableCopyHelper.copyTable(buildKeys)
     }
   }
   
@@ -212,6 +322,113 @@ private trait RemappingSupport {
   protected def closeRemappingResources(): Unit = {
     remapStructures.foreach(_.close())
     remappedBuildKeys.foreach(_.close())
+  }
+}
+
+/**
+ * Helper object for post-processing inner join results into other join types.
+ * Consolidates the common post-processing logic used by PostProcessingBuildHolder
+ * and MixedPostProcessingBuildHolder.
+ */
+private object PostProcessingHelper {
+  /**
+   * Apply post-processing to inner join gather maps based on the target join type.
+   * This takes inner join results and transforms them into the desired join type
+   * using JoinPrimitives operations (makeLeftOuter, makeFullOuter, makeSemi, makeAnti).
+   * 
+   * @param innerMaps The inner join gather maps (2 maps for inner join)
+   * @param joinType The target join type to produce
+   * @param buildSide Which side is the build side
+   * @param buildRowCount Number of rows in the build table
+   * @param probeRowCount Number of rows in the probe table
+   * @return Post-processed gather maps (count depends on join type)
+   * 
+   * Resource ownership: Takes ownership of innerMaps and closes them. Returns new maps.
+   */
+  def applyPostProcessing(
+      innerMaps: Array[GatherMap],
+      joinType: JoinTypeSpec,
+      buildSide: BuildSideSpec,
+      buildRowCount: Int,
+      probeRowCount: Int): Array[GatherMap] = {
+    try {
+      joinType match {
+        case InnerJoin =>
+          // No post-processing needed for inner join
+          innerMaps
+        
+        case LeftOuterJoin =>
+          // Convert inner join to left outer
+          // If build is left, makeLeftOuter directly on build side
+          // If build is right, swap sides to do right outer, then swap back
+          val result = if (buildSide == LeftBuild) {
+            JoinPrimitives.makeLeftOuter(
+              innerMaps(0), innerMaps(1), buildRowCount, probeRowCount)
+          } else {
+            // Build is right, so we need to swap and do right outer, then swap back
+            val rightOuter = JoinPrimitives.makeLeftOuter(
+              innerMaps(1), innerMaps(0), probeRowCount, buildRowCount)
+            Array(rightOuter(1), rightOuter(0))
+          }
+          innerMaps.foreach(_.close())
+          result
+        
+        case RightOuterJoin =>
+          // Convert inner join to right outer (swap left/right)
+          val result = if (buildSide == RightBuild) {
+            JoinPrimitives.makeLeftOuter(
+              innerMaps(1), innerMaps(0), probeRowCount, buildRowCount)
+          } else {
+            // Build is left, so we're doing right outer from probe perspective
+            val leftOuter = JoinPrimitives.makeLeftOuter(
+              innerMaps(0), innerMaps(1), buildRowCount, probeRowCount)
+            Array(leftOuter(1), leftOuter(0))
+          }
+          innerMaps.foreach(_.close())
+          result
+        
+        case FullOuterJoin =>
+          // Convert inner join to full outer
+          val result = JoinPrimitives.makeFullOuter(
+            innerMaps(0), innerMaps(1), buildRowCount, probeRowCount)
+          innerMaps.foreach(_.close())
+          result
+        
+        case LeftSemiJoin =>
+          // Convert inner join to semi join (unique left indices from build side)
+          // Semi join returns only one gather map
+          val semiMap = if (buildSide == LeftBuild) {
+            JoinPrimitives.makeSemi(innerMaps(0), buildRowCount)
+          } else {
+            // Build is right, probe is left - use probe side map
+            JoinPrimitives.makeSemi(innerMaps(1), probeRowCount)
+          }
+          innerMaps.foreach(_.close())
+          Array(semiMap)
+        
+        case LeftAntiJoin =>
+          // Convert inner join to anti join
+          // First get semi join, then anti
+          val semiMap = if (buildSide == LeftBuild) {
+            JoinPrimitives.makeSemi(innerMaps(0), buildRowCount)
+          } else {
+            JoinPrimitives.makeSemi(innerMaps(1), probeRowCount)
+          }
+          innerMaps.foreach(_.close())
+          
+          val antiMap = if (buildSide == LeftBuild) {
+            JoinPrimitives.makeAnti(semiMap, buildRowCount)
+          } else {
+            JoinPrimitives.makeAnti(semiMap, probeRowCount)
+          }
+          semiMap.close()
+          Array(antiMap)
+      }
+    } catch {
+      case e: Exception =>
+        innerMaps.foreach(_.close())
+        throw e
+    }
   }
 }
 
@@ -226,10 +443,9 @@ private class InnerHashBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder with RemappingSupport {
+) extends NonConditionalBuildHolder with RemappingSupport with DistinctnessSupport {
   
   private var cachedJoinObject: Option[Either[HashJoin, DistinctHashJoin]] = None
-  private var cachedIsDistinct: Option[Boolean] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
@@ -239,28 +455,11 @@ private class InnerHashBuildHolder(
       
       if (optimizations.cacheJoinObject) {
         // Determine which keys to use for join object creation
-        val keysForJoin = if (optimizations.remapComplexKeysToInts &&
-            remappedBuildKeys.isDefined) {
-          new Table(remappedBuildKeys.get)
-        } else {
-          buildKeys
-        }
+        val keysForJoin = getKeysForJoin(buildKeys, optimizations)
         
         try {
-          // Check if build keys are distinct (use cached result if available)
-          val isDistinct = if (optimizations.useDistinctJoin) {
-            if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
-              cachedIsDistinct.get
-            } else {
-              val distinct = keysForJoin.getRowCount == keysForJoin.distinctCount()
-              if (optimizations.cacheDistinctFlag) {
-                cachedIsDistinct = Some(distinct)
-              }
-              distinct
-            }
-          } else {
-            false
-          }
+          // Check if build keys are distinct
+          val isDistinct = checkDistinctness(keysForJoin, InnerJoin, optimizations)
           
           // Create appropriate join object based on distinctness
           cachedJoinObject = Some(if (isDistinct) {
@@ -269,10 +468,7 @@ private class InnerHashBuildHolder(
             Left(HashJoin.create(keysForJoin, compareNullsEqual))
           })
         } finally {
-          if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            keysForJoin.close()
-          }
+          keysForJoin.close()
         }
       }
       initialized = true
@@ -299,20 +495,8 @@ private class InnerHashBuildHolder(
           val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
           
           try {
-            // Check if build keys are distinct (use cached result if available)
-            val isDistinct = if (optimizations.useDistinctJoin) {
-              if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
-                cachedIsDistinct.get
-              } else {
-                val distinct = actualBuildKeys.getRowCount == actualBuildKeys.distinctCount()
-                if (optimizations.cacheDistinctFlag) {
-                  cachedIsDistinct = Some(distinct)
-                }
-                distinct
-              }
-            } else {
-              false
-            }
+            // Check if build keys are distinct
+            val isDistinct = checkDistinctness(actualBuildKeys, InnerJoin, optimizations)
             
             // Create appropriate join object based on distinctness
             if (isDistinct) {
@@ -331,16 +515,11 @@ private class InnerHashBuildHolder(
               }
             }
           } finally {
-            if (optimizations.remapComplexKeysToInts &&
-                actualBuildKeys != buildKeys) {
-              actualBuildKeys.close()
-            }
+            actualBuildKeys.close()
           }
         }
       } finally {
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -434,9 +613,7 @@ private class LeftOuterHashBuildHolder(
           }
         }
       } finally {
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -529,9 +706,7 @@ private class RightOuterHashBuildHolder(
         // Swap the gather maps to convert left outer to right outer
         Array(result(1), result(0))
       } finally {
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -611,16 +786,11 @@ private class FullOuterHashBuildHolder(
               tempHashJoin.close()
             }
           } finally {
-            if (optimizations.remapComplexKeysToInts &&
-                actualBuildKeys != buildKeys) {
-              actualBuildKeys.close()
-            }
+            actualBuildKeys.close()
           }
         }
       } finally {
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -725,16 +895,11 @@ private class SemiAntiHashBuildHolder(
               tempFilteredJoin.close()
             }
           } finally {
-            if (optimizations.remapComplexKeysToInts &&
-                actualBuildKeys != buildKeys) {
-              actualBuildKeys.close()
-            }
+            actualBuildKeys.close()
           }
         }
       } finally {
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -760,9 +925,8 @@ private class InnerHashDirectBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder with RemappingSupport {
+) extends NonConditionalBuildHolder with RemappingSupport with DistinctnessSupport {
   
-  private var cachedIsDistinct: Option[Boolean] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
@@ -784,20 +948,8 @@ private class InnerHashDirectBuildHolder(
       val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
       
       try {
-        // Check if build keys are distinct (use cached result if available)
-        val isDistinct = if (optimizations.useDistinctJoin) {
-          if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
-            cachedIsDistinct.get
-          } else {
-            val distinct = actualBuildKeys.getRowCount == actualBuildKeys.distinctCount()
-            if (optimizations.cacheDistinctFlag) {
-              cachedIsDistinct = Some(distinct)
-            }
-            distinct
-          }
-        } else {
-          false
-        }
+        // Check if build keys are distinct
+        val isDistinct = checkDistinctness(actualBuildKeys, InnerJoin, optimizations)
         
         // Use Table direct APIs
         if (isDistinct) {
@@ -806,8 +958,7 @@ private class InnerHashDirectBuildHolder(
           actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
         }
       } finally {
-        if (optimizations.remapComplexKeysToInts &&
-            actualBuildKeys != buildKeys) {
+        if (actualBuildKeys != buildKeys) {
           actualBuildKeys.close()
         }
         if (actualProbeKeys != probeKeys) {
@@ -860,13 +1011,8 @@ private class LeftOuterHashDirectBuildHolder(
       try {
         actualBuildKeys.leftJoinGatherMaps(actualProbeKeys, compareNullsEqual)
       } finally {
-        if (optimizations.remapComplexKeysToInts &&
-            actualBuildKeys != buildKeys) {
-          actualBuildKeys.close()
-        }
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualBuildKeys.close()
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -918,13 +1064,8 @@ private class RightOuterHashDirectBuildHolder(
         // Swap the gather maps to convert left outer to right outer
         Array(result(1), result(0))
       } finally {
-        if (optimizations.remapComplexKeysToInts &&
-            actualBuildKeys != buildKeys) {
-          actualBuildKeys.close()
-        }
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualBuildKeys.close()
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -972,13 +1113,8 @@ private class FullOuterHashDirectBuildHolder(
       try {
         actualBuildKeys.fullJoinGatherMaps(actualProbeKeys, compareNullsEqual)
       } finally {
-        if (optimizations.remapComplexKeysToInts &&
-            actualBuildKeys != buildKeys) {
-          actualBuildKeys.close()
-        }
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualBuildKeys.close()
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -1008,12 +1144,11 @@ private class PostProcessingBuildHolder(
   buildSide: BuildSideSpec,
   leftRowCount: Long,
   rightRowCount: Long
-) extends NonConditionalBuildHolder with RemappingSupport {
+) extends NonConditionalBuildHolder with RemappingSupport with DistinctnessSupport {
   
   // Either[HashJoin | DistinctHashJoin, SortMergeJoin]
   private var cachedJoinObject:
       Option[Either[Either[HashJoin, DistinctHashJoin], SortMergeJoin]] = None
-  private var cachedIsDistinct: Option[Boolean] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
@@ -1029,35 +1164,12 @@ private class PostProcessingBuildHolder(
       
       if (optimizations.cacheJoinObject) {
         // Determine which keys to use for join object creation
-        val keysForJoin = if (optimizations.remapComplexKeysToInts &&
-            remappedBuildKeys.isDefined) {
-          new Table(remappedBuildKeys.get)
-        } else {
-          buildKeys
-        }
+        val keysForJoin = getKeysForJoin(buildKeys, optimizations)
         
         try {
           // Check distinctness for hash joins if optimization enabled
-          val isDistinct = if (optimizations.useDistinctJoin &&
-              strategy == HashObjectWithPostStrategy) {
-            if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
-              cachedIsDistinct.get
-            } else {
-              // Only check distinctness for join types that support DistinctHashJoin
-              val canUseDistinct = joinType match {
-                case InnerJoin | LeftOuterJoin => true
-                case _ => false
-              }
-              if (canUseDistinct) {
-                val distinct = keysForJoin.getRowCount == keysForJoin.distinctCount()
-                if (optimizations.cacheDistinctFlag) {
-                  cachedIsDistinct = Some(distinct)
-                }
-                distinct
-              } else {
-                false
-              }
-            }
+          val isDistinct = if (strategy == HashObjectWithPostStrategy) {
+            checkDistinctness(keysForJoin, joinType, optimizations)
           } else {
             false
           }
@@ -1076,10 +1188,7 @@ private class PostProcessingBuildHolder(
                 s"Unsupported strategy for post-processing: $strategy")
           })
         } finally {
-          if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            keysForJoin.close()
-          }
+          keysForJoin.close()
         }
       }
       initialized = true
@@ -1118,27 +1227,7 @@ private class PostProcessingBuildHolder(
             strategy match {
               case HashObjectWithPostStrategy =>
                 // Check distinctness for non-cached path if optimization enabled
-                val isDistinct = if (optimizations.useDistinctJoin) {
-                  if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
-                    cachedIsDistinct.get
-                  } else {
-                    val canUseDistinct = joinType match {
-                      case InnerJoin | LeftOuterJoin => true
-                      case _ => false
-                    }
-                    if (canUseDistinct) {
-                      val distinct = actualBuildKeys.getRowCount == actualBuildKeys.distinctCount()
-                      if (optimizations.cacheDistinctFlag) {
-                        cachedIsDistinct = Some(distinct)
-                      }
-                      distinct
-                    } else {
-                      false
-                    }
-                  }
-                } else {
-                  false
-                }
+                val isDistinct = checkDistinctness(actualBuildKeys, joinType, optimizations)
                 
                 // Use HashJoin or DistinctHashJoin API (not Table one-shot)
                 if (isDistinct) {
@@ -1159,27 +1248,7 @@ private class PostProcessingBuildHolder(
                 
               case HashDirectWithPostStrategy =>
                 // Use Table direct APIs (no objects)
-                val isDistinct = if (optimizations.useDistinctJoin) {
-                  if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
-                    cachedIsDistinct.get
-                  } else {
-                    val canUseDistinct = joinType match {
-                      case InnerJoin | LeftOuterJoin => true
-                      case _ => false
-                    }
-                    if (canUseDistinct) {
-                      val distinct = actualBuildKeys.getRowCount == actualBuildKeys.distinctCount()
-                      if (optimizations.cacheDistinctFlag) {
-                        cachedIsDistinct = Some(distinct)
-                      }
-                      distinct
-                    } else {
-                      false
-                    }
-                  }
-                } else {
-                  false
-                }
+                val isDistinct = checkDistinctness(actualBuildKeys, joinType, optimizations)
                 
                 if (isDistinct) {
                   actualBuildKeys.innerDistinctJoinGatherMaps(actualProbeKeys, compareNullsEqual)
@@ -1188,13 +1257,8 @@ private class PostProcessingBuildHolder(
                 }
               
               case SortObjectWithPostStrategy =>
-                // Validate key types for SortMergeJoin
-                // (in case this wasn't done in ensureInitialized)
-                if (strategy == SortObjectWithPostStrategy) {
-                  KeyRemappingHelper.validateSortMergeKeyTypes(
-                    actualBuildKeys, optimizations.remapComplexKeysToInts)
-                }
                 // Use SortMergeJoin API (not cached)
+                // Key types already validated in ensureInitialized
                 val smj = SortMergeJoin.create(
                   actualBuildKeys, false /* isBuildSorted */, compareNullsEqual)
                 try {
@@ -1215,95 +1279,15 @@ private class PostProcessingBuildHolder(
                   s"Unsupported strategy for post-processing: $strategy")
             }
           } finally {
-            if (optimizations.remapComplexKeysToInts &&
-                actualBuildKeys != buildKeys) {
-              actualBuildKeys.close()
-            }
+            actualBuildKeys.close()
           }
         }
     
     // Step 2: Apply post-processing based on join type
-    try {
-      joinType match {
-        case InnerJoin =>
-          // No post-processing needed for inner join
-          innerMaps
-        
-        case LeftOuterJoin =>
-          // Convert inner join to left outer
-          // If build is left, swap the maps before post-processing
-          val result = if (buildSide == LeftBuild) {
-            JoinPrimitives.makeLeftOuter(
-              innerMaps(0), innerMaps(1), buildRowCount.toInt, probeRowCount.toInt)
-          } else {
-            // Build is right, so we need to swap and do right outer, then swap back
-            val rightOuter = JoinPrimitives.makeLeftOuter(
-              innerMaps(1), innerMaps(0), probeRowCount.toInt, buildRowCount.toInt)
-            Array(rightOuter(1), rightOuter(0))
-          }
-          innerMaps.foreach(_.close())
-          result
-        
-        case RightOuterJoin =>
-          // Convert inner join to right outer (swap left/right)
-          val result = if (buildSide == RightBuild) {
-            JoinPrimitives.makeLeftOuter(
-              innerMaps(1), innerMaps(0), probeRowCount.toInt, buildRowCount.toInt)
-          } else {
-            // Build is left, so we're doing right outer from probe perspective
-            val leftOuter = JoinPrimitives.makeLeftOuter(
-              innerMaps(0), innerMaps(1), buildRowCount.toInt, probeRowCount.toInt)
-            Array(leftOuter(1), leftOuter(0))
-          }
-          innerMaps.foreach(_.close())
-          result
-        
-        case FullOuterJoin =>
-          // Convert inner join to full outer
-          val result = JoinPrimitives.makeFullOuter(
-            innerMaps(0), innerMaps(1), buildRowCount.toInt, probeRowCount.toInt)
-          innerMaps.foreach(_.close())
-          result
-        
-        case LeftSemiJoin =>
-          // Convert inner join to semi join (unique left indices from build side)
-          // Semi join returns only one gather map
-          val semiMap = if (buildSide == LeftBuild) {
-            JoinPrimitives.makeSemi(innerMaps(0), buildRowCount.toInt)
-          } else {
-            // Build is right, probe is left - use probe side map
-            JoinPrimitives.makeSemi(innerMaps(1), probeRowCount.toInt)
-          }
-          innerMaps.foreach(_.close())
-          Array(semiMap)
-        
-        case LeftAntiJoin =>
-          // Convert inner join to anti join
-          // First get semi join, then anti
-          val semiMap = if (buildSide == LeftBuild) {
-            JoinPrimitives.makeSemi(innerMaps(0), buildRowCount.toInt)
-          } else {
-            JoinPrimitives.makeSemi(innerMaps(1), probeRowCount.toInt)
-          }
-          innerMaps.foreach(_.close())
-          
-          val antiMap = if (buildSide == LeftBuild) {
-            JoinPrimitives.makeAnti(semiMap, buildRowCount.toInt)
-          } else {
-            JoinPrimitives.makeAnti(semiMap, probeRowCount.toInt)
-          }
-          semiMap.close()
-          Array(antiMap)
-      }
-        } catch {
-          case e: Exception =>
-            innerMaps.foreach(_.close())
-            throw e
-        }
+    PostProcessingHelper.applyPostProcessing(
+      innerMaps, joinType, buildSide, buildRowCount.toInt, probeRowCount.toInt)
       } finally {
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -1363,13 +1347,8 @@ private class MixedInnerHashBuildHolder(
           /* condition = */ astExpression,
           /* nullEq    = */ nullEq)
       } finally {
-        if (optimizations.remapComplexKeysToInts &&
-            actualBuildKeys != buildKeys) {
-          actualBuildKeys.close()
-        }
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualBuildKeys.close()
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -1401,12 +1380,11 @@ private class MixedPostProcessingBuildHolder(
   buildSide: BuildSideSpec,
   leftRowCount: Long,
   rightRowCount: Long
-) extends MixedConditionalBuildHolder with RemappingSupport {
+) extends MixedConditionalBuildHolder with RemappingSupport with DistinctnessSupport {
   
   // Either[HashJoin | DistinctHashJoin, SortMergeJoin]
   private var cachedJoinObject:
       Option[Either[Either[HashJoin, DistinctHashJoin], SortMergeJoin]] = None
-  private var cachedIsDistinct: Option[Boolean] = None
   private var initialized = false
   
   private def ensureInitialized(): Unit = {
@@ -1432,34 +1410,12 @@ private class MixedPostProcessingBuildHolder(
       
       if (optimizations.cacheJoinObject && canCacheJoinObject) {
         // Determine which keys to use for join object creation
-        val keysForJoin = if (optimizations.remapComplexKeysToInts &&
-            remappedBuildKeys.isDefined) {
-          new Table(remappedBuildKeys.get)
-        } else {
-          buildKeys
-        }
+        val keysForJoin = getKeysForJoin(buildKeys, optimizations)
         
         try {
           // Check distinctness for hash joins if optimization enabled
-          val isDistinct = if (optimizations.useDistinctJoin &&
-              strategy == HashObjectWithPostStrategy) {
-            if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
-              cachedIsDistinct.get
-            } else {
-              val canUseDistinct = joinType match {
-                case InnerJoin | LeftOuterJoin => true
-                case _ => false
-              }
-              if (canUseDistinct) {
-                val distinct = keysForJoin.getRowCount == keysForJoin.distinctCount()
-                if (optimizations.cacheDistinctFlag) {
-                  cachedIsDistinct = Some(distinct)
-                }
-                distinct
-              } else {
-                false
-              }
-            }
+          val isDistinct = if (strategy == HashObjectWithPostStrategy) {
+            checkDistinctness(keysForJoin, joinType, optimizations)
           } else {
             false
           }
@@ -1477,10 +1433,7 @@ private class MixedPostProcessingBuildHolder(
               throw new IllegalArgumentException(s"Unsupported strategy: $strategy")
           })
         } finally {
-          if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            keysForJoin.close()
-          }
+          keysForJoin.close()
         }
       }
       initialized = true
@@ -1518,61 +1471,19 @@ private class MixedPostProcessingBuildHolder(
             strategy match {
               case HashObjectWithPostStrategy =>
                 // Check distinctness for non-cached path if optimization enabled
-                if (optimizations.useDistinctJoin) {
-                  val isDistinct = if (optimizations.cacheDistinctFlag &&
-                      cachedIsDistinct.isDefined) {
-                    cachedIsDistinct.get
-                  } else {
-                    val canUseDistinct = joinType match {
-                      case InnerJoin | LeftOuterJoin => true
-                      case _ => false
-                    }
-                    if (canUseDistinct) {
-                      val distinct = actualBuildKeys.getRowCount == actualBuildKeys.distinctCount()
-                      if (optimizations.cacheDistinctFlag) {
-                        cachedIsDistinct = Some(distinct)
-                      }
-                      distinct
-                    } else {
-                      false
-                    }
-                  }
-                  
-                  if (isDistinct) {
-                    actualBuildKeys.innerDistinctJoinGatherMaps(actualProbeKeys, compareNullsEqual)
-                  } else {
-                    actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
-                  }
+                val isDistinct = checkDistinctness(actualBuildKeys, joinType, optimizations)
+                
+                if (isDistinct) {
+                  actualBuildKeys.innerDistinctJoinGatherMaps(actualProbeKeys, compareNullsEqual)
                 } else {
                   actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
                 }
               case HashDirectWithPostStrategy =>
                 // Use Table direct APIs (no objects)
-                if (optimizations.useDistinctJoin) {
-                  val isDistinct = if (optimizations.cacheDistinctFlag &&
-                      cachedIsDistinct.isDefined) {
-                    cachedIsDistinct.get
-                  } else {
-                    val canUseDistinct = joinType match {
-                      case InnerJoin | LeftOuterJoin => true
-                      case _ => false
-                    }
-                    if (canUseDistinct) {
-                      val distinct = actualBuildKeys.getRowCount == actualBuildKeys.distinctCount()
-                      if (optimizations.cacheDistinctFlag) {
-                        cachedIsDistinct = Some(distinct)
-                      }
-                      distinct
-                    } else {
-                      false
-                    }
-                  }
-                  
-                  if (isDistinct) {
-                    actualBuildKeys.innerDistinctJoinGatherMaps(actualProbeKeys, compareNullsEqual)
-                  } else {
-                    actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
-                  }
+                val isDistinct = checkDistinctness(actualBuildKeys, joinType, optimizations)
+                
+                if (isDistinct) {
+                  actualBuildKeys.innerDistinctJoinGatherMaps(actualProbeKeys, compareNullsEqual)
                 } else {
                   actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
                 }
@@ -1599,10 +1510,7 @@ private class MixedPostProcessingBuildHolder(
               case _ => throw new IllegalArgumentException(s"Unsupported strategy: $strategy")
             }
           } finally {
-            if (optimizations.remapComplexKeysToInts &&
-                actualBuildKeys != buildKeys) {
-              actualBuildKeys.close()
-            }
+            actualBuildKeys.close()
           }
         }
     
@@ -1613,80 +1521,15 @@ private class MixedPostProcessingBuildHolder(
       innerMaps.foreach(_.close())
       
       // Step 3: Apply post-processing based on join type
-      try {
-        joinType match {
-          case InnerJoin =>
-            filteredMaps
-          
-          case LeftOuterJoin =>
-            val result = if (buildSide == LeftBuild) {
-              JoinPrimitives.makeLeftOuter(
-                filteredMaps(0), filteredMaps(1), buildRowCount.toInt, probeRowCount.toInt)
-            } else {
-              val rightOuter = JoinPrimitives.makeLeftOuter(
-                filteredMaps(1), filteredMaps(0), probeRowCount.toInt, buildRowCount.toInt)
-              Array(rightOuter(1), rightOuter(0))
-            }
-            filteredMaps.foreach(_.close())
-            result
-          
-          case RightOuterJoin =>
-            val result = if (buildSide == RightBuild) {
-              JoinPrimitives.makeLeftOuter(
-                filteredMaps(1), filteredMaps(0), probeRowCount.toInt, buildRowCount.toInt)
-            } else {
-              val leftOuter = JoinPrimitives.makeLeftOuter(
-                filteredMaps(0), filteredMaps(1), buildRowCount.toInt, probeRowCount.toInt)
-              Array(leftOuter(1), leftOuter(0))
-            }
-            filteredMaps.foreach(_.close())
-            result
-          
-          case FullOuterJoin =>
-            val result = JoinPrimitives.makeFullOuter(
-              filteredMaps(0), filteredMaps(1), buildRowCount.toInt, probeRowCount.toInt)
-            filteredMaps.foreach(_.close())
-            result
-          
-          case LeftSemiJoin =>
-            val semiMap = if (buildSide == LeftBuild) {
-              JoinPrimitives.makeSemi(filteredMaps(0), buildRowCount.toInt)
-            } else {
-              JoinPrimitives.makeSemi(filteredMaps(1), probeRowCount.toInt)
-            }
-            filteredMaps.foreach(_.close())
-            Array(semiMap)
-          
-          case LeftAntiJoin =>
-            val semiMap = if (buildSide == LeftBuild) {
-              JoinPrimitives.makeSemi(filteredMaps(0), buildRowCount.toInt)
-            } else {
-              JoinPrimitives.makeSemi(filteredMaps(1), probeRowCount.toInt)
-            }
-            filteredMaps.foreach(_.close())
-            
-            val antiMap = if (buildSide == LeftBuild) {
-              JoinPrimitives.makeAnti(semiMap, buildRowCount.toInt)
-            } else {
-              JoinPrimitives.makeAnti(semiMap, probeRowCount.toInt)
-            }
-            semiMap.close()
-            Array(antiMap)
-        }
-      } catch {
-        case e: Exception =>
-          filteredMaps.foreach(_.close())
-          throw e
-      }
+      PostProcessingHelper.applyPostProcessing(
+        filteredMaps, joinType, buildSide, buildRowCount.toInt, probeRowCount.toInt)
         } catch {
           case e: Exception =>
             innerMaps.foreach(_.close())
             throw e
         }
       } finally {
-        if (actualProbeKeys != probeKeys) {
-          actualProbeKeys.close()
-        }
+        actualProbeKeys.close()
       }
     } finally {
       remappedProbeCol.foreach(_.close())
@@ -1747,12 +1590,11 @@ private[benchmarks] class JoinExecutor(
     }
     
     val sourceTable = if (buildSide == LeftBuild) leftTable else rightTable
-    // Create new Table with incremented refcounts - holder will own this
-    val buildTable = new Table(
-      (0 until sourceTable.getNumberOfColumns).map(sourceTable.getColumn): _*)
     val buildKeyIndices = if (buildSide == LeftBuild) leftKeyIndices else rightKeyIndices
-    // Create new Table for keys with incremented refcounts - holder will own this
-    val buildKeys = new Table(buildKeyIndices.map(buildTable.getColumn): _*)
+    
+    // Create new Tables with incremented refcounts - holder will own these
+    val buildTable = TableCopyHelper.copyTable(sourceTable)
+    val buildKeys = TableCopyHelper.extractColumns(buildTable, buildKeyIndices)
     val tablesWereSwapped = buildSideSpec match {
       case LeftBuild | RightBuild => buildSide != buildSideSpec
       case _ => false
@@ -1907,7 +1749,8 @@ private[benchmarks] class JoinExecutor(
       (leftTable, leftKeyIndices)
     }
     
-    val probeKeys = new Table(probeKeyIndices.map(probeTable.getColumn): _*)
+    // Create probe keys table - we own it and must close it
+    val probeKeys = TableCopyHelper.extractColumns(probeTable, probeKeyIndices)
     
     try {
       val gatherMaps = holder match {
