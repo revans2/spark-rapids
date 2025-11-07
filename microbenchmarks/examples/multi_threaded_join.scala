@@ -101,7 +101,7 @@ val baseConfig = JoinBenchmarkConfig(
   leftParquetPath = leftTablePath,
   rightParquetPath = rightTablePath,
   joinType = InnerJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = RightBuild,
   optimizations = JoinOptimizations(),
   conditionalFilter = None,
@@ -151,7 +151,7 @@ println("\n=== Test 5: HashWithPost strategy (multi-threaded with caching) ===")
 threadCounts.foreach { numThreads =>
   val results = runBenchmark(baseConfig.copy(
     testName = s"hash_with_post_${numThreads}threads",
-    joinStrategy = HashWithPostStrategy,
+    joinStrategy = HashObjectWithPostStrategy,
     numThreads = numThreads,
     optimizations = JoinOptimizations(cacheJoinObject = true, cacheDistinctFlag = true)
   ), spark)
@@ -163,7 +163,7 @@ println("\n=== Test 6: SortMerge strategy (multi-threaded with caching) ===")
 threadCounts.foreach { numThreads =>
   val results = runBenchmark(baseConfig.copy(
     testName = s"sort_merge_${numThreads}threads",
-    joinStrategy = SortWithPostStrategy,
+    joinStrategy = SortObjectWithPostStrategy,
     numThreads = numThreads,
     optimizations = JoinOptimizations(cacheJoinObject = true)
   ), spark)

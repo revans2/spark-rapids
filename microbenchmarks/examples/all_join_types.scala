@@ -115,7 +115,7 @@ val baseConfig = JoinBenchmarkConfig(
   leftParquetPath = leftTablePath,
   rightParquetPath = rightTablePath,
   joinType = InnerJoin,
-  joinStrategy = HashWithPostStrategy,
+  joinStrategy = HashObjectWithPostStrategy,
   buildSide = RightBuild,
   optimizations = JoinOptimizations(),
   conditionalFilter = None,
@@ -264,7 +264,7 @@ println("\n--- CACHING WITH SORT-MERGE STRATEGY ---")
 // Test 0.11: Sort-merge baseline
 val r0_11 = runBenchmark(baseConfig.copy(
   testName = "sortmerge_baseline",
-  joinStrategy = SortWithPostStrategy,
+  joinStrategy = SortObjectWithPostStrategy,
   iterations = cachingIterations,
   optimizations = JoinOptimizations(
     cacheJoinObject = false
@@ -275,7 +275,7 @@ printResultsTSV(r0_11)
 // Test 0.12: Sort-merge with caching
 val r0_12 = runBenchmark(baseConfig.copy(
   testName = "sortmerge_cached",
-  joinStrategy = SortWithPostStrategy,
+  joinStrategy = SortObjectWithPostStrategy,
   iterations = cachingIterations,
   optimizations = JoinOptimizations(
     cacheJoinObject = true
@@ -482,48 +482,48 @@ println("\n--- DIRECT HASH JOIN STRATEGY TESTS (All Join Types) ---")
 println("Testing new direct build holders: InnerHashBuildHolder, LeftOuterHashBuildHolder,")
 println("RightOuterHashBuildHolder, FullOuterHashBuildHolder, SemiAntiHashBuildHolder")
 
-// Test 22: HashJoinStrategy Inner - left build
+// Test 22: HashObjectStrategy Inner - left build
 val r22 = runBenchmark(baseConfig.copy(
   testName = "inner_hash_left_build",
   joinType = InnerJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = LeftBuild
 ), spark)
 printResultsTSV(r22)
 
-// Test 23: HashJoinStrategy Inner - right build
+// Test 23: HashObjectStrategy Inner - right build
 val r23 = runBenchmark(baseConfig.copy(
   testName = "inner_hash_right_build",
   joinType = InnerJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = RightBuild
 ), spark)
 printResultsTSV(r23)
 
-// Test 24: HashJoinStrategy Inner - auto build (can swap, picks smaller = right)
+// Test 24: HashObjectStrategy Inner - auto build (can swap, picks smaller = right)
 val r24 = runBenchmark(baseConfig.copy(
   testName = "inner_hash_auto_build",
   joinType = InnerJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = AutoPickSmallerIfAllowed
 ), spark)
 printResultsTSV(r24)
 
-// Test 25: HashJoinStrategy Inner - distinct optimization
+// Test 25: HashObjectStrategy Inner - distinct optimization
 val r25 = runBenchmark(baseConfig.copy(
   testName = "inner_hash_distinct",
   joinType = InnerJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = RightBuild,
   optimizations = JoinOptimizations(useDistinctJoin = true, cacheDistinctFlag = true)
 ), spark)
 printResultsTSV(r25)
 
-// Test 26: HashJoinStrategy Inner - with caching
+// Test 26: HashObjectStrategy Inner - with caching
 val r26 = runBenchmark(baseConfig.copy(
   testName = "inner_hash_cached",
   joinType = InnerJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = RightBuild,
   optimizations = JoinOptimizations(
     useDistinctJoin = true,
@@ -533,20 +533,20 @@ val r26 = runBenchmark(baseConfig.copy(
 ), spark)
 printResultsTSV(r26)
 
-// Test 27: HashJoinStrategy LeftOuter - left build (CANNOT swap)
+// Test 27: HashObjectStrategy LeftOuter - left build (CANNOT swap)
 val r27 = runBenchmark(baseConfig.copy(
   testName = "left_outer_hash_left",
   joinType = LeftOuterJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = LeftBuild
 ), spark)
 printResultsTSV(r27)
 
-// Test 28: HashJoinStrategy LeftOuter - caching only (no distinct - DistinctHashJoin.leftJoin() is for remapping)
+// Test 28: HashObjectStrategy LeftOuter - caching only (no distinct - DistinctHashJoin.leftJoin() is for remapping)
 val r28 = runBenchmark(baseConfig.copy(
   testName = "left_outer_hash_cached_only",
   joinType = LeftOuterJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = LeftBuild,
   optimizations = JoinOptimizations(cacheJoinObject = true)
 ), spark)
@@ -554,20 +554,20 @@ printResultsTSV(r28)
 
 // Test 29: Removed - duplicate of test 28 with different name
 
-// Test 30: HashJoinStrategy RightOuter - right build (CANNOT swap)
+// Test 30: HashObjectStrategy RightOuter - right build (CANNOT swap)
 val r30 = runBenchmark(baseConfig.copy(
   testName = "right_outer_hash_right",
   joinType = RightOuterJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = RightBuild
 ), spark)
 printResultsTSV(r30)
 
-// Test 31: HashJoinStrategy RightOuter - with caching (no distinct - DistinctHashJoin not supported)
+// Test 31: HashObjectStrategy RightOuter - with caching (no distinct - DistinctHashJoin not supported)
 val r31 = runBenchmark(baseConfig.copy(
   testName = "right_outer_hash_cached",
   joinType = RightOuterJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = RightBuild,
   optimizations = JoinOptimizations(cacheJoinObject = true)
 ), spark)
@@ -575,122 +575,122 @@ printResultsTSV(r31)
 
 // Test 32: Removed - was duplicate with distinct flags that don't apply
 
-// Test 33: HashJoinStrategy FullOuter - left build
+// Test 33: HashObjectStrategy FullOuter - left build
 val r33 = runBenchmark(baseConfig.copy(
   testName = "full_outer_hash_left",
   joinType = FullOuterJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = LeftBuild
 ), spark)
 printResultsTSV(r33)
 
-// Test 34: HashJoinStrategy FullOuter - right build
+// Test 34: HashObjectStrategy FullOuter - right build
 val r34 = runBenchmark(baseConfig.copy(
   testName = "full_outer_hash_right",
   joinType = FullOuterJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = RightBuild
 ), spark)
 printResultsTSV(r34)
 
-// Test 35: HashJoinStrategy FullOuter - auto build (CAN swap, picks smaller = right)
+// Test 35: HashObjectStrategy FullOuter - auto build (CAN swap, picks smaller = right)
 val r35 = runBenchmark(baseConfig.copy(
   testName = "full_outer_hash_auto",
   joinType = FullOuterJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = AutoPickSmallerIfAllowed
 ), spark)
 printResultsTSV(r35)
 
-// Test 36: HashJoinStrategy FullOuter - with caching
+// Test 36: HashObjectStrategy FullOuter - with caching
 val r36 = runBenchmark(baseConfig.copy(
   testName = "full_outer_hash_cached",
   joinType = FullOuterJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = RightBuild,
   optimizations = JoinOptimizations(cacheJoinObject = true)
 ), spark)
 printResultsTSV(r36)
 
-// Test 37: HashJoinStrategy Semi - left build (CANNOT swap)
+// Test 37: HashObjectStrategy Semi - left build (CANNOT swap)
 val r37 = runBenchmark(baseConfig.copy(
   testName = "semi_hash_left",
   joinType = LeftSemiJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = LeftBuild
 ), spark)
 printResultsTSV(r37)
 
-// Test 38: HashJoinStrategy Semi - with caching (FilteredJoin supports caching!)
+// Test 38: HashObjectStrategy Semi - with caching (FilteredJoin supports caching!)
 val r38 = runBenchmark(baseConfig.copy(
   testName = "semi_hash_cached",
   joinType = LeftSemiJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = LeftBuild,
   optimizations = JoinOptimizations(cacheJoinObject = true)
 ), spark)
 printResultsTSV(r38)
 
-// Test 39: HashJoinStrategy Semi - auto build (cannot swap, must use left)
+// Test 39: HashObjectStrategy Semi - auto build (cannot swap, must use left)
 val r39 = runBenchmark(baseConfig.copy(
   testName = "semi_hash_auto",
   joinType = LeftSemiJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = AutoMeetJoinRequirement
 ), spark)
 printResultsTSV(r39)
 
-// Test 40: HashJoinStrategy Anti - left build (CANNOT swap)
+// Test 40: HashObjectStrategy Anti - left build (CANNOT swap)
 val r40 = runBenchmark(baseConfig.copy(
   testName = "anti_hash_left",
   joinType = LeftAntiJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = LeftBuild
 ), spark)
 printResultsTSV(r40)
 
-// Test 41: HashJoinStrategy Anti - with caching (FilteredJoin supports caching!)
+// Test 41: HashObjectStrategy Anti - with caching (FilteredJoin supports caching!)
 val r41 = runBenchmark(baseConfig.copy(
   testName = "anti_hash_cached",
   joinType = LeftAntiJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = LeftBuild,
   optimizations = JoinOptimizations(cacheJoinObject = true)
 ), spark)
 printResultsTSV(r41)
 
-// Test 42: HashJoinStrategy Anti - auto build (cannot swap, must use left)
+// Test 42: HashObjectStrategy Anti - auto build (cannot swap, must use left)
 val r42 = runBenchmark(baseConfig.copy(
   testName = "anti_hash_auto",
   joinType = LeftAntiJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = AutoMeetJoinRequirement
 ), spark)
 printResultsTSV(r42)
 
 println("\n--- STRATEGY COMPARISON TESTS (Inner Join) ---")
 
-// Test 43: HashWithPostStrategy (inner join + post-processing path)
+// Test 43: HashObjectWithPostStrategy (inner join + post-processing path)
 val r43 = runBenchmark(baseConfig.copy(
   testName = "inner_hash_post_strategy",
   joinType = InnerJoin,
-  joinStrategy = HashWithPostStrategy,
+  joinStrategy = HashObjectWithPostStrategy,
   buildSide = RightBuild
 ), spark)
 printResultsTSV(r43)
 
-// Test 44: SortWithPostStrategy (sort-merge inner join + post-processing)
+// Test 44: SortObjectWithPostStrategy (sort-merge inner join + post-processing)
 val r44 = runBenchmark(baseConfig.copy(
   testName = "inner_sort_post_strategy",
   joinType = InnerJoin,
-  joinStrategy = SortWithPostStrategy,
+  joinStrategy = SortObjectWithPostStrategy,
   buildSide = RightBuild
 ), spark)
 printResultsTSV(r44)
 
 println("\n--- OPTIMIZATION COMBINATION TESTS ---")
 
-// Test 45: All optimizations enabled with HashWithPostStrategy
+// Test 45: All optimizations enabled with HashObjectWithPostStrategy
 val r45 = runBenchmark(baseConfig.copy(
   testName = "inner_all_optimizations",
   joinType = InnerJoin,
@@ -729,9 +729,9 @@ println(s"  - Covers: Inner, LeftOuter, Semi joins with Hash and SortMerge strat
 println(s"\nPart 2 - Comprehensive Join Type Tests (46 tests):")
 println(s"  - Join types: Inner, LeftOuter, RightOuter, FullOuter, LeftSemi, LeftAnti")
 println(s"  - Build side modes: LeftBuild, RightBuild, AutoPickSmallerIfAllowed, AutoMeetJoinRequirement")
-println(s"  - Strategies: HashJoinStrategy, HashWithPostStrategy, SortWithPostStrategy")
+println(s"  - Strategies: HashObjectStrategy, HashObjectWithPostStrategy, SortObjectWithPostStrategy")
 println(s"  - Optimizations: useDistinctJoin, cacheDistinctFlag, cacheJoinObject, allowBuildSideSwap")
-println(s"\n**NEW: Phase 2 Direct HashJoinStrategy Tests (tests 22-42):**")
+println(s"\n**NEW: Phase 2 Direct HashObjectStrategy Tests (tests 22-42):**")
 println(s"  - Tests all new direct build holders:")
 println(s"    * InnerHashBuildHolder (5 tests) - supports DistinctHashJoin + caching")
 println(s"    * LeftOuterHashBuildHolder (2 tests) - caching only (no DistinctHashJoin - leftJoin() is for remapping)")
@@ -750,9 +750,9 @@ println(s"  1. Compare baseline_no_opt vs all_caching_opts to see total caching 
 println(s"  2. Compare distinct_no_cache vs distinct_cache_flag to see cacheDistinctFlag benefit")
 println(s"  3. Compare baseline_no_opt vs cache_join_object to see cacheJoinObject benefit")
 println(s"  4. Look at mean time reduction across multiple iterations with caching enabled")
-println(s"  5. Compare HashJoinStrategy vs HashWithPostStrategy for same join types")
+println(s"  5. Compare HashObjectStrategy vs HashObjectWithPostStrategy for same join types")
 println(s"  6. Verify that auto build side selection works correctly for each join type")
-println(s"  7. Note that LeftOuter/RightOuter with HashJoinStrategy don't benefit from DistinctHashJoin")
+println(s"  7. Note that LeftOuter/RightOuter with HashObjectStrategy don't benefit from DistinctHashJoin")
 println(s"  8. Semi/Anti joins with FilteredJoin now support caching - compare cached vs non-cached!")
 println("\nYou can copy the TSV output above and paste into a spreadsheet for analysis.")
 
@@ -821,7 +821,7 @@ val keyTypeDataPaths = keyTypes.map { keyType =>
 }.toMap
 
 println("\n--- KEY REMAPPING PERFORMANCE TESTS ---")
-println("Testing HashWithPostStrategy and SortWithPostStrategy")
+println("Testing HashObjectWithPostStrategy and SortObjectWithPostStrategy")
 println("Comparing: no remapping vs remapped (cached) vs remapped (non-cached)\n")
 
 val remappingIterations = 10
@@ -837,7 +837,7 @@ for (keyType <- keyTypes) {
     leftParquetPath = leftPath,
     rightParquetPath = rightPath,
     joinType = InnerJoin,
-    joinStrategy = HashWithPostStrategy,
+    joinStrategy = HashObjectWithPostStrategy,
     buildSide = RightBuild,
     optimizations = JoinOptimizations(),
     conditionalFilter = None,
@@ -845,7 +845,7 @@ for (keyType <- keyTypes) {
     printHeader = false
   )
   
-  // Test 1: HashWithPostStrategy - No remapping
+  // Test 1: HashObjectWithPostStrategy - No remapping
   val r1 = runBenchmark(remapBaseConfig.copy(
     testName = s"${keyType}_hash_no_remap",
     optimizations = JoinOptimizations(
@@ -856,7 +856,7 @@ for (keyType <- keyTypes) {
   ), spark)
   printResultsTSV(r1)
   
-  // Test 2: HashWithPostStrategy - Remapping with caching
+  // Test 2: HashObjectWithPostStrategy - Remapping with caching
   val r2 = runBenchmark(remapBaseConfig.copy(
     testName = s"${keyType}_hash_remap_cached",
     optimizations = JoinOptimizations(
@@ -867,7 +867,7 @@ for (keyType <- keyTypes) {
   ), spark)
   printResultsTSV(r2)
   
-  // Test 3: HashWithPostStrategy - Remapping without caching
+  // Test 3: HashObjectWithPostStrategy - Remapping without caching
   val r3 = runBenchmark(remapBaseConfig.copy(
     testName = s"${keyType}_hash_remap_nocache",
     optimizations = JoinOptimizations(
@@ -878,7 +878,7 @@ for (keyType <- keyTypes) {
   ), spark)
   printResultsTSV(r3)
   
-  // Test 4: HashWithPostStrategy - Remapping + join object caching
+  // Test 4: HashObjectWithPostStrategy - Remapping + join object caching
   val r4 = runBenchmark(remapBaseConfig.copy(
     testName = s"${keyType}_hash_both_cached",
     optimizations = JoinOptimizations(
@@ -889,10 +889,10 @@ for (keyType <- keyTypes) {
   ), spark)
   printResultsTSV(r4)
   
-  // Test 5: SortWithPostStrategy - No remapping
+  // Test 5: SortObjectWithPostStrategy - No remapping
   val r5 = runBenchmark(remapBaseConfig.copy(
     testName = s"${keyType}_sort_no_remap",
-    joinStrategy = SortWithPostStrategy,
+    joinStrategy = SortObjectWithPostStrategy,
     optimizations = JoinOptimizations(
       remapComplexKeysToInts = false,
       cacheRemapping = false,
@@ -901,10 +901,10 @@ for (keyType <- keyTypes) {
   ), spark)
   printResultsTSV(r5)
   
-  // Test 6: SortWithPostStrategy - Remapping with caching
+  // Test 6: SortObjectWithPostStrategy - Remapping with caching
   val r6 = runBenchmark(remapBaseConfig.copy(
     testName = s"${keyType}_sort_remap_cached",
-    joinStrategy = SortWithPostStrategy,
+    joinStrategy = SortObjectWithPostStrategy,
     optimizations = JoinOptimizations(
       remapComplexKeysToInts = true,
       cacheRemapping = true,
@@ -913,10 +913,10 @@ for (keyType <- keyTypes) {
   ), spark)
   printResultsTSV(r6)
   
-  // Test 7: SortWithPostStrategy - Remapping without caching
+  // Test 7: SortObjectWithPostStrategy - Remapping without caching
   val r7 = runBenchmark(remapBaseConfig.copy(
     testName = s"${keyType}_sort_remap_nocache",
-    joinStrategy = SortWithPostStrategy,
+    joinStrategy = SortObjectWithPostStrategy,
     optimizations = JoinOptimizations(
       remapComplexKeysToInts = true,
       cacheRemapping = false,
@@ -925,10 +925,10 @@ for (keyType <- keyTypes) {
   ), spark)
   printResultsTSV(r7)
   
-  // Test 8: SortWithPostStrategy - Remapping + join object caching
+  // Test 8: SortObjectWithPostStrategy - Remapping + join object caching
   val r8 = runBenchmark(remapBaseConfig.copy(
     testName = s"${keyType}_sort_both_cached",
-    joinStrategy = SortWithPostStrategy,
+    joinStrategy = SortObjectWithPostStrategy,
     optimizations = JoinOptimizations(
       remapComplexKeysToInts = true,
       cacheRemapping = true,
@@ -944,14 +944,14 @@ println("="*80)
 println(s"\nTested key types: ${keyTypes.mkString(", ")}")
 println(s"Total key remapping tests: ${keyTypes.size * 8} (8 tests per key type)")
 println(s"\nFor each key type, tested:")
-println(s"  1. HashWithPostStrategy - no remapping (baseline)")
-println(s"  2. HashWithPostStrategy - remapping with caching")
-println(s"  3. HashWithPostStrategy - remapping without caching")
-println(s"  4. HashWithPostStrategy - remapping + join object caching")
-println(s"  5. SortWithPostStrategy - no remapping (baseline)")
-println(s"  6. SortWithPostStrategy - remapping with caching")
-println(s"  7. SortWithPostStrategy - remapping without caching")
-println(s"  8. SortWithPostStrategy - remapping + join object caching")
+println(s"  1. HashObjectWithPostStrategy - no remapping (baseline)")
+println(s"  2. HashObjectWithPostStrategy - remapping with caching")
+println(s"  3. HashObjectWithPostStrategy - remapping without caching")
+println(s"  4. HashObjectWithPostStrategy - remapping + join object caching")
+println(s"  5. SortObjectWithPostStrategy - no remapping (baseline)")
+println(s"  6. SortObjectWithPostStrategy - remapping with caching")
+println(s"  7. SortObjectWithPostStrategy - remapping without caching")
+println(s"  8. SortObjectWithPostStrategy - remapping + join object caching")
 println(s"\nKEY INSIGHTS TO LOOK FOR:")
 println(s"  1. Remapping overhead for different key types")
 println(s"  2. Performance benefit of cacheRemapping vs non-cached remapping")

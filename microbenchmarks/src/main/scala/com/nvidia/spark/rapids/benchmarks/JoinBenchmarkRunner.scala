@@ -78,9 +78,12 @@ object JoinBenchmarkRunner {
   case object LeftAntiJoin extends JoinTypeSpec
   
   sealed trait JoinStrategySpec
-  case object HashJoinStrategy extends JoinStrategySpec
-  case object HashWithPostStrategy extends JoinStrategySpec
-  case object SortWithPostStrategy extends JoinStrategySpec
+  case object HashObjectStrategy extends JoinStrategySpec
+  case object HashObjectWithPostStrategy extends JoinStrategySpec
+  case object SortObjectWithPostStrategy extends JoinStrategySpec
+  case object HashDirectStrategy extends JoinStrategySpec
+  case object HashDirectWithPostStrategy extends JoinStrategySpec
+  case object SortDirectWithPostStrategy extends JoinStrategySpec
   
   sealed trait BuildSideSpec
   case object LeftBuild extends BuildSideSpec
@@ -545,9 +548,12 @@ object JoinBenchmarkRunner {
   }
   
   private def formatJoinStrategy(strategy: JoinStrategySpec): String = strategy match {
-    case HashJoinStrategy => "Hash"
-    case HashWithPostStrategy => "HashPost"
-    case SortWithPostStrategy => "SortPost"
+    case HashObjectStrategy => "HashObject"
+    case HashObjectWithPostStrategy => "HashObjectPost"
+    case SortObjectWithPostStrategy => "SortObjectPost"
+    case HashDirectStrategy => "HashDirect"
+    case HashDirectWithPostStrategy => "HashDirectPost"
+    case SortDirectWithPostStrategy => "SortDirectPost"
   }
 }
 

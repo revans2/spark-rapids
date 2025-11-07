@@ -119,7 +119,7 @@ try {
     leftParquetPath = leftTablePath,
     rightParquetPath = rightTablePath,
     joinType = InnerJoin,
-    joinStrategy = HashJoinStrategy,
+    joinStrategy = HashDirectStrategy,
     buildSide = RightBuild,
     optimizations = JoinOptimizations(),
     conditionalFilter = Some(ConditionalFilterSpec(
@@ -141,14 +141,14 @@ try {
   // Test 2: Hash with post-processing (keys + AST filter)
   val results2 = runBenchmark(baseConfig.copy(
     testName = "hash_with_post_mixed",
-    joinStrategy = HashWithPostStrategy
+    joinStrategy = HashDirectWithPostStrategy
   ), spark)
   printResultsTSV(results2)
   
   // Test 3: Sort-merge with post-processing (keys + AST filter)
   val results3 = runBenchmark(baseConfig.copy(
     testName = "sort_with_post_mixed",
-    joinStrategy = SortWithPostStrategy
+    joinStrategy = SortDirectWithPostStrategy
   ), spark)
   printResultsTSV(results3)
   

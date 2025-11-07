@@ -110,7 +110,7 @@ val baseConfig = JoinBenchmarkConfig(
   leftParquetPath = leftTablePath,
   rightParquetPath = rightTablePath,
   joinType = InnerJoin,
-  joinStrategy = HashJoinStrategy,
+  joinStrategy = HashObjectStrategy,
   buildSide = RightBuild,
   optimizations = JoinOptimizations(),
   conditionalFilter = None,
@@ -118,39 +118,53 @@ val baseConfig = JoinBenchmarkConfig(
   printHeader = false
 )
 
-// Test 1: Basic hash join with right build
+// Test 1: Hash object strategy (uses HashJoin object, can cache)
 val results1 = runBenchmark(baseConfig.copy(
-  testName = "hash_inner_right_build"
+  testName = "hash_object_inner"
 ), spark)
 printResultsTSV(results1)
 
-// Test 2: Hash join with auto build side selection (will pick smaller side)
+// Test 2: Hash direct strategy (uses Table APIs, no object caching)
 val results2 = runBenchmark(baseConfig.copy(
-  testName = "hash_inner_auto_build",
-  buildSide = AutoPickSmallerIfAllowed
+  testName = "hash_direct_inner",
+  joinStrategy = HashDirectStrategy
 ), spark)
 printResultsTSV(results2)
 
-// Test 3: Hash join with post-processing strategy
+// Test 3: Hash object with post-processing
 val results3 = runBenchmark(baseConfig.copy(
-  testName = "hash_with_post",
-  joinStrategy = HashWithPostStrategy
+  testName = "hash_object_post",
+  joinStrategy = HashObjectWithPostStrategy
 ), spark)
 printResultsTSV(results3)
 
-// Test 4: Sort-merge with post-processing strategy
+// Test 4: Hash direct with post-processing
 val results4 = runBenchmark(baseConfig.copy(
-  testName = "sort_with_post",
-  joinStrategy = SortWithPostStrategy
+  testName = "hash_direct_post",
+  joinStrategy = HashDirectWithPostStrategy
 ), spark)
 printResultsTSV(results4)
 
-// Test 5: Hash join with caching enabled
+// Test 5: Sort object with post-processing
 val results5 = runBenchmark(baseConfig.copy(
-  testName = "hash_inner_cached",
-  optimizations = JoinOptimizations(cacheJoinObject = true)
+  testName = "sort_object_post",
+  joinStrategy = SortObjectWithPostStrategy
 ), spark)
 printResultsTSV(results5)
+
+// Test 6: Sort direct with post-processing
+val results6 = runBenchmark(baseConfig.copy(
+  testName = "sort_direct_post",
+  joinStrategy = SortDirectWithPostStrategy
+), spark)
+printResultsTSV(results6)
+
+// Test 7: Hash object with caching enabled
+val results7 = runBenchmark(baseConfig.copy(
+  testName = "hash_object_cached",
+  optimizations = JoinOptimizations(cacheJoinObject = true)
+), spark)
+printResultsTSV(results7)
 
 println("\n" + "="*80)
 println("Benchmark Complete!")

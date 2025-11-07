@@ -36,7 +36,7 @@ import com.nvidia.spark.rapids.jni.{DistinctHashJoin, FilteredJoin, HashJoin, Jo
  *    allows us to measure the cost of post-processing operations separately, providing more
  *    detailed performance insights.
  * 
- * 3. FLEXIBILITY: HashWithPostStrategy and SortWithPostStrategy work uniformly across all join
+ * 3. FLEXIBILITY: HashObjectWithPostStrategy and SortObjectWithPostStrategy work uniformly across all join
  *    types without special-casing semi/anti joins.
  * 
  * The FilteredJoin API remains available in spark-rapids-jni for production use cases where
@@ -867,6 +867,415 @@ private class SemiAntiHashBuildHolder(
 }
 
 /**
+ * Build holder for inner hash joins using Table direct APIs (no join object).
+ * Uses Table.innerJoinGatherMaps() or Table.innerDistinctJoinGatherMaps().
+ * Cannot cache join objects. Supports distinct join optimization with cacheDistinctFlag.
+ */
+private class InnerHashDirectBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  tablesWereSwapped: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder {
+  
+  private var cachedIsDistinct: Option[Boolean] = None
+  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
+  private var remappedBuildKeys: Option[ColumnVector] = None
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      // Initialize remapping if enabled (independent of join object caching)
+      if (optimizations.remapComplexKeysToInts) {
+        if (optimizations.cacheRemapping) {
+          val remap = KeyRemapping.createRemapStructures(buildKeys)
+          remapStructures = Some(remap)
+          remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
+        }
+      }
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    // Remap keys if needed
+    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
+      if (remapStructures.isDefined) {
+        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
+      } else {
+        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+        try {
+          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
+        } finally {
+          tempRemap.close()
+        }
+      }
+    } else {
+      None
+    }
+    
+    try {
+      val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
+          remappedBuildKeys.isDefined) {
+        new Table(remappedBuildKeys.get)
+      } else if (optimizations.remapComplexKeysToInts) {
+        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+        try {
+          val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
+          try {
+            new Table(remappedCol)
+          } finally {
+            remappedCol.close()
+          }
+        } finally {
+          tempRemap.close()
+        }
+      } else {
+        buildKeys
+      }
+      
+      val actualProbeKeys = remappedProbeCol match {
+        case Some(col) => new Table(col)
+        case None => probeKeys
+      }
+      
+      try {
+        // Check if build keys are distinct (use cached result if available)
+        val isDistinct = if (optimizations.useDistinctJoin) {
+          if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
+            cachedIsDistinct.get
+          } else {
+            val distinct = actualBuildKeys.getRowCount == actualBuildKeys.distinctCount()
+            if (optimizations.cacheDistinctFlag) {
+              cachedIsDistinct = Some(distinct)
+            }
+            distinct
+          }
+        } else {
+          false
+        }
+        
+        // Use Table direct APIs
+        if (isDistinct) {
+          actualBuildKeys.innerDistinctJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+        } else {
+          actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+        }
+      } finally {
+        if (optimizations.remapComplexKeysToInts &&
+            actualBuildKeys != buildKeys) {
+          actualBuildKeys.close()
+        }
+        if (actualProbeKeys != probeKeys) {
+          actualProbeKeys.close()
+        }
+      }
+    } finally {
+      remappedProbeCol.foreach(_.close())
+    }
+  }
+  
+  def close(): Unit = {
+    remapStructures.foreach(_.close())
+    remappedBuildKeys.foreach(_.close())
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
+ * Build holder for left outer hash joins using Table direct APIs (no join object).
+ * Uses Table.leftJoinGatherMaps().
+ * Cannot cache join objects.
+ */
+private class LeftOuterHashDirectBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  tablesWereSwapped: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder {
+  
+  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
+  private var remappedBuildKeys: Option[ColumnVector] = None
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
+        val remap = KeyRemapping.createRemapStructures(buildKeys)
+        remapStructures = Some(remap)
+        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
+      }
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
+      if (remapStructures.isDefined) {
+        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
+      } else {
+        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+        try {
+          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
+        } finally {
+          tempRemap.close()
+        }
+      }
+    } else {
+      None
+    }
+    
+    try {
+      val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
+          remappedBuildKeys.isDefined) {
+        new Table(remappedBuildKeys.get)
+      } else if (optimizations.remapComplexKeysToInts) {
+        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+        try {
+          val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
+          try {
+            new Table(remappedCol)
+          } finally {
+            remappedCol.close()
+          }
+        } finally {
+          tempRemap.close()
+        }
+      } else {
+        buildKeys
+      }
+      
+      val actualProbeKeys = remappedProbeCol match {
+        case Some(col) => new Table(col)
+        case None => probeKeys
+      }
+      
+      try {
+        actualBuildKeys.leftJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+      } finally {
+        if (optimizations.remapComplexKeysToInts &&
+            actualBuildKeys != buildKeys) {
+          actualBuildKeys.close()
+        }
+        if (actualProbeKeys != probeKeys) {
+          actualProbeKeys.close()
+        }
+      }
+    } finally {
+      remappedProbeCol.foreach(_.close())
+    }
+  }
+  
+  def close(): Unit = {
+    remapStructures.foreach(_.close())
+    remappedBuildKeys.foreach(_.close())
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
+ * Build holder for right outer hash joins using Table direct APIs (no join object).
+ * Right outer join is implemented as left outer join with swapped sides.
+ * Uses Table.leftJoinGatherMaps().
+ * Cannot cache join objects.
+ */
+private class RightOuterHashDirectBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  tablesWereSwapped: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder {
+  
+  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
+  private var remappedBuildKeys: Option[ColumnVector] = None
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
+        val remap = KeyRemapping.createRemapStructures(buildKeys)
+        remapStructures = Some(remap)
+        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
+      }
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
+      if (remapStructures.isDefined) {
+        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
+      } else {
+        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+        try {
+          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
+        } finally {
+          tempRemap.close()
+        }
+      }
+    } else {
+      None
+    }
+    
+    try {
+      val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
+          remappedBuildKeys.isDefined) {
+        new Table(remappedBuildKeys.get)
+      } else if (optimizations.remapComplexKeysToInts) {
+        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+        try {
+          val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
+          try {
+            new Table(remappedCol)
+          } finally {
+            remappedCol.close()
+          }
+        } finally {
+          tempRemap.close()
+        }
+      } else {
+        buildKeys
+      }
+      
+      val actualProbeKeys = remappedProbeCol match {
+        case Some(col) => new Table(col)
+        case None => probeKeys
+      }
+      
+      try {
+        // Right outer join is implemented as left outer join with swapped sides
+        val result = actualBuildKeys.leftJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+        // Swap the gather maps to convert left outer to right outer
+        Array(result(1), result(0))
+      } finally {
+        if (optimizations.remapComplexKeysToInts &&
+            actualBuildKeys != buildKeys) {
+          actualBuildKeys.close()
+        }
+        if (actualProbeKeys != probeKeys) {
+          actualProbeKeys.close()
+        }
+      }
+    } finally {
+      remappedProbeCol.foreach(_.close())
+    }
+  }
+  
+  def close(): Unit = {
+    remapStructures.foreach(_.close())
+    remappedBuildKeys.foreach(_.close())
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
+ * Build holder for full outer hash joins using Table direct APIs (no join object).
+ * Uses Table.fullJoinGatherMaps().
+ * Cannot cache join objects.
+ */
+private class FullOuterHashDirectBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  tablesWereSwapped: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder {
+  
+  private var remapStructures: Option[KeyRemapping.RemapStructures] = None
+  private var remappedBuildKeys: Option[ColumnVector] = None
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
+        val remap = KeyRemapping.createRemapStructures(buildKeys)
+        remapStructures = Some(remap)
+        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
+      }
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    val remappedProbeCol = if (optimizations.remapComplexKeysToInts) {
+      if (remapStructures.isDefined) {
+        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
+      } else {
+        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+        try {
+          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
+        } finally {
+          tempRemap.close()
+        }
+      }
+    } else {
+      None
+    }
+    
+    try {
+      val actualBuildKeys = if (optimizations.remapComplexKeysToInts &&
+          remappedBuildKeys.isDefined) {
+        new Table(remappedBuildKeys.get)
+      } else if (optimizations.remapComplexKeysToInts) {
+        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
+        try {
+          val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
+          try {
+            new Table(remappedCol)
+          } finally {
+            remappedCol.close()
+          }
+        } finally {
+          tempRemap.close()
+        }
+      } else {
+        buildKeys
+      }
+      
+      val actualProbeKeys = remappedProbeCol match {
+        case Some(col) => new Table(col)
+        case None => probeKeys
+      }
+      
+      try {
+        actualBuildKeys.fullJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+      } finally {
+        if (optimizations.remapComplexKeysToInts &&
+            actualBuildKeys != buildKeys) {
+          actualBuildKeys.close()
+        }
+        if (actualProbeKeys != probeKeys) {
+          actualProbeKeys.close()
+        }
+      }
+    } finally {
+      remappedProbeCol.foreach(_.close())
+    }
+  }
+  
+  def close(): Unit = {
+    remapStructures.foreach(_.close())
+    remappedBuildKeys.foreach(_.close())
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
  * Post-processing build holder for all join types.
  * Does inner join first, then applies post-processing (makeLeftOuter, makeSemi, etc.).
  * Supports both hash and sort-merge strategies with distinct join optimization.
@@ -895,7 +1304,7 @@ private class PostProcessingBuildHolder(
   private def ensureInitialized(): Unit = {
     if (!initialized) {
       // Validate SortMergeJoin key types BEFORE any initialization
-      if (strategy == SortWithPostStrategy) {
+      if (strategy == SortObjectWithPostStrategy) {
         KeyRemappingHelper.validateSortMergeKeyTypes(
           buildKeys, optimizations.remapComplexKeysToInts)
       }
@@ -918,7 +1327,7 @@ private class PostProcessingBuildHolder(
         
         try {
           // Check distinctness for hash joins if optimization enabled
-          val isDistinct = if (optimizations.useDistinctJoin && strategy == HashWithPostStrategy) {
+          val isDistinct = if (optimizations.useDistinctJoin && strategy == HashObjectWithPostStrategy) {
             if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
               cachedIsDistinct.get
             } else {
@@ -942,13 +1351,13 @@ private class PostProcessingBuildHolder(
           }
           
           cachedJoinObject = Some(strategy match {
-            case HashWithPostStrategy =>
+            case HashObjectWithPostStrategy =>
               if (isDistinct) {
                 Left(Right(DistinctHashJoin.create(keysForJoin, compareNullsEqual)))
               } else {
                 Left(Left(HashJoin.create(keysForJoin, compareNullsEqual)))
               }
-            case SortWithPostStrategy =>
+            case SortObjectWithPostStrategy =>
               Right(SortMergeJoin.create(keysForJoin, false /* isBuildSorted */, compareNullsEqual))
             case _ =>
               throw new IllegalArgumentException(
@@ -1028,7 +1437,7 @@ private class PostProcessingBuildHolder(
           
           try {
             strategy match {
-              case HashWithPostStrategy =>
+              case HashObjectWithPostStrategy =>
                 // Check distinctness for non-cached path if optimization enabled
                 val isDistinct = if (optimizations.useDistinctJoin) {
                   if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
@@ -1069,10 +1478,40 @@ private class PostProcessingBuildHolder(
                   }
                 }
                 
-              case SortWithPostStrategy =>
+              case HashDirectWithPostStrategy =>
+                // Use Table direct APIs (no objects)
+                val isDistinct = if (optimizations.useDistinctJoin) {
+                  if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
+                    cachedIsDistinct.get
+                  } else {
+                    val canUseDistinct = joinType match {
+                      case InnerJoin | LeftOuterJoin => true
+                      case _ => false
+                    }
+                    if (canUseDistinct) {
+                      val distinct = actualBuildKeys.getRowCount == actualBuildKeys.distinctCount()
+                      if (optimizations.cacheDistinctFlag) {
+                        cachedIsDistinct = Some(distinct)
+                      }
+                      distinct
+                    } else {
+                      false
+                    }
+                  }
+                } else {
+                  false
+                }
+                
+                if (isDistinct) {
+                  actualBuildKeys.innerDistinctJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+                } else {
+                  actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+                }
+              
+              case SortObjectWithPostStrategy =>
                 // Validate key types for SortMergeJoin
                 // (in case this wasn't done in ensureInitialized)
-                if (strategy == SortWithPostStrategy) {
+                if (strategy == SortObjectWithPostStrategy) {
                   KeyRemappingHelper.validateSortMergeKeyTypes(
                     actualBuildKeys, optimizations.remapComplexKeysToInts)
                 }
@@ -1084,6 +1523,13 @@ private class PostProcessingBuildHolder(
                 } finally {
                   smj.close()
                 }
+              
+              case SortDirectWithPostStrategy =>
+                // Use JoinPrimitives sort API (no objects)
+                JoinPrimitives.sortMergeInnerJoin(
+                  actualBuildKeys, actualProbeKeys,
+                  false /* isLeftSorted */, false /* isRightSorted */,
+                  compareNullsEqual)
                 
               case _ =>
                 throw new IllegalArgumentException(
@@ -1332,7 +1778,7 @@ private class MixedPostProcessingBuildHolder(
   private def ensureInitialized(): Unit = {
     if (!initialized) {
       // Validate SortMergeJoin key types BEFORE any initialization
-      if (strategy == SortWithPostStrategy) {
+      if (strategy == SortObjectWithPostStrategy) {
         KeyRemappingHelper.validateSortMergeKeyTypes(
           buildKeys, optimizations.remapComplexKeysToInts)
       }
@@ -1344,7 +1790,13 @@ private class MixedPostProcessingBuildHolder(
         remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
       }
       
-      if (optimizations.cacheJoinObject) {
+      // Only Object strategies can cache join objects
+      val canCacheJoinObject = strategy match {
+        case HashObjectWithPostStrategy | SortObjectWithPostStrategy => true
+        case _ => false
+      }
+      
+      if (optimizations.cacheJoinObject && canCacheJoinObject) {
         // Determine which keys to use for join object creation
         val keysForJoin = if (optimizations.remapComplexKeysToInts &&
             remappedBuildKeys.isDefined) {
@@ -1355,7 +1807,7 @@ private class MixedPostProcessingBuildHolder(
         
         try {
           // Check distinctness for hash joins if optimization enabled
-          val isDistinct = if (optimizations.useDistinctJoin && strategy == HashWithPostStrategy) {
+          val isDistinct = if (optimizations.useDistinctJoin && strategy == HashObjectWithPostStrategy) {
             if (optimizations.cacheDistinctFlag && cachedIsDistinct.isDefined) {
               cachedIsDistinct.get
             } else {
@@ -1378,13 +1830,13 @@ private class MixedPostProcessingBuildHolder(
           }
           
           cachedJoinObject = Some(strategy match {
-            case HashWithPostStrategy =>
+            case HashObjectWithPostStrategy =>
               if (isDistinct) {
                 Left(Right(DistinctHashJoin.create(keysForJoin, compareNullsEqual)))
               } else {
                 Left(Left(HashJoin.create(keysForJoin, compareNullsEqual)))
               }
-            case SortWithPostStrategy =>
+            case SortObjectWithPostStrategy =>
               Right(SortMergeJoin.create(keysForJoin, false /* isBuildSorted */, compareNullsEqual))
             case _ =>
               throw new IllegalArgumentException(s"Unsupported strategy: $strategy")
@@ -1462,7 +1914,7 @@ private class MixedPostProcessingBuildHolder(
           
           try {
             strategy match {
-              case HashWithPostStrategy =>
+              case HashObjectWithPostStrategy =>
                 // Check distinctness for non-cached path if optimization enabled
                 if (optimizations.useDistinctJoin) {
                   val isDistinct = if (optimizations.cacheDistinctFlag &&
@@ -1492,7 +1944,38 @@ private class MixedPostProcessingBuildHolder(
                 } else {
                   actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
                 }
-              case SortWithPostStrategy =>
+              case HashDirectWithPostStrategy =>
+                // Use Table direct APIs (no objects)
+                if (optimizations.useDistinctJoin) {
+                  val isDistinct = if (optimizations.cacheDistinctFlag &&
+                      cachedIsDistinct.isDefined) {
+                    cachedIsDistinct.get
+                  } else {
+                    val canUseDistinct = joinType match {
+                      case InnerJoin | LeftOuterJoin => true
+                      case _ => false
+                    }
+                    if (canUseDistinct) {
+                      val distinct = actualBuildKeys.getRowCount == actualBuildKeys.distinctCount()
+                      if (optimizations.cacheDistinctFlag) {
+                        cachedIsDistinct = Some(distinct)
+                      }
+                      distinct
+                    } else {
+                      false
+                    }
+                  }
+                  
+                  if (isDistinct) {
+                    actualBuildKeys.innerDistinctJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+                  } else {
+                    actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+                  }
+                } else {
+                  actualBuildKeys.innerJoinGatherMaps(actualProbeKeys, compareNullsEqual)
+                }
+              
+              case SortObjectWithPostStrategy =>
                 // Validate key types for SortMergeJoin
                 KeyRemappingHelper.validateSortMergeKeyTypes(
                   actualBuildKeys, optimizations.remapComplexKeysToInts)
@@ -1503,6 +1986,14 @@ private class MixedPostProcessingBuildHolder(
                 } finally {
                   smj.close()
                 }
+              
+              case SortDirectWithPostStrategy =>
+                // Use JoinPrimitives sort API (no objects)
+                JoinPrimitives.sortMergeInnerJoin(
+                  actualBuildKeys, actualProbeKeys,
+                  false /* isLeftSorted */, false /* isRightSorted */,
+                  compareNullsEqual)
+              
               case _ => throw new IllegalArgumentException(s"Unsupported strategy: $strategy")
             }
           } finally {
@@ -1643,6 +2134,17 @@ private[benchmarks] class JoinExecutor(
    */
   private def createBuildHolder(
       buildSide: BuildSideSpec): Either[NonConditionalBuildHolder, MixedConditionalBuildHolder] = {
+    // Validate that Direct strategies do not use cacheJoinObject
+    strategy match {
+      case HashDirectStrategy | HashDirectWithPostStrategy | SortDirectWithPostStrategy =>
+        if (optimizations.cacheJoinObject) {
+          throw new IllegalArgumentException(
+            s"$strategy does not support cacheJoinObject optimization. " +
+            s"Direct strategies use Table APIs without join objects that can be cached.")
+        }
+      case _ => // Object strategies can use caching
+    }
+    
     val sourceTable = if (buildSide == LeftBuild) leftTable else rightTable
     // Create new Table with incremented refcounts - holder will own this
     val buildTable = new Table(
@@ -1665,11 +2167,22 @@ private[benchmarks] class JoinExecutor(
       case Some(ast) =>
         // Mixed conditional join
         val holder = (joinType, strategy) match {
-          case (InnerJoin, HashJoinStrategy) =>
+          case (InnerJoin, HashObjectStrategy) =>
+            throw new IllegalArgumentException(
+              s"HashObjectStrategy does not support mixed (AST) joins. " +
+              s"Use HashDirectStrategy or HashDirectWithPostStrategy for mixed joins.")
+          
+          case (InnerJoin, HashDirectStrategy) =>
             new MixedInnerHashBuildHolder(buildTable, buildKeys, ast, compareNullsEqual,
               optimizations)
           
-          case (_, HashWithPostStrategy | SortWithPostStrategy) =>
+          case (_, HashObjectWithPostStrategy | SortObjectWithPostStrategy) =>
+            throw new IllegalArgumentException(
+              s"Object-based strategies (HashObjectWithPostStrategy, SortObjectWithPostStrategy) " +
+              s"do not support mixed (AST) joins. " +
+              s"Use HashDirectWithPostStrategy or SortDirectWithPostStrategy for mixed joins.")
+          
+          case (_, HashDirectWithPostStrategy | SortDirectWithPostStrategy) =>
             // All join types supported with post-processing
             new MixedPostProcessingBuildHolder(joinType, strategy, buildTable, buildKeys,
               ast, compareNullsEqual, tablesWereSwapped, optimizations, buildSide,
@@ -1678,34 +2191,61 @@ private[benchmarks] class JoinExecutor(
           case _ =>
             throw new IllegalArgumentException(
               s"Mixed conditional joins not supported for: $joinType with $strategy. " +
-              s"Use HashWithPostStrategy or SortWithPostStrategy for non-inner joins.")
+              s"Use HashDirectStrategy, HashDirectWithPostStrategy, or SortDirectWithPostStrategy for mixed joins.")
         }
         Right(holder)
       
       case None =>
         // Non-conditional join
         val holder = (joinType, strategy) match {
-          case (InnerJoin, HashJoinStrategy) =>
+          case (InnerJoin, HashObjectStrategy) =>
             new InnerHashBuildHolder(buildTable, buildKeys, compareNullsEqual,
               tablesWereSwapped, optimizations)
           
-          case (LeftOuterJoin, HashJoinStrategy) =>
+          case (LeftOuterJoin, HashObjectStrategy) =>
             new LeftOuterHashBuildHolder(buildTable, buildKeys, compareNullsEqual,
               tablesWereSwapped, optimizations)
           
-          case (RightOuterJoin, HashJoinStrategy) =>
+          case (RightOuterJoin, HashObjectStrategy) =>
             new RightOuterHashBuildHolder(buildTable, buildKeys, compareNullsEqual,
               tablesWereSwapped, optimizations)
           
-          case (FullOuterJoin, HashJoinStrategy) =>
+          case (FullOuterJoin, HashObjectStrategy) =>
             new FullOuterHashBuildHolder(buildTable, buildKeys, compareNullsEqual,
               tablesWereSwapped, optimizations)
           
-          case (LeftSemiJoin | LeftAntiJoin, HashJoinStrategy) =>
+          case (LeftSemiJoin | LeftAntiJoin, HashObjectStrategy) =>
             new SemiAntiHashBuildHolder(joinType, buildTable, buildKeys, compareNullsEqual,
               optimizations)
           
-          case (_, HashWithPostStrategy | SortWithPostStrategy) =>
+          case (_, HashObjectWithPostStrategy | SortObjectWithPostStrategy) =>
+            // All join types supported with post-processing
+            new PostProcessingBuildHolder(joinType, strategy, buildTable, buildKeys,
+              compareNullsEqual, tablesWereSwapped, optimizations, buildSide,
+              leftTable.getRowCount, rightTable.getRowCount)
+          
+          case (InnerJoin, HashDirectStrategy) =>
+            new InnerHashDirectBuildHolder(buildTable, buildKeys, compareNullsEqual,
+              tablesWereSwapped, optimizations)
+          
+          case (LeftOuterJoin, HashDirectStrategy) =>
+            new LeftOuterHashDirectBuildHolder(buildTable, buildKeys, compareNullsEqual,
+              tablesWereSwapped, optimizations)
+          
+          case (RightOuterJoin, HashDirectStrategy) =>
+            new RightOuterHashDirectBuildHolder(buildTable, buildKeys, compareNullsEqual,
+              tablesWereSwapped, optimizations)
+          
+          case (FullOuterJoin, HashDirectStrategy) =>
+            new FullOuterHashDirectBuildHolder(buildTable, buildKeys, compareNullsEqual,
+              tablesWereSwapped, optimizations)
+          
+          case (LeftSemiJoin | LeftAntiJoin, HashDirectStrategy) =>
+            throw new UnsupportedOperationException(
+              s"HashDirectStrategy does not support $joinType. " +
+              s"Use HashDirectWithPostStrategy for semi/anti joins.")
+          
+          case (_, HashDirectWithPostStrategy | SortDirectWithPostStrategy) =>
             // All join types supported with post-processing
             new PostProcessingBuildHolder(joinType, strategy, buildTable, buildKeys,
               compareNullsEqual, tablesWereSwapped, optimizations, buildSide,
@@ -1797,11 +2337,12 @@ private[benchmarks] class JoinExecutor(
   
   private def canSwap(joinType: JoinTypeSpec, strategy: JoinStrategySpec): Boolean = {
     strategy match {
-      case HashWithPostStrategy | SortWithPostStrategy =>
+      case HashObjectWithPostStrategy | SortObjectWithPostStrategy | 
+           HashDirectWithPostStrategy | SortDirectWithPostStrategy =>
         // Post-processing strategies can swap for all join types
         true
-      case HashJoinStrategy =>
-        // Direct hash join strategy can only swap for join types with symmetric semantics
+      case HashObjectStrategy | HashDirectStrategy =>
+        // Direct hash join strategies can only swap for join types with symmetric semantics
         joinType match {
           case InnerJoin | FullOuterJoin =>
             // Inner and Full Outer joins are symmetric and can swap build sides
