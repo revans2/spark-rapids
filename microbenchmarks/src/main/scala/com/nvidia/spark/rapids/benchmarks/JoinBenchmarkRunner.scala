@@ -63,6 +63,8 @@ object JoinBenchmarkRunner {
     buildSide: BuildSideSpec,
     optimizations: JoinOptimizations,
     conditionalFilter: Option[ConditionalFilterSpec],
+    leftKeyIndices: Seq[Int] = Seq(0),
+    rightKeyIndices: Seq[Int] = Seq(0),
     iterations: Int = 10,
     numThreads: Int = 1,
     enableCaching: Boolean = false,
@@ -269,9 +271,9 @@ object JoinBenchmarkRunner {
       val (leftTable, rightTable) = loadTables(config.leftParquetPath, config.rightParquetPath)
       
       try {
-        // Determine key column indices
-        val leftKeyIndices = Array(0)  // TODO: Make configurable
-        val rightKeyIndices = Array(0)  // TODO: Make configurable
+        // Determine key column indices (configurable; defaults to first column)
+        val leftKeyIndices = config.leftKeyIndices.toArray
+        val rightKeyIndices = config.rightKeyIndices.toArray
         
         val wallClockStart = System.nanoTime()
         

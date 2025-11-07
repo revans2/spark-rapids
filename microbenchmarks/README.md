@@ -93,6 +93,51 @@ This comprehensive example includes extensive test coverage:
 - ✅ **Build side swapping** - Automatically picks smaller side when allowed
 - ✅ **Remapping structure caching** - Reuses remapping structures across iterations
 
+## Configuration Reference (JoinBenchmarkConfig)
+
+Key fields for configuring a benchmark run:
+
+- testName: Label for the test row in TSV output
+- leftParquetPath / rightParquetPath: Paths to the single-file Parquet inputs
+- joinType: One of Inner, LeftOuter, RightOuter, FullOuter, LeftSemi, LeftAnti
+- joinStrategy: One of HashObject, HashObjectPost, SortObjectPost, HashDirect, HashDirectPost, SortDirectPost
+- buildSide: Left, Right, Auto(Smaller), Auto(Required)
+- optimizations:
+  - allowBuildSideSwap: Enable build-side swap when allowed by join type/strategy
+  - remapComplexKeysToInts: Remap complex keys (e.g., string/decimal/composite) to dense ints
+  - useDistinctJoin: Use DistinctHashJoin when build-side keys are distinct (inner joins)
+  - cacheJoinObject: Cache HashJoin/SortMergeJoin/FilteredJoin objects across iterations
+  - cacheRemapping: Cache key remapping structures across iterations
+  - cacheDistinctFlag: Cache the distinctness check result across iterations
+- leftKeyIndices / rightKeyIndices: Key column indices (default: Seq(0))
+- iterations: Iterations per thread
+- numThreads: Number of concurrent threads
+- printHeader: Whether to print the TSV header
+
+Example: multi-column keys and custom key indices
+
+```scala
+val cfg = JoinBenchmarkConfig(
+  testName = "inner_multi_key",
+  leftParquetPath = "/data/left.parquet",
+  rightParquetPath = "/data/right.parquet",
+  joinType = InnerJoin,
+  joinStrategy = HashObjectWithPostStrategy,
+  buildSide = AutoPickSmallerIfAllowed,
+  optimizations = JoinOptimizations(
+    allowBuildSideSwap = true,
+    useDistinctJoin = true,
+    cacheJoinObject = true,
+    cacheDistinctFlag = true
+  ),
+  leftKeyIndices = Seq(0, 2),   // composite key: columns 0 and 2 on left
+  rightKeyIndices = Seq(0, 2),  // composite key: columns 0 and 2 on right
+  iterations = 20,
+  numThreads = 1,
+  printHeader = true
+)
+```
+
 ## Example Output
 
 The benchmarks output TSV format that can be pasted into a spreadsheet:

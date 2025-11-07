@@ -326,6 +326,39 @@ private trait RemappingSupport {
 }
 
 /**
+ * Shared initialization support for object-based join holders that may cache join objects.
+ * Initializes remapping once and, if enabled, creates the cached join object using provided keys.
+ */
+private trait ObjectJoinInitialization extends RemappingSupport {
+  protected var initialized: Boolean = false
+
+  /**
+   * Ensure one-time initialization of remapping and optional cached join object.
+   * The provided createJoin function will be invoked only when cacheJoinObject is true.
+   */
+  protected def maybeInit(
+      buildKeys: Table,
+      optimizations: JoinOptimizations)
+      (createJoin: Table => Unit): Unit = {
+    if (!initialized) {
+      // Initialize remapping structures if configured
+      initializeRemapping(buildKeys, optimizations)
+
+      // Create cached join object if caching is enabled
+      if (optimizations.cacheJoinObject) {
+        val keysForJoin = getKeysForJoin(buildKeys, optimizations)
+        try {
+          createJoin(keysForJoin)
+        } finally {
+          keysForJoin.close()
+        }
+      }
+      initialized = true
+    }
+  }
+}
+
+/**
  * Helper object for post-processing inner join results into other join types.
  * Consolidates the common post-processing logic used by PostProcessingBuildHolder
  * and MixedPostProcessingBuildHolder.
@@ -549,36 +582,14 @@ private class LeftOuterHashBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder with RemappingSupport {
+) extends NonConditionalBuildHolder with ObjectJoinInitialization {
   
   private var cachedJoinObject: Option[HashJoin] = None
-  private var initialized = false
   
   private def ensureInitialized(): Unit = {
-    if (!initialized) {
-      // Initialize remapping if enabled
-      initializeRemapping(buildKeys, optimizations)
-      
-      if (optimizations.cacheJoinObject) {
-        // Determine which keys to use
-        val keysForJoin = if (optimizations.remapComplexKeysToInts &&
-            remappedBuildKeys.isDefined) {
-          new Table(remappedBuildKeys.get)
-        } else {
-          buildKeys
-        }
-        
-        try {
-          // Left outer join always uses HashJoin
-          cachedJoinObject = Some(HashJoin.create(keysForJoin, compareNullsEqual))
-        } finally {
-          if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            keysForJoin.close()
-          }
-        }
-      }
-      initialized = true
+    maybeInit(buildKeys, optimizations) { keysForJoin =>
+      // Left outer join always uses HashJoin
+      cachedJoinObject = Some(HashJoin.create(keysForJoin, compareNullsEqual))
     }
   }
   
@@ -641,34 +652,13 @@ private class RightOuterHashBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder with RemappingSupport {
+) extends NonConditionalBuildHolder with ObjectJoinInitialization {
   
   private var cachedJoinObject: Option[HashJoin] = None
-  private var initialized = false
   
   private def ensureInitialized(): Unit = {
-    if (!initialized) {
-      // Initialize remapping if enabled
-      initializeRemapping(buildKeys, optimizations)
-      
-      if (optimizations.cacheJoinObject) {
-        val keysForJoin = if (optimizations.remapComplexKeysToInts &&
-            remappedBuildKeys.isDefined) {
-          new Table(remappedBuildKeys.get)
-        } else {
-          buildKeys
-        }
-        
-        try {
-          cachedJoinObject = Some(HashJoin.create(keysForJoin, compareNullsEqual))
-        } finally {
-          if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            keysForJoin.close()
-          }
-        }
-      }
-      initialized = true
+    maybeInit(buildKeys, optimizations) { keysForJoin =>
+      cachedJoinObject = Some(HashJoin.create(keysForJoin, compareNullsEqual))
     }
   }
   
@@ -732,34 +722,13 @@ private class FullOuterHashBuildHolder(
   compareNullsEqual: Boolean,
   tablesWereSwapped: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder with RemappingSupport {
+) extends NonConditionalBuildHolder with ObjectJoinInitialization {
   
   private var cachedJoinObject: Option[HashJoin] = None
-  private var initialized = false
   
   private def ensureInitialized(): Unit = {
-    if (!initialized) {
-      // Initialize remapping if enabled
-      initializeRemapping(buildKeys, optimizations)
-      
-      if (optimizations.cacheJoinObject) {
-        val keysForJoin = if (optimizations.remapComplexKeysToInts &&
-            remappedBuildKeys.isDefined) {
-          new Table(remappedBuildKeys.get)
-        } else {
-          buildKeys
-        }
-        
-        try {
-          cachedJoinObject = Some(HashJoin.create(keysForJoin, compareNullsEqual))
-        } finally {
-          if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            keysForJoin.close()
-          }
-        }
-      }
-      initialized = true
+    maybeInit(buildKeys, optimizations) { keysForJoin =>
+      cachedJoinObject = Some(HashJoin.create(keysForJoin, compareNullsEqual))
     }
   }
   
@@ -817,34 +786,13 @@ private class SemiAntiHashBuildHolder(
   val buildKeys: Table,
   compareNullsEqual: Boolean,
   optimizations: JoinOptimizations
-) extends NonConditionalBuildHolder with RemappingSupport {
+) extends NonConditionalBuildHolder with ObjectJoinInitialization {
   
   private var cachedJoinObject: Option[FilteredJoin] = None
-  private var initialized = false
   
   private def ensureInitialized(): Unit = {
-    if (!initialized) {
-      // Initialize remapping if enabled
-      initializeRemapping(buildKeys, optimizations)
-      
-      if (optimizations.cacheJoinObject) {
-        val keysForJoin = if (optimizations.remapComplexKeysToInts &&
-            remappedBuildKeys.isDefined) {
-          new Table(remappedBuildKeys.get)
-        } else {
-          buildKeys
-        }
-        
-        try {
-          cachedJoinObject = Some(FilteredJoin.create(keysForJoin, compareNullsEqual))
-        } finally {
-          if (optimizations.remapComplexKeysToInts &&
-              remappedBuildKeys.isDefined) {
-            keysForJoin.close()
-          }
-        }
-      }
-      initialized = true
+    maybeInit(buildKeys, optimizations) { keysForJoin =>
+      cachedJoinObject = Some(FilteredJoin.create(keysForJoin, compareNullsEqual))
     }
   }
   
