@@ -76,6 +76,24 @@ Measures the overhead of join object creation (JNI calls) versus direct API call
 
 Tests across different data sizes (10K-5M rows), key types (INT, LONG, STRING), selectivities (10%-100%), and join types to determine if overhead is fixed or data-dependent. Runtime: approximately 1-2 minutes including data generation and warmup.
 
+### Run Distinct Join Analysis Benchmark
+
+Analyzes the performance benefits and costs of the distinct join optimization:
+
+```bash
+:load examples/distinct_join_analysis.scala
+```
+
+**Part 1:** Measures performance benefit when data IS distinct
+- Compares DistinctHashJoin vs regular HashJoin
+- Shows speedup percentages for distinct data
+
+**Part 2:** Measures distinctCount() check overhead when data is NOT distinct
+- Compares HashJoin with useDistinctJoin=true vs false
+- Quantifies cost of the distinctness check
+
+Tests across different data sizes (10K-10M rows) for both INT and STRING keys to understand how distinctness checking scales with data size and key complexity. Runtime: approximately 3-5 minutes including data generation and warmup.
+
 ## Implemented Features
 
 ### Core Functionality
