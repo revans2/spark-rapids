@@ -94,6 +94,45 @@ Analyzes the performance benefits and costs of the distinct join optimization:
 
 Tests across different data sizes (10K-10M rows) for both INT and STRING keys to understand how distinctness checking scales with data size and key complexity. Runtime: approximately 3-5 minutes including data generation and warmup.
 
+### Run Hash vs Sort Join Analysis
+
+Compares HashJoin vs SortMergeJoin performance to build a heuristic for deciding when to use each strategy:
+
+```bash
+:load examples/hash_vs_sort_analysis.scala
+```
+
+**Key Questions Answered:**
+- How does build-side cardinality (% distinct keys) affect hash vs sort performance?
+- What is the exact crossover point? (Fine-grained 1-10% sweep with 2%, 4%, 6%, 8% tests)
+- **Does key distribution skew affect the decision?** (NEW!)
+  - Tests uniform vs Zipf-distributed keys at different skew levels
+  - Theory: Hash joins may suffer with skewed data (unbalanced buckets), sort joins handle skew better
+- Which key types favor hash joins vs sort joins?
+- How do hash and sort joins scale with data size?
+- Does cardinality matter more on the build side or probe side? (Asymmetric join tests)
+
+**Test Coverage:**
+- **Symmetric joins:** 1M to 25M rows
+  - Cardinality: Full sweep (1%, 2%, 4%, 6%, 8%, 10%, 25%, 50%, 75%, 100%)
+  - Key types: INT (single/multi), LONG (single), STRING (single/multi)
+- **Skewed distribution tests:** 5M rows at crossover cardinalities (2%, 4%, 6%, 8%, 10%)
+  - Uniform (baseline), Zipf s=0.5 (light skew), s=1.0 (moderate), s=1.5 (heavy)
+  - Identifies if crossover point shifts with distribution skew
+- **Asymmetric joins:** Build vs probe side analysis
+  - Small build (1M) with large probe (10M)
+  - Large build (10M) with small probe (1M)
+  - Cardinality sweep: 2%, 4%, 6%, 8%, 10%, 50%, 100%
+- Build side swapping DISABLED for true performance comparison
+- Iterations: 20 per test (faster runtime with good statistical confidence)
+
+**Output includes heuristic recommendations:**
+- If skew matters: 2D decision (cardinality + skew metric)
+- If skew doesn't matter: Simple cardinality threshold
+- Specific threshold values based on benchmark results
+
+Runtime: approximately 60-120 minutes (comprehensive suite with skew + asymmetric tests).
+
 ## Implemented Features
 
 ### Core Functionality
