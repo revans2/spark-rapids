@@ -133,6 +133,52 @@ Compares HashJoin vs SortMergeJoin performance to build a heuristic for deciding
 
 Runtime: approximately 60-120 minutes (comprehensive suite with skew + asymmetric tests).
 
+### Run Key Remapping Optimization Analysis
+
+Analyzes the `remapComplexKeysToInts` optimization which converts join keys to dense integers:
+
+```bash
+:load examples/remapping_analysis.scala
+```
+
+**Key Questions Answered:**
+- Which data types benefit from remapping? (int vs long/decimal/string)
+- How does key width affect the tradeoff? (16 bytes → 4 bytes helps for decimals)
+- Does cardinality affect remapping benefit? (dictionary overhead vs comparison savings)
+- Does table size matter? (overhead amortization)
+- Does remapping help hash joins, or only sort joins?
+- How much does caching the remapping structure help?
+- String length impact: Do longer strings benefit more?
+
+**Test Coverage (75 configs, 225 benchmark runs):**
+- **Key types:**
+  - Narrow: int (4B), decimal(9,2) (4B)
+  - Wide: long (8B), decimal(18,2) (8B), decimal(38,2) (16B)
+  - Variable: string (10, 50, 200 char lengths)
+  - Multi-column: 2-key composites (int, long, string, decimal128)
+  - NOTE: byte/short removed due to sort join gather map bug
+  - Each config runs 3 times: no remap, with remap, with remap cached
+- **Cardinalities:** 1%, 5%, 10%, 50%, 100%
+- **Table sizes:** 1M, 5M, 10M rows (full size scaling for strings and key types that benefit)
+- **Join strategies:** Hash and Sort (equal coverage)
+- **Caching:** With and without cacheRemapping enabled
+
+**Output includes:**
+- Type-by-type recommendations (remap vs don't remap)
+- Cardinality impact analysis
+- String length scaling analysis
+- Size scaling trends
+- Cache effectiveness metrics
+- Concrete heuristic for when to enable remapping
+
+Runtime: approximately 20-40 minutes.
+
+**Note:** Additional dimensions to explore:
+- Multi-column composite keys (test if ALL keys must be wide to benefit)
+- Null value impact (nulls in remapping dictionary)
+- Join selectivity (does output size matter?)
+- Build side size asymmetry
+
 ## Implemented Features
 
 ### Core Functionality
