@@ -171,13 +171,56 @@ Analyzes the `remapComplexKeysToInts` optimization which converts join keys to d
 - Cache effectiveness metrics
 - Concrete heuristic for when to enable remapping
 
-Runtime: approximately 20-40 minutes.
+Runtime: approximately 30-50 minutes.
 
 **Note:** Additional dimensions to explore:
-- Multi-column composite keys (test if ALL keys must be wide to benefit)
 - Null value impact (nulls in remapping dictionary)
 - Join selectivity (does output size matter?)
 - Build side size asymmetry
+
+### Run Post-Processing vs Combined Join API Analysis
+
+Compares the performance of join post-processing strategies versus combined/direct join APIs:
+
+```bash
+:load examples/post_processing_analysis.scala
+```
+
+**Key Questions Answered:**
+- How does AST condition complexity affect post-filtering overhead?
+- How does output selectivity (% passing filter) impact materialization cost?
+- Which join types benefit from direct implementations vs post-processing?
+- Does hash vs sort strategy change the post-processing overhead?
+- When is inner join + AST filtering more efficient than separate operations?
+
+**Test Coverage:**
+- **AST Post-Filtering (Inner Joins):**
+  - **Inner join size scaling:** Vary cardinality (1%, 10%, 50%, 100%) to create different intermediate result sizes
+    - Low cardinality = large inner join output (many duplicates, high materialization cost)
+    - High cardinality = small inner join output (few duplicates, low materialization cost)
+  - Condition complexity: simple (1 predicate), medium (2 preds), complex (3-4 preds with OR/nested)
+  - Output selectivity: 5%, 25%, 50%, 75%, 90% (% of inner join output passing filter)
+  - Input sizes: 1M, 5M rows
+  - Both hash and sort strategies
+  - **48 test configs, 96 benchmark runs**
+
+- **Join Type Post-Processing vs Direct:**
+  - Join types: LeftOuter, RightOuter, FullOuter, LeftSemi, LeftAnti
+  - Compares `*WithPostStrategy` (inner + post) vs `*ObjectStrategy` (native)
+  - Input sizes: 1M, 5M rows
+  - Cardinalities: 10%, 50%
+  - Both hash and sort strategies
+  - **30 test configs, 60 benchmark runs**
+
+**Output includes:**
+- **Inner join size scaling analysis** (how overhead grows with intermediate result size)
+- Overhead analysis by selectivity (materialization cost curve)
+- Overhead analysis by condition complexity
+- Join type recommendations (post vs direct)
+- Strategy comparison (hash vs sort for post-processing)
+- Concrete heuristics for when to use each approach
+
+Runtime: approximately 45-90 minutes (78 configs, 156 runs total).
 
 ## Implemented Features
 
