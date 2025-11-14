@@ -67,7 +67,8 @@ object JoinBenchmarkRunner {
     rightKeyIndices: Seq[Int] = Seq(0),
     iterations: Int = 10,
     numThreads: Int = 1,
-    printHeader: Boolean = true
+    printHeader: Boolean = true,
+    collectDetailedTimings: Boolean = false
   )
   
   sealed trait JoinTypeSpec
@@ -182,6 +183,7 @@ object JoinBenchmarkRunner {
     maxMs: Double,
     stdDevMs: Double,
     optimizations: JoinOptimizations,
+    detailedTimings: Option[com.nvidia.spark.rapids.benchmarks.DetailedTimings] = None,
     joinType: JoinTypeSpec,
     joinStrategy: JoinStrategySpec,
     buildSideConfig: BuildSideSpec,
@@ -194,7 +196,8 @@ object JoinBenchmarkRunner {
   private case class ThreadResult(
     timings: Seq[Double],
     outputRows: Long,
-    actualBuildSide: Option[String]
+    actualBuildSide: Option[String],
+    detailedTimings: Option[com.nvidia.spark.rapids.benchmarks.DetailedTimings] = None
   )
   
   /**
@@ -229,10 +232,19 @@ object JoinBenchmarkRunner {
       val timings = ArrayBuffer[Double]()
       var totalOutputRows = 0L
       var actualBuildSide: Option[String] = None
+      var capturedDetailedTimings: Option[com.nvidia.spark.rapids.benchmarks.DetailedTimings] = None
       
       (1 to iterations).foreach { i =>
+        println(s"\n--- ITERATION $i/$iterations ---")
+        
         val startTime = System.nanoTime()
-        val (gatherMaps, _) = executor.executeJoin()
+        
+        val (gatherMaps, detailedTimings) = if (config.collectDetailedTimings) {
+          executor.executeJoinWithDetailedTimings()
+        } else {
+          val (maps, _) = executor.executeJoin()
+          (maps, None)
+        }
         
         // Synchronize to ensure GPU work completes
         Cuda.DEFAULT_STREAM.sync()
@@ -241,17 +253,28 @@ object JoinBenchmarkRunner {
         val timingMs = (endTime - startTime) / 1e6
         timings += timingMs
         
-        // Track output rows and actual build side from first iteration
+        // Get output row count for this iteration
+        val iterationOutputRows = gatherMaps(0).getRowCount
+        println(s"Join output rows: $iterationOutputRows")
+        
+        // Track output rows, build side, and detailed timings from first iteration
         if (i == 1) {
-          totalOutputRows = gatherMaps(0).getRowCount
+          totalOutputRows = iterationOutputRows
           actualBuildSide = executor.getActualBuildSide
+          capturedDetailedTimings = detailedTimings
+        } else if (iterationOutputRows != totalOutputRows) {
+          // Error if output row count changes between iterations
+          val errorMsg = s"Output row count mismatch between iterations! " +
+            s"First iteration: $totalOutputRows rows, Iteration $i: $iterationOutputRows rows"
+          println(s"\nERROR: $errorMsg")
+          throw new IllegalStateException(errorMsg)
         }
         
         // Close gather maps
         gatherMaps.foreach(_.close())
       }
       
-      ThreadResult(timings.toSeq, totalOutputRows, actualBuildSide)
+      ThreadResult(timings.toSeq, totalOutputRows, actualBuildSide, capturedDetailedTimings)
     } finally {
       executor.clearCache()
     }
@@ -277,7 +300,8 @@ object JoinBenchmarkRunner {
         val wallClockStart = System.nanoTime()
         
         // Choose single-threaded or multi-threaded execution
-        val (allTimings, totalOutputRows, actualBuildSide) = if (config.numThreads == 1) {
+        val (allTimings, totalOutputRows, actualBuildSide, detailedTimings) =
+          if (config.numThreads == 1) {
           // Single-threaded execution (original path)
           val result = runThreadIterations(
             threadId = 0,
@@ -288,7 +312,7 @@ object JoinBenchmarkRunner {
             rightKeyIndices = rightKeyIndices,
             config = config
           )
-          (result.timings, result.outputRows, result.actualBuildSide)
+          (result.timings, result.outputRows, result.actualBuildSide, result.detailedTimings)
           
         } else {
           // Multi-threaded execution
@@ -328,10 +352,14 @@ object JoinBenchmarkRunner {
             // Aggregate results from all threads
             val results = futures.asScala.map(_.get())
             val allTimings = results.flatMap(_.timings)
-            val outputRows = results.head.outputRows  // All threads should have same output rows
-            val buildSide = results.head.actualBuildSide  // All threads should have same build side
+            // All threads should have same output rows
+            val outputRows = results.head.outputRows
+            // All threads should have same build side
+            val buildSide = results.head.actualBuildSide
+            // Detailed timings from first thread
+            val detailedTimings = results.head.detailedTimings
             
-            (allTimings, outputRows, buildSide)
+            (allTimings, outputRows, buildSide, detailedTimings)
             
           } finally {
             executor.shutdown()
@@ -372,6 +400,7 @@ object JoinBenchmarkRunner {
           maxMs = max,
           stdDevMs = stdDev,
           optimizations = config.optimizations,
+          detailedTimings = detailedTimings,
           joinType = config.joinType,
           joinStrategy = config.joinStrategy,
           buildSideConfig = config.buildSide,
@@ -495,13 +524,24 @@ object JoinBenchmarkRunner {
       val strategy = formatJoinStrategy(results.joinStrategy)
       val buildSideConfig = formatBuildSideConfig(results.buildSideConfig)
       val actualBuild = results.actualBuildSide.getOrElse("N/A")
+      // Format detailed timings if available
+      val detailedTimingsStr = results.detailedTimings match {
+        case Some(dt) =>
+          s"\t${f"${dt.remapStructureBuildMs}%.3f"}\t${f"${dt.remapBuildKeysMs}%.3f"}\t" +
+          s"${f"${dt.remapProbeKeysMs}%.3f"}\t${f"${dt.createBuildObjectMs}%.3f"}\t" +
+          s"${f"${dt.executeJoinMs}%.3f"}"
+        case None =>
+          "\t\t\t\t\t"  // Empty columns when no detailed timings
+      }
+      
       println(s"${results.testName}\t${results.status}\t" +
         s"${results.leftRows}\t${results.rightRows}\t${results.outputRows}\t" +
         s"${results.numThreads}\t${results.iterations}\t" +
         s"${f"${results.wallClockMs}%.2f"}\t${f"${results.averageMs}%.2f"}\t" +
         s"${f"${results.medianMs}%.2f"}\t${f"${results.minMs}%.2f"}\t" +
         s"${f"${results.maxMs}%.2f"}\t${f"${results.stdDevMs}%.2f"}\t" +
-        s"$joinType\t$strategy\t$buildSideConfig\t$actualBuild\t$optimizations")
+        s"$joinType\t$strategy\t$buildSideConfig\t$actualBuild\t$optimizations" +
+        detailedTimingsStr)
     } else {
       println(s"${results.testName}\t${results.status}\t" +
         s"ERROR\t${results.errorMessage.getOrElse("Unknown error")}")
@@ -515,7 +555,9 @@ object JoinBenchmarkRunner {
     println("TestName\tStatus\tLeftRows\tRightRows\tOutputRows\t" +
       "NumThreads\tIterations\tWallClockMs\tAvgTimeMs\tMedianTimeMs\t" +
       "MinTimeMs\tMaxTimeMs\tStdDevMs\tJoinType\tStrategy\t" +
-      "BuildSideConfig\tActualBuildSide\tOptimizations")
+      "BuildSideConfig\tActualBuildSide\tOptimizations\t" +
+      "RemapStructureBuildMs\tRemapBuildKeysMs\tRemapProbeKeysMs\t" +
+      "CreateBuildObjectMs\tExecuteJoinMs")
   }
   
   private def formatOptimizations(results: BenchmarkResults): String = {

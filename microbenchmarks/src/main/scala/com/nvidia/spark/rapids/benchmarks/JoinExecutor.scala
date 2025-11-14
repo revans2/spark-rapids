@@ -35,6 +35,24 @@ import com.nvidia.spark.rapids.jni.{DistinctHashJoin, FilteredJoin, HashJoin, Jo
  */
 
 /**
+ * Detailed timing breakdown for join operations with key remapping.
+ * All timings are in milliseconds. Only populated when key remapping is enabled.
+ * 
+ * @param remapStructureBuildMs Time to build the key remapping structure (dictionary + hash tables)
+ * @param remapBuildKeysMs Time to remap the build table keys using the remapping structure
+ * @param remapProbeKeysMs Time to remap the probe table keys using the remapping structure
+ * @param createBuildObjectMs Time to create the join object (HashJoin/SortMergeJoin)
+ * @param executeJoinMs Time to execute the join and produce gather maps
+ */
+case class DetailedTimings(
+  remapStructureBuildMs: Double,
+  remapBuildKeysMs: Double,
+  remapProbeKeysMs: Double,
+  createBuildObjectMs: Double,
+  executeJoinMs: Double
+)
+
+/**
  * Build holder for non-conditional (key-only) joins.
  * 
  * RESOURCE OWNERSHIP CONVENTION:
@@ -58,6 +76,16 @@ sealed trait NonConditionalBuildHolder extends AutoCloseable {
    * @return Array of GatherMap (interpretation depends on holder type)
    */
   def join(probeKeys: Table): Array[GatherMap]
+  
+  /**
+   * Execute the join with detailed timing breakdown.
+   * Only PostProcessingBuildHolder supports detailed timings.
+   * @param probeKeys The probe-side keys
+   * @return (gatherMaps, optionalDetailedTimings)
+   */
+  def joinWithDetailedTimings(probeKeys: Table): (Array[GatherMap], Option[DetailedTimings]) = {
+    (join(probeKeys), None)
+  }
 }
 
 /**
@@ -224,9 +252,47 @@ private trait RemappingSupport {
    */
   protected def initializeRemapping(buildKeys: Table, optimizations: JoinOptimizations): Unit = {
     if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-      val remap = KeyRemapping.createRemapStructures(buildKeys)
+      val remap = KeyRemapping.createRemapStructures(buildKeys, 
+        KeyRemapping.NullEqualityMode.SPARK_EQUALITY)
       remapStructures = Some(remap)
-      remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
+      remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap, true))
+    }
+  }
+  
+  /**
+   * Initialize remapping structures with timing tracking.
+   * Returns (remapStructureBuildMs, remapBuildKeysMs)
+   */
+  protected def initializeRemappingWithTiming(
+      buildKeys: Table, 
+      optimizations: JoinOptimizations): (Double, Double) = {
+    if (optimizations.remapComplexKeysToInts) {
+      val t0 = System.nanoTime()
+      val remap = KeyRemapping.createRemapStructures(buildKeys, 
+        KeyRemapping.NullEqualityMode.SPARK_EQUALITY)
+      Cuda.DEFAULT_STREAM.sync()
+      val t1 = System.nanoTime()
+      
+      val structureBuildMs = (t1 - t0) / 1e6
+      
+      if (optimizations.cacheRemapping) {
+        // Cache the remapping structures and pre-remap build keys
+        val remappedCol = KeyRemapping.applyRemapping(buildKeys, remap, true)
+        Cuda.DEFAULT_STREAM.sync()
+        val t2 = System.nanoTime()
+        
+        remapStructures = Some(remap)
+        remappedBuildKeys = Some(remappedCol)
+        
+        val remapBuildMs = (t2 - t1) / 1e6
+        (structureBuildMs, remapBuildMs)
+      } else {
+        // Non-cached: just time structure creation, will remap on-demand
+        remapStructures = Some(remap)
+        (structureBuildMs, 0.0)
+      }
+    } else {
+      (0.0, 0.0)
     }
   }
   
@@ -240,20 +306,66 @@ private trait RemappingSupport {
       buildKeys: Table, 
       optimizations: JoinOptimizations): Option[ColumnVector] = {
     if (optimizations.remapComplexKeysToInts) {
+      // Validate that cached state matches configuration
+      if (optimizations.cacheRemapping && remappedBuildKeys.isEmpty) {
+        throw new IllegalStateException(
+          "cacheRemapping is enabled but remappedBuildKeys is not set. " +
+          "initializeRemappingWithTiming must be called before remapProbeKeys.")
+      }
+      if (!optimizations.cacheRemapping && remappedBuildKeys.isDefined) {
+        throw new IllegalStateException(
+          "cacheRemapping is disabled but remappedBuildKeys is set. " +
+          "This indicates a configuration/state mismatch.")
+      }
+      
       if (remapStructures.isDefined) {
         // Use cached remapping structures
-        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get))
+        Some(KeyRemapping.applyRemapping(probeKeys, remapStructures.get, false))
       } else {
-        // Non-cached: create temporary structures
-        val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-        try {
-          Some(KeyRemapping.applyRemapping(probeKeys, tempRemap))
-        } finally {
-          tempRemap.close()
-        }
+        throw new IllegalStateException(
+          "Remapping is enabled but no remapping structures are available. " +
+          "initializeRemappingWithTiming must be called before remapProbeKeys.")
       }
     } else {
       None
+    }
+  }
+  
+  /**
+   * Remap probe keys with timing tracking.
+   * Returns (remappedColumn, timingMs)
+   */
+  protected def remapProbeKeysWithTiming(
+      probeKeys: Table, 
+      buildKeys: Table, 
+      optimizations: JoinOptimizations): (Option[ColumnVector], Double) = {
+    if (optimizations.remapComplexKeysToInts) {
+      // Validate that cached state matches configuration
+      if (optimizations.cacheRemapping && remappedBuildKeys.isEmpty) {
+        throw new IllegalStateException(
+          "cacheRemapping is enabled but remappedBuildKeys is not set. " +
+          "initializeRemappingWithTiming must be called before remapProbeKeysWithTiming.")
+      }
+      if (!optimizations.cacheRemapping && remappedBuildKeys.isDefined) {
+        throw new IllegalStateException(
+          "cacheRemapping is disabled but remappedBuildKeys is set. " +
+          "This indicates a configuration/state mismatch.")
+      }
+      
+      if (remapStructures.isEmpty) {
+        throw new IllegalStateException(
+          "Remapping is enabled but no remapping structures are available. " +
+          "initializeRemappingWithTiming must be called before remapProbeKeysWithTiming.")
+      }
+      
+      val t0 = System.nanoTime()
+      val remappedCol = KeyRemapping.applyRemapping(probeKeys, remapStructures.get, false)
+      Cuda.DEFAULT_STREAM.sync()
+      val t1 = System.nanoTime()
+      val timingMs = (t1 - t0) / 1e6
+      (Some(remappedCol), timingMs)
+    } else {
+      (None, 0.0)
     }
   }
   
@@ -265,21 +377,34 @@ private trait RemappingSupport {
   protected def getActualBuildKeys(
       buildKeys: Table,
       optimizations: JoinOptimizations): Table = {
-    if (optimizations.remapComplexKeysToInts && remappedBuildKeys.isDefined) {
-      // Wrap cached remapped column
-      TableCopyHelper.wrapColumn(remappedBuildKeys.get)
-    } else if (optimizations.remapComplexKeysToInts) {
-      // Non-cached: remap build keys now
-      val tempRemap = KeyRemapping.createRemapStructures(buildKeys)
-      try {
-        val remappedCol = KeyRemapping.applyRemapping(buildKeys, tempRemap)
+    if (optimizations.remapComplexKeysToInts) {
+      // Validate that cached state matches configuration
+      if (optimizations.cacheRemapping && remappedBuildKeys.isEmpty) {
+        throw new IllegalStateException(
+          "cacheRemapping is enabled but remappedBuildKeys is not set. " +
+          "initializeRemappingWithTiming must be called before getActualBuildKeys.")
+      }
+      if (!optimizations.cacheRemapping && remappedBuildKeys.isDefined) {
+        throw new IllegalStateException(
+          "cacheRemapping is disabled but remappedBuildKeys is set. " +
+          "This indicates a configuration/state mismatch.")
+      }
+      
+      if (remappedBuildKeys.isDefined) {
+        // Wrap cached remapped column
+        TableCopyHelper.wrapColumn(remappedBuildKeys.get)
+      } else if (remapStructures.isDefined) {
+        // Non-cached build keys but remapping structures exist: use the existing structure
+        val remappedCol = KeyRemapping.applyRemapping(buildKeys, remapStructures.get, true)
         try {
           TableCopyHelper.wrapColumn(remappedCol)
         } finally {
           remappedCol.close()
         }
-      } finally {
-        tempRemap.close()
+      } else {
+        throw new IllegalStateException(
+          "Remapping is enabled but no remapping structures are available. " +
+          "initializeRemappingWithTiming must be called before getActualBuildKeys.")
       }
     } else {
       // No remapping: return a copy to maintain uniform ownership semantics
@@ -336,8 +461,35 @@ private trait RemappingSupport {
   protected def getKeysForJoin(
       buildKeys: Table,
       optimizations: JoinOptimizations): Table = {
-    if (optimizations.remapComplexKeysToInts && remappedBuildKeys.isDefined) {
-      TableCopyHelper.wrapColumn(remappedBuildKeys.get)
+    if (optimizations.remapComplexKeysToInts) {
+      // Validate that cached state matches configuration
+      if (optimizations.cacheRemapping && remappedBuildKeys.isEmpty) {
+        throw new IllegalStateException(
+          "cacheRemapping is enabled but remappedBuildKeys is not set. " +
+          "initializeRemappingWithTiming must be called before getKeysForJoin.")
+      }
+      if (!optimizations.cacheRemapping && remappedBuildKeys.isDefined) {
+        throw new IllegalStateException(
+          "cacheRemapping is disabled but remappedBuildKeys is set. " +
+          "This indicates a configuration/state mismatch.")
+      }
+      
+      if (remappedBuildKeys.isDefined) {
+        // Use cached remapped build keys
+        TableCopyHelper.wrapColumn(remappedBuildKeys.get)
+      } else if (remapStructures.isDefined) {
+        // Remap on-demand using existing remapping structures
+        val remappedCol = KeyRemapping.applyRemapping(buildKeys, remapStructures.get, true)
+        try {
+          TableCopyHelper.wrapColumn(remappedCol)
+        } finally {
+          remappedCol.close()
+        }
+      } else {
+        throw new IllegalStateException(
+          "Remapping is enabled but no remapping structures are available. " +
+          "initializeRemappingWithTiming must be called before getKeysForJoin.")
+      }
     } else {
       TableCopyHelper.copyTable(buildKeys)
     }
@@ -576,6 +728,122 @@ private class InnerHashBuildHolder(
       }
     } finally {
       actualProbeKeys.close()
+    }
+  }
+  
+  override def joinWithDetailedTimings(
+      probeKeys: Table): (Array[GatherMap], Option[DetailedTimings]) = {
+    var remapStructureBuildMs = 0.0
+    var remapBuildKeysMsTotal = 0.0
+    var createBuildObjectMsTotal = 0.0
+    
+    if (!initialized) {
+      val (structMs, buildMs) = initializeRemappingWithTiming(buildKeys, optimizations)
+      remapStructureBuildMs += structMs
+      remapBuildKeysMsTotal += buildMs
+      
+      if (optimizations.cacheJoinObject) {
+        val keysForJoin = getKeysForJoin(buildKeys, optimizations)
+        try {
+          val createStart = System.nanoTime()
+          val isDistinct = checkDistinctness(keysForJoin, InnerJoin, optimizations)
+          
+          cachedJoinObject = Some(if (isDistinct) {
+            Right(DistinctHashJoin.create(keysForJoin, compareNullsEqual))
+          } else {
+            Left(HashJoin.create(keysForJoin, compareNullsEqual))
+          })
+          Cuda.DEFAULT_STREAM.sync()
+          val createEnd = System.nanoTime()
+          createBuildObjectMsTotal += (createEnd - createStart) / 1e6
+        } finally {
+          keysForJoin.close()
+        }
+      }
+      initialized = true
+    }
+    
+    val (remappedProbeCol, remapProbeKeysMs) = remapProbeKeysWithTiming(
+      probeKeys, buildKeys, optimizations)
+    val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
+    
+    try {
+      val (gatherMaps, additionalRemapBuildMs, additionalCreateMs, executeJoinMs) =
+        cachedJoinObject match {
+          case Some(existingJoin) =>
+            val joinStart = System.nanoTime()
+            val maps = existingJoin match {
+              case Left(hashJoin) => hashJoin.innerJoin(actualProbeKeys)
+              case Right(distinctJoin) => distinctJoin.innerJoin(actualProbeKeys)
+            }
+            Cuda.DEFAULT_STREAM.sync()
+            val joinEnd = System.nanoTime()
+            (maps, 0.0, 0.0, (joinEnd - joinStart) / 1e6)
+          
+          case None =>
+            val remapBuildStart = System.nanoTime()
+            val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+            Cuda.DEFAULT_STREAM.sync()
+            val remapBuildEnd = System.nanoTime()
+            val remapBuildMs = (remapBuildEnd - remapBuildStart) / 1e6
+            
+            try {
+              val createStart = System.nanoTime()
+              val isDistinct = checkDistinctness(actualBuildKeys, InnerJoin, optimizations)
+              
+              if (isDistinct) {
+                val joinObj = DistinctHashJoin.create(actualBuildKeys, compareNullsEqual)
+                Cuda.DEFAULT_STREAM.sync()
+                val createEnd = System.nanoTime()
+                val createMs = (createEnd - createStart) / 1e6
+                
+                try {
+                  val joinStart = System.nanoTime()
+                  val maps = joinObj.innerJoin(actualProbeKeys)
+                  Cuda.DEFAULT_STREAM.sync()
+                  val joinEnd = System.nanoTime()
+                  val executeMs = (joinEnd - joinStart) / 1e6
+                  (maps, remapBuildMs, createMs, executeMs)
+                } finally {
+                  joinObj.close()
+                }
+              } else {
+                val joinObj = HashJoin.create(actualBuildKeys, compareNullsEqual)
+                Cuda.DEFAULT_STREAM.sync()
+                val createEnd = System.nanoTime()
+                val createMs = (createEnd - createStart) / 1e6
+                
+                try {
+                  val joinStart = System.nanoTime()
+                  val maps = joinObj.innerJoin(actualProbeKeys)
+                  Cuda.DEFAULT_STREAM.sync()
+                  val joinEnd = System.nanoTime()
+                  val executeMs = (joinEnd - joinStart) / 1e6
+                  (maps, remapBuildMs, createMs, executeMs)
+                } finally {
+                  joinObj.close()
+                }
+              }
+            } finally {
+              actualBuildKeys.close()
+            }
+        }
+      
+      remapBuildKeysMsTotal += additionalRemapBuildMs
+      createBuildObjectMsTotal += additionalCreateMs
+      
+      val timings = DetailedTimings(
+        remapStructureBuildMs = remapStructureBuildMs,
+        remapBuildKeysMs = remapBuildKeysMsTotal,
+        remapProbeKeysMs = remapProbeKeysMs,
+        createBuildObjectMs = createBuildObjectMsTotal,
+        executeJoinMs = executeJoinMs
+      )
+      
+      (gatherMaps, Some(timings))
+    } finally {
+      actualProbeKeys.close()
+      remappedProbeCol.foreach(_.close())
     }
   }
   
@@ -1192,6 +1460,169 @@ private class PostProcessingBuildHolder(
     }
   }
   
+  override def joinWithDetailedTimings(
+      probeKeys: Table): (Array[GatherMap], Option[DetailedTimings]) = {
+    // Only HashObjectWithPostStrategy and SortObjectWithPostStrategy support detailed timings
+    if (strategy != HashObjectWithPostStrategy && strategy != SortObjectWithPostStrategy) {
+      throw new UnsupportedOperationException(
+        s"Detailed timings are not supported for strategy: $strategy. " +
+        s"Only HashObjectWithPostStrategy and SortObjectWithPostStrategy support detailed timings.")
+    }
+    
+    // Track initialization timing (structure build + remap build keys)
+    var remapStructureBuildMs = 0.0
+    var remapBuildKeysMs = 0.0
+    var createBuildObjectMs = 0.0
+    
+    if (!initialized) {
+      // Validate SortMergeJoin key types BEFORE any initialization
+      if (strategy == SortObjectWithPostStrategy) {
+        KeyRemappingHelper.validateSortMergeKeyTypes(
+          buildKeys, optimizations.remapComplexKeysToInts)
+      }
+      
+      // Initialize remapping with timing
+      val (structMs, buildMs) = initializeRemappingWithTiming(buildKeys, optimizations)
+      remapStructureBuildMs = structMs
+      remapBuildKeysMs = buildMs
+      
+      if (optimizations.cacheJoinObject) {
+        // Time the build object creation
+        val keysForJoin = getKeysForJoin(buildKeys, optimizations)
+        
+        try {
+          val t0 = System.nanoTime()
+          
+          // Check distinctness for hash joins if optimization enabled
+          val isDistinct = if (strategy == HashObjectWithPostStrategy) {
+            checkDistinctness(keysForJoin, joinType, optimizations)
+          } else {
+            false
+          }
+          
+          cachedJoinObject = Some(strategy match {
+            case HashObjectWithPostStrategy =>
+              if (isDistinct) {
+                Left(Right(DistinctHashJoin.create(keysForJoin, compareNullsEqual)))
+              } else {
+                Left(Left(HashJoin.create(keysForJoin, compareNullsEqual)))
+              }
+            case SortObjectWithPostStrategy =>
+              Right(SortMergeJoin.create(keysForJoin, false /* isBuildSorted */, compareNullsEqual))
+            case _ =>
+              throw new IllegalArgumentException(
+                s"Unsupported strategy for post-processing: $strategy")
+          })
+          
+          Cuda.DEFAULT_STREAM.sync()
+          val t1 = System.nanoTime()
+          createBuildObjectMs = (t1 - t0) / 1e6
+          
+        } finally {
+          keysForJoin.close()
+        }
+      }
+      initialized = true
+    }
+    
+    // Determine actual row counts based on build side
+    val (buildRowCount, probeRowCount) = if (buildSide == LeftBuild) {
+      (leftRowCount, rightRowCount)
+    } else {
+      (rightRowCount, leftRowCount)
+    }
+    
+    // Remap probe keys with timing
+    val (remappedProbeCol, remapProbeKeysMs) = remapProbeKeysWithTiming(
+      probeKeys, buildKeys, optimizations)
+    val actualProbeKeys = wrapRemappedKeys(remappedProbeCol, probeKeys)
+    
+    try {
+      val t0 = System.nanoTime()
+      
+      // Step 1: Do inner join
+      val innerMaps = if (cachedJoinObject.isDefined) {
+        cachedJoinObject.get match {
+          case Left(Left(hj)) => hj.innerJoin(actualProbeKeys)
+          case Left(Right(dhj)) => dhj.innerJoin(actualProbeKeys)
+          case Right(smj) => smj.innerJoin(actualProbeKeys, false /* isProbeSorted */)
+        }
+      } else {
+        // Non-cached path - need to remap build keys and create join object
+        val t_remap0 = System.nanoTime()
+        val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+        Cuda.DEFAULT_STREAM.sync()
+        val t_remap1 = System.nanoTime()
+        
+        // If remapping is enabled and not cached, this timing captures the remap operation
+        if (optimizations.remapComplexKeysToInts && !optimizations.cacheRemapping) {
+          remapBuildKeysMs = (t_remap1 - t_remap0) / 1e6
+        }
+        
+        try {
+          val t_build0 = System.nanoTime()
+          val joinObj = strategy match {
+            case HashObjectWithPostStrategy =>
+              val isDistinct = checkDistinctness(actualBuildKeys, joinType, optimizations)
+              if (isDistinct) {
+                Left(Right(DistinctHashJoin.create(actualBuildKeys, compareNullsEqual)))
+              } else {
+                Left(Left(HashJoin.create(actualBuildKeys, compareNullsEqual)))
+              }
+            case SortObjectWithPostStrategy =>
+              Right(SortMergeJoin.create(
+                actualBuildKeys, false /* isBuildSorted */, compareNullsEqual))
+            case _ =>
+              throw new IllegalArgumentException(
+                s"Unsupported strategy for post-processing: $strategy")
+          }
+          
+          Cuda.DEFAULT_STREAM.sync()
+          val t_build1 = System.nanoTime()
+          createBuildObjectMs = (t_build1 - t_build0) / 1e6
+          
+          val maps = joinObj match {
+            case Left(Left(hj)) =>
+              try { hj.innerJoin(actualProbeKeys) } finally { hj.close() }
+            case Left(Right(dhj)) =>
+              try { dhj.innerJoin(actualProbeKeys) } finally { dhj.close() }
+            case Right(smj) =>
+              try {
+                smj.innerJoin(actualProbeKeys, false /* isProbeSorted */)
+              } finally {
+                smj.close()
+              }
+          }
+          maps
+        } finally {
+          actualBuildKeys.close()
+        }
+      }
+      
+      // Step 2: Apply post-processing based on join type
+      val result = PostProcessingHelper.applyPostProcessing(
+        innerMaps, joinType, buildSide, buildRowCount.toInt, probeRowCount.toInt)
+      
+      Cuda.DEFAULT_STREAM.sync()
+      val t1 = System.nanoTime()
+      val executeJoinMs = (t1 - t0) / 1e6
+      
+      val timings = DetailedTimings(
+        remapStructureBuildMs = remapStructureBuildMs,
+        remapBuildKeysMs = remapBuildKeysMs,
+        remapProbeKeysMs = remapProbeKeysMs,
+        createBuildObjectMs = createBuildObjectMs,
+        executeJoinMs = executeJoinMs
+      )
+      
+      (result, Some(timings))
+      
+    } finally {
+      actualProbeKeys.close()
+      remappedProbeCol.foreach(_.close())
+    }
+  }
+  
   def close(): Unit = {
     cachedJoinObject.foreach {
       case Left(Left(hj)) => hj.close()
@@ -1288,9 +1719,10 @@ private class MixedPostProcessingBuildHolder(
       
       // Initialize remapping if enabled
       if (optimizations.remapComplexKeysToInts && optimizations.cacheRemapping) {
-        val remap = KeyRemapping.createRemapStructures(buildKeys)
+        val remap = KeyRemapping.createRemapStructures(buildKeys, 
+          KeyRemapping.NullEqualityMode.SPARK_EQUALITY)
         remapStructures = Some(remap)
-        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap))
+        remappedBuildKeys = Some(KeyRemapping.applyRemapping(buildKeys, remap, true))
       }
       
       // Only Object strategies can cache join objects
@@ -1581,6 +2013,83 @@ private[benchmarks] class JoinExecutor(
               s"Join type $joinType with strategy $strategy not supported")
         }
         Left(holder)
+    }
+  }
+  
+  /**
+   * Execute a single join and return gather maps with optional detailed timings.
+   * Returns: (gatherMaps: Array[GatherMap], optionalDetailedTimings: Option[DetailedTimings])
+   */
+  def executeJoinWithDetailedTimings(): (Array[GatherMap], Option[DetailedTimings]) = {
+    val holder = cachedHolder match {
+      case Some(h) => h
+      case None =>
+        val buildSide = buildSideSpec match {
+          case AutoPickSmallerIfAllowed =>
+            val leftSize = leftTable.getRowCount
+            val rightSize = rightTable.getRowCount
+            val preferredSide = if (leftSize <= rightSize) LeftBuild else RightBuild
+            
+            if (optimizations.allowBuildSideSwap && canSwap(joinType, strategy)) {
+              preferredSide
+            } else {
+              val requiredSide = defaultBuildSide(joinType, strategy)
+              if (preferredSide == requiredSide || canSwap(joinType, strategy)) {
+                preferredSide
+              } else {
+                requiredSide
+              }
+            }
+          
+          case AutoMeetJoinRequirement =>
+            defaultBuildSide(joinType, strategy)
+          
+          case LeftBuild => LeftBuild
+          case RightBuild => RightBuild
+        }
+        
+        val h = createBuildHolder(buildSide)
+        actualBuildSide = Some(buildSide)
+        
+        if (optimizations.cacheJoinObject) {
+          cachedHolder = Some(h)
+        }
+        
+        h
+    }
+    
+    val buildSide = actualBuildSide.get
+    val (probeTable, probeKeyIndices) = if (buildSide == LeftBuild) {
+      (rightTable, rightKeyIndices)
+    } else {
+      (leftTable, leftKeyIndices)
+    }
+    
+    // Create probe keys table - we own it and must close it
+    val probeKeys = TableCopyHelper.extractColumns(probeTable, probeKeyIndices)
+    
+    try {
+      val (gatherMaps, timings) = holder match {
+        case Left(nonConditionalHolder) =>
+          nonConditionalHolder.joinWithDetailedTimings(probeKeys)
+        
+        case Right(mixedConditionalHolder) =>
+          (mixedConditionalHolder.join(probeKeys, probeTable), None)
+      }
+      
+      (gatherMaps, timings)
+      
+    } finally {
+      probeKeys.close()  // Must close to decrement column refcounts
+      
+      if (!optimizations.cacheJoinObject) {
+        holder match {
+          case Left(h) => h.close()
+          case Right(h) => h.close()
+        }
+        // Note: Don't clear actualBuildSide here - it should persist across iterations
+        // It will be cleared when clearCache() is called
+      }
     }
   }
   

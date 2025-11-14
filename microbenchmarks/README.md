@@ -222,6 +222,61 @@ Compares the performance of join post-processing strategies versus combined/dire
 
 Runtime: approximately 45-90 minutes (78 configs, 156 runs total).
 
+### Run ML Training Data Generation
+
+Generates comprehensive training data for building machine learning models that predict optimal join strategies:
+
+```bash
+:load examples/ml_join_training_data.scala
+```
+
+**Purpose:**
+This script automates the generation of diverse benchmark data to train ML models for join optimization heuristics. Instead of manually analyzing microbenchmark results, this approach:
+- Generates 100+ random test configurations with realistic data distributions
+- Tests all strategy combinations (hash object/direct, sort) with various optimizations
+- Performs adaptive refinement to densely sample interesting decision boundaries
+- Outputs structured TSV data ready for ML analysis
+
+**Key Questions Answered:**
+- When should we use sort vs hash vs hash direct?
+- When is key remapping beneficial?
+- When should we enable build side swapping?
+- Does distinct join optimization help? (spoiler: probably not)
+
+**Test Coverage:**
+- **Initial sampling:** 100 random configurations covering:
+  - Key types: int, long, decimal (3 widths), string (3 lengths), composite keys
+  - Distributions: uniform, Zipf (3 skew levels)
+  - Cardinality: 1% to 100% distinct keys
+  - Memory sizes: 512 MiB to 2 GiB per side
+  - Primary/Foreign key relationships (30% of tests)
+- **Adaptive refinement:** 50 targeted tests around performance crossover points
+- **Optimizations tested:** All combinations of:
+  - Join strategy: hash_object, hash_direct, sort
+  - Build side: left, right, auto
+  - Distinct join: on/off
+  - Key remapping: on/off
+  - Build side swapping: on/off
+- **Error handling:** Failed tests recorded but don't stop execution
+- **Statistical significance:** 5 iterations per test
+
+**Output:**
+- TSV file: `/data/tmp/ml_join_training/training_data.tsv`
+- Columns: Configuration, statistics (cheap to compute), results, errors
+- Ready for analysis with Python/R ML frameworks
+
+**Analysis:**
+Use the companion Python script to analyze results:
+```bash
+python examples/ml_join_analysis.py /data/tmp/ml_join_training/training_data.tsv
+```
+
+This trains decision trees and random forests, extracts interpretable rules, and provides concrete heuristic recommendations.
+
+**Documentation:** See `examples/ML_TRAINING_README.md` for detailed guide.
+
+Runtime: approximately 2-4 hours (150 configs, ~20 strategy combinations each, 5 iterations).
+
 ## Implemented Features
 
 ### Core Functionality

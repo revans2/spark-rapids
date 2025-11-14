@@ -15,13 +15,13 @@
  */
 package org.apache.spark.sql.rapids.execution
 
-import ai.rapids.cudf.{ColumnView, DType, GatherMap, NullEquality, OutOfBoundsPolicy, Scalar, Table}
+import ai.rapids.cudf.{ColumnVector, ColumnView, DType, GatherMap, NullEquality, OutOfBoundsPolicy, Scalar, Table}
 import ai.rapids.cudf.ast.CompiledExpression
 import com.nvidia.spark.rapids._
 import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
 import com.nvidia.spark.rapids.RapidsPluginImplicits.AutoCloseableProducingSeq
 import com.nvidia.spark.rapids.RmmRapidsRetryIterator.{withRestoreOnRetry, withRetryNoSplit}
-import com.nvidia.spark.rapids.jni.{GpuOOM, JoinPrimitives}
+import com.nvidia.spark.rapids.jni.{GpuOOM, JoinPrimitives, KeyRemapping}
 import com.nvidia.spark.rapids.shims.ShimBinaryExecNode
 
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, NamedExpression}
@@ -334,12 +334,14 @@ object JoinStrategy extends Enumeration {
  * @param logCardinalityEnabled whether to log cardinality statistics for debugging
  * @param sizeEstimateThreshold the threshold used to decide when to skip the expensive join
  *                              output size estimation (defaults to 0.75)
+ * @param enableKeyRemapping whether to enable join key remapping to convert complex keys to ints
  */
 case class JoinOptions(
     strategy: JoinStrategy.JoinStrategy,
     targetSize: Long,
     logCardinalityEnabled: Boolean,
-    sizeEstimateThreshold: Double)
+    sizeEstimateThreshold: Double,
+    enableKeyRemapping: Boolean)
 
 /**
  * Statistics for join cardinality logging to help diagnose performance issues.
@@ -761,6 +763,29 @@ class HashJoinIterator(
       conditionForLogging,
       opTime = opTime,
       joinTime = joinTime) {
+
+  /**
+   * Apply key remapping to build and probe keys if enabled.
+   * Returns (remappedBuildKeys, remappedProbeKeys, remapStructures) or (None, None, None).
+   * The caller is responsible for closing all returned resources.
+   */
+  private def applyKeyRemapping(
+      buildKeys: Table,
+      probeKeys: Table): (Option[ColumnVector], 
+        Option[ColumnVector], Option[KeyRemapping.RemapStructures]) = {
+    if (joinOptions.enableKeyRemapping) {
+      closeOnExcept(KeyRemapping.createRemapStructures(buildKeys, 
+        KeyRemapping.NullEqualityMode.SPARK_EQUALITY)) { remapStructures =>
+        closeOnExcept(KeyRemapping.applyRemapping(buildKeys, 
+          remapStructures, true)) { remappedBuild =>
+          val remappedProbe = KeyRemapping.applyRemapping(probeKeys, remapStructures, false)
+          (Some(remappedBuild), Some(remappedProbe), Some(remapStructures))
+        }
+      }
+    } else {
+      (None, None, None)
+    }
+  }
   override protected def joinGathererLeftRight(
       leftKeys: Table,
       leftData: LazySpillableColumnarBatch,
@@ -772,36 +797,82 @@ class HashJoinIterator(
         (leftKeys.getRowCount == 0 || rightKeys.getRowCount == 0)) {
         None
       } else {
-        // Join strategy dispatching:
-        // PRIORITY 1: Distinct join optimization (overrides all strategies)
-        // PRIORITY 2: Strategy-based dispatching for non-distinct joins
-        
-        val maps = if (buildStats.isDistinct) {
-          // Distinct join optimizations (highest priority, overrides strategy)
-          logJoinCardinality(leftKeys, rightKeys, "distinct")
-          val result = joinType match {
-            case LeftOuter =>
-              Array(leftKeys.leftDistinctJoinGatherMap(rightKeys, compareNullsEqual))
-            case RightOuter =>
-              Array(rightKeys.leftDistinctJoinGatherMap(leftKeys, compareNullsEqual))
-            case _: InnerLike =>
-              if (buildSide == GpuBuildRight) {
-                leftKeys.innerDistinctJoinGatherMaps(rightKeys, compareNullsEqual)
+        // Apply key remapping if enabled
+        val buildKeys = if (buildSide == GpuBuildLeft) leftKeys else rightKeys
+        val probeKeys = if (buildSide == GpuBuildLeft) rightKeys else leftKeys
+        val (remappedBuild, remappedProbe, remapStructures) = applyKeyRemapping(buildKeys, probeKeys)
+
+        withResource(remappedBuild) { _ =>
+          withResource(remappedProbe) { _ =>
+            withResource(remapStructures) { _ =>
+              // Create tables from remapped keys if available
+              val leftKeysTable = if (remappedBuild.isDefined && remappedProbe.isDefined) {
+                if (buildSide == GpuBuildLeft) {
+                  new Table(remappedBuild.get)
+                } else {
+                  new Table(remappedProbe.get)
+                }
               } else {
-                rightKeys.innerDistinctJoinGatherMaps(leftKeys, compareNullsEqual).reverse
+                null
               }
-            case _ =>
-              // Fall through to strategy-based dispatching for non-outer joins
-              computeNonDistinctJoin(leftKeys, rightKeys, leftData, rightData)
+              val rightKeysTable = if (remappedBuild.isDefined && remappedProbe.isDefined) {
+                if (buildSide == GpuBuildLeft) {
+                  new Table(remappedProbe.get)
+                } else {
+                  new Table(remappedBuild.get)
+                }
+              } else {
+                null
+              }
+
+              withResource(leftKeysTable) { leftKeysTbl =>
+                withResource(rightKeysTable) { rightKeysTbl =>
+                  val (leftKeysToUse, rightKeysToUse) = 
+                    if (leftKeysTbl != null && rightKeysTbl != null) {
+                      (leftKeysTbl, rightKeysTbl)
+                    } else {
+                      (leftKeys, rightKeys)
+                    }
+
+                  // Join strategy dispatching:
+                  // PRIORITY 1: Distinct join optimization (overrides all strategies)
+                  // PRIORITY 2: Strategy-based dispatching for non-distinct joins
+                  
+                  val maps = if (buildStats.isDistinct) {
+                    // Distinct join optimizations (highest priority, overrides strategy)
+                    logJoinCardinality(leftKeysToUse, rightKeysToUse, "distinct")
+                    val result = joinType match {
+                      case LeftOuter =>
+                        Array(leftKeysToUse.leftDistinctJoinGatherMap(
+                          rightKeysToUse, compareNullsEqual))
+                      case RightOuter =>
+                        Array(rightKeysToUse.leftDistinctJoinGatherMap(
+                          leftKeysToUse, compareNullsEqual))
+                      case _: InnerLike =>
+                        if (buildSide == GpuBuildRight) {
+                          leftKeysToUse.innerDistinctJoinGatherMaps(
+                            rightKeysToUse, compareNullsEqual)
+                        } else {
+                          rightKeysToUse.innerDistinctJoinGatherMaps(
+                            leftKeysToUse, compareNullsEqual).reverse
+                        }
+                      case _ =>
+                        // Fall through to strategy-based dispatching for non-outer joins
+                        computeNonDistinctJoin(leftKeysToUse, rightKeysToUse, leftData, rightData)
+                    }
+                    logJoinCompletion()
+                    result
+                  } else {
+                    // Non-distinct joins: use strategy-based dispatching
+                    computeNonDistinctJoin(leftKeysToUse, rightKeysToUse, leftData, rightData)
+                  }
+                  
+                  makeGatherer(maps, leftData, rightData, joinType)
+                }
+              }
+            }
           }
-          logJoinCompletion()
-          result
-        } else {
-          // Non-distinct joins: use strategy-based dispatching
-          computeNonDistinctJoin(leftKeys, rightKeys, leftData, rightData)
         }
-        
-        makeGatherer(maps, leftData, rightData, joinType)
       }
     }
   }
@@ -944,6 +1015,29 @@ class ConditionalHashJoinIterator(
       conditionForLogging,
       opTime = opTime,
       joinTime = joinTime) {
+
+  /**
+   * Apply key remapping to build and probe keys if enabled.
+   * Returns (remappedBuildKeys, remappedProbeKeys, remapStructures) or (None, None, None).
+   * The caller is responsible for closing all returned resources.
+   */
+  private def applyKeyRemapping(
+      buildKeys: Table,
+      probeKeys: Table): (Option[ColumnVector], Option[ColumnVector], 
+          Option[KeyRemapping.RemapStructures]) = {
+    if (joinOptions.enableKeyRemapping) {      
+      closeOnExcept(KeyRemapping.createRemapStructures(buildKeys, 
+          KeyRemapping.NullEqualityMode.SPARK_EQUALITY)) { remapStructures =>
+        closeOnExcept(KeyRemapping.applyRemapping(buildKeys, remapStructures, true)) { 
+            remappedBuild =>
+          val remappedProbe = KeyRemapping.applyRemapping(probeKeys, remapStructures, false)
+          (Some(remappedBuild), Some(remappedProbe), Some(remapStructures))
+        }
+      }
+    } else {
+      (None, None, None)
+    }
+  }
   override protected def joinGathererLeftRight(
       leftKeys: Table,
       leftData: LazySpillableColumnarBatch,
@@ -951,32 +1045,78 @@ class ConditionalHashJoinIterator(
       rightData: LazySpillableColumnarBatch): Option[JoinGatherer] = {
     val nullEquality = if (compareNullsEqual) NullEquality.EQUAL else NullEquality.UNEQUAL
     NvtxIdWithMetrics(NvtxRegistry.HASH_JOIN_GATHER_MAP, joinTime) {
-      withResource(GpuColumnVector.from(leftData.getBatch)) { leftTable =>
-        withResource(GpuColumnVector.from(rightData.getBatch)) { rightTable =>
-          // Join strategy dispatching for conditional joins:
-          val maps = joinOptions.strategy match {
-            case JoinStrategy.INNER_HASH_WITH_POST =>
-              // Use composable JNI APIs: inner join -> filter -> convert to target join type
-              computeInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
-            case JoinStrategy.INNER_SORT_WITH_POST =>
-              // Check if sort join is supported (no ARRAY/STRUCT types)
-              val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
-              val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
-              if (leftKeysSupported && rightKeysSupported) {
-                computeInnerSortWithPost(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
+      // Apply key remapping if enabled
+      val buildKeys = if (buildSide == GpuBuildLeft) leftKeys else rightKeys
+      val probeKeys = if (buildSide == GpuBuildLeft) rightKeys else leftKeys
+      val (remappedBuild, remappedProbe, remapStructures) = applyKeyRemapping(buildKeys, probeKeys)
+
+      withResource(remappedBuild) { _ =>
+        withResource(remappedProbe) { _ =>
+          withResource(remapStructures) { _ =>
+            // Create tables from remapped keys if available
+            val leftKeysTable = if (remappedBuild.isDefined && remappedProbe.isDefined) {
+              if (buildSide == GpuBuildLeft) {
+                new Table(remappedBuild.get)
               } else {
-                // Log warning and fall back to hash join
-                logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
-                  s"ARRAY or STRUCT types which are not supported for sort joins. " +
-                  s"Falling back to INNER_HASH_WITH_POST strategy.")
-                computeInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable, nullEquality, 
-                  isFallback = true)
+                new Table(remappedProbe.get)
               }
-            case _ =>
-              // Use existing mixed join methods (for AUTO and HASH_ONLY strategies)
-              computeWithMixedJoin(leftKeys, rightKeys, leftTable, rightTable, nullEquality)
-          }          
-          makeGatherer(maps, leftData, rightData, joinType)
+            } else {
+              null
+            }
+            val rightKeysTable = if (remappedBuild.isDefined && remappedProbe.isDefined) {
+              if (buildSide == GpuBuildLeft) {
+                new Table(remappedProbe.get)
+              } else {
+                new Table(remappedBuild.get)
+              }
+            } else {
+              null
+            }
+
+            withResource(leftKeysTable) { leftKeysTbl =>
+              withResource(rightKeysTable) { rightKeysTbl =>
+                val (leftKeysToUse, rightKeysToUse) = 
+                  if (leftKeysTbl != null && rightKeysTbl != null) {
+                    (leftKeysTbl, rightKeysTbl)
+                  } else {
+                    (leftKeys, rightKeys)
+                  }
+
+                withResource(GpuColumnVector.from(leftData.getBatch)) { leftTable =>
+                  withResource(GpuColumnVector.from(rightData.getBatch)) { rightTable =>
+                    // Join strategy dispatching for conditional joins:
+                    val maps = joinOptions.strategy match {
+                      case JoinStrategy.INNER_HASH_WITH_POST =>
+                        // Use composable JNI APIs: inner join -> filter -> convert to target join type
+                        computeInnerHashWithPost(
+                          leftKeysToUse, rightKeysToUse, leftTable, rightTable, nullEquality)
+                      case JoinStrategy.INNER_SORT_WITH_POST =>
+                        // Check if sort join is supported (no ARRAY/STRUCT types)
+                        val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
+                        val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
+                        if (leftKeysSupported && rightKeysSupported) {
+                          computeInnerSortWithPost(
+                            leftKeysToUse, rightKeysToUse, leftTable, rightTable, nullEquality)
+                        } else {
+                          // Log warning and fall back to hash join
+                          logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys " +
+                            s"contain ARRAY or STRUCT types which are not supported for sort " +
+                            s"joins. Falling back to INNER_HASH_WITH_POST strategy.")
+                          computeInnerHashWithPost(
+                            leftKeysToUse, rightKeysToUse, leftTable, rightTable, nullEquality, 
+                            isFallback = true)
+                        }
+                      case _ =>
+                        // Use existing mixed join methods (for AUTO and HASH_ONLY strategies)
+                        computeWithMixedJoin(
+                          leftKeysToUse, rightKeysToUse, leftTable, rightTable, nullEquality)
+                    }          
+                    makeGatherer(maps, leftData, rightData, joinType)
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -1213,32 +1353,99 @@ class HashJoinStreamSideIterator(
 
   private[this] var builtSideTracker: Option[SpillableColumnarBatch] = buildSideTrackerInit
 
+  /**
+   * Apply key remapping to build and probe keys if enabled.
+   * Returns (remappedBuildKeys, remappedProbeKeys, remapStructures) or (None, None, None).
+   * The caller is responsible for closing all returned resources.
+   */
+  private def applyKeyRemapping(
+      buildKeys: Table,
+      probeKeys: Table): (Option[ColumnVector], Option[ColumnVector], 
+          Option[KeyRemapping.RemapStructures]) = {
+    if (joinOptions.enableKeyRemapping) {      
+      closeOnExcept(KeyRemapping.createRemapStructures(buildKeys, 
+          KeyRemapping.NullEqualityMode.SPARK_EQUALITY)) { remapStructures =>
+        closeOnExcept(KeyRemapping.applyRemapping(buildKeys, remapStructures, true)) { 
+            remappedBuild =>
+          val remappedProbe = KeyRemapping.applyRemapping(probeKeys, remapStructures, false)
+          (Some(remappedBuild), Some(remappedProbe), Some(remapStructures))
+        }
+      }
+    } else {
+      (None, None, None)
+    }
+  }
+
   private def unconditionalJoinGatherMaps(
       leftKeys: Table, rightKeys: Table): Array[GatherMap] = {
-    // Pass the original joinType if it was transformed to subJoinType
-    val originalJoinType = if (joinType != subJoinType) Some(joinType) else None
-    
-    joinOptions.strategy match {
-      case JoinStrategy.INNER_HASH_WITH_POST =>
-        // Use composable JNI APIs
-        computeUnconditionalInnerHashWithPost(leftKeys, rightKeys, originalJoinType)
-      case JoinStrategy.INNER_SORT_WITH_POST =>
-        // Check if sort join is supported (no ARRAY/STRUCT types)
-        val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
-        val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
-        if (leftKeysSupported && rightKeysSupported) {
-          computeUnconditionalInnerSortWithPost(leftKeys, rightKeys, originalJoinType)
-        } else {
-          // Log warning and fall back to hash join
-          logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
-            s"ARRAY or STRUCT types which are not supported for sort joins. " +
-            s"Falling back to INNER_HASH_WITH_POST strategy.")
-          computeUnconditionalInnerHashWithPost(leftKeys, rightKeys, originalJoinType, 
-            isFallback = true)
+    // Apply key remapping if enabled
+    val buildKeys = if (buildSide == GpuBuildLeft) leftKeys else rightKeys
+    val probeKeys = if (buildSide == GpuBuildLeft) rightKeys else leftKeys
+    val (remappedBuild, remappedProbe, remapStructures) = applyKeyRemapping(buildKeys, probeKeys)
+
+    withResource(remappedBuild) { _ =>
+      withResource(remappedProbe) { _ =>
+        withResource(remapStructures) { _ =>
+          // Create tables from remapped keys if available
+          val leftKeysTable = if (remappedBuild.isDefined && remappedProbe.isDefined) {
+            if (buildSide == GpuBuildLeft) {
+              new Table(remappedBuild.get)
+            } else {
+              new Table(remappedProbe.get)
+            }
+          } else {
+            null
+          }
+          val rightKeysTable = if (remappedBuild.isDefined && remappedProbe.isDefined) {
+            if (buildSide == GpuBuildLeft) {
+              new Table(remappedProbe.get)
+            } else {
+              new Table(remappedBuild.get)
+            }
+          } else {
+            null
+          }
+
+          withResource(leftKeysTable) { leftKeysTbl =>
+            withResource(rightKeysTable) { rightKeysTbl =>
+              val (leftKeysToUse, rightKeysToUse) = 
+                if (leftKeysTbl != null && rightKeysTbl != null) {
+                  (leftKeysTbl, rightKeysTbl)
+                } else {
+                  (leftKeys, rightKeys)
+                }
+
+              // Pass the original joinType if it was transformed to subJoinType
+              val originalJoinType = if (joinType != subJoinType) Some(joinType) else None
+              
+              joinOptions.strategy match {
+                case JoinStrategy.INNER_HASH_WITH_POST =>
+                  // Use composable JNI APIs
+                  computeUnconditionalInnerHashWithPost(
+                    leftKeysToUse, rightKeysToUse, originalJoinType)
+                case JoinStrategy.INNER_SORT_WITH_POST =>
+                  // Check if sort join is supported (no ARRAY/STRUCT types)
+                  val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
+                  val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
+                  if (leftKeysSupported && rightKeysSupported) {
+                    computeUnconditionalInnerSortWithPost(
+                      leftKeysToUse, rightKeysToUse, originalJoinType)
+                  } else {
+                    // Log warning and fall back to hash join
+                    logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
+                      s"ARRAY or STRUCT types which are not supported for sort joins. " +
+                      s"Falling back to INNER_HASH_WITH_POST strategy.")
+                    computeUnconditionalInnerHashWithPost(
+                      leftKeysToUse, rightKeysToUse, originalJoinType, isFallback = true)
+                  }
+                case _ =>
+                  // Use existing hash join methods
+                  computeUnconditionalHashJoin(leftKeysToUse, rightKeysToUse, originalJoinType)
+              }
+            }
+          }
         }
-      case _ =>
-        // Use existing hash join methods
-        computeUnconditionalHashJoin(leftKeys, rightKeys, originalJoinType)
+      }
     }
   }
 
@@ -1326,35 +1533,81 @@ class HashJoinStreamSideIterator(
       rightKeys: Table,
       rightData: LazySpillableColumnarBatch,
       compiledCondition: CompiledExpression): Array[GatherMap] = {
-    // Pass the original joinType if it was transformed to subJoinType
-    val originalJoinType = if (joinType != subJoinType) Some(joinType) else None
-    
-    withResource(GpuColumnVector.from(leftData.getBatch)) { leftTable =>
-      withResource(GpuColumnVector.from(rightData.getBatch)) { rightTable =>
-        joinOptions.strategy match {
-          case JoinStrategy.INNER_HASH_WITH_POST =>
-            // Use composable JNI APIs
-            computeConditionalInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable,
-              compiledCondition, originalJoinType)
-          case JoinStrategy.INNER_SORT_WITH_POST =>
-            // Check if sort join is supported (no ARRAY/STRUCT types)
-            val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
-            val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
-            if (leftKeysSupported && rightKeysSupported) {
-              computeConditionalInnerSortWithPost(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, originalJoinType)
+    // Apply key remapping if enabled
+    val buildKeys = if (buildSide == GpuBuildLeft) leftKeys else rightKeys
+    val probeKeys = if (buildSide == GpuBuildLeft) rightKeys else leftKeys
+    val (remappedBuild, remappedProbe, remapStructures) = applyKeyRemapping(buildKeys, probeKeys)
+
+    withResource(remappedBuild) { _ =>
+      withResource(remappedProbe) { _ =>
+        withResource(remapStructures) { _ =>
+          // Create tables from remapped keys if available
+          val leftKeysTable = if (remappedBuild.isDefined && remappedProbe.isDefined) {
+            if (buildSide == GpuBuildLeft) {
+              new Table(remappedBuild.get)
             } else {
-              // Log warning and fall back to hash join
-              logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys contain " +
-                s"ARRAY or STRUCT types which are not supported for sort joins. " +
-                s"Falling back to INNER_HASH_WITH_POST strategy.")
-              computeConditionalInnerHashWithPost(leftKeys, rightKeys, leftTable, rightTable,
-                compiledCondition, originalJoinType, isFallback = true)
+              new Table(remappedProbe.get)
             }
-          case _ =>
-            // Use existing mixed join methods
-            computeConditionalMixedJoin(leftKeys, rightKeys, leftTable, rightTable,
-              compiledCondition, originalJoinType)
+          } else {
+            null
+          }
+          val rightKeysTable = if (remappedBuild.isDefined && remappedProbe.isDefined) {
+            if (buildSide == GpuBuildLeft) {
+              new Table(remappedProbe.get)
+            } else {
+              new Table(remappedBuild.get)
+            }
+          } else {
+            null
+          }
+
+          withResource(leftKeysTable) { leftKeysTbl =>
+            withResource(rightKeysTable) { rightKeysTbl =>
+              val (leftKeysToUse, rightKeysToUse) = 
+                if (leftKeysTbl != null && rightKeysTbl != null) {
+                  (leftKeysTbl, rightKeysTbl)
+                } else {
+                  (leftKeys, rightKeys)
+                }
+
+              // Pass the original joinType if it was transformed to subJoinType
+              val originalJoinType = if (joinType != subJoinType) Some(joinType) else None
+              
+              withResource(GpuColumnVector.from(leftData.getBatch)) { leftTable =>
+                withResource(GpuColumnVector.from(rightData.getBatch)) { rightTable =>
+                  joinOptions.strategy match {
+                    case JoinStrategy.INNER_HASH_WITH_POST =>
+                      // Use composable JNI APIs
+                      computeConditionalInnerHashWithPost(
+                        leftKeysToUse, rightKeysToUse, leftTable, rightTable,
+                        compiledCondition, originalJoinType)
+                    case JoinStrategy.INNER_SORT_WITH_POST =>
+                      // Check if sort join is supported (no ARRAY/STRUCT types)
+                      val leftKeysSupported = isSortJoinSupported(boundBuiltKeys)
+                      val rightKeysSupported = isSortJoinSupported(boundStreamKeys)
+                      if (leftKeysSupported && rightKeysSupported) {
+                        computeConditionalInnerSortWithPost(
+                          leftKeysToUse, rightKeysToUse, leftTable, rightTable,
+                          compiledCondition, originalJoinType)
+                      } else {
+                        // Log warning and fall back to hash join
+                        logWarning(s"INNER_SORT_WITH_POST strategy requested but join keys " +
+                          s"contain ARRAY or STRUCT types which are not supported for sort " +
+                          s"joins. Falling back to INNER_HASH_WITH_POST strategy.")
+                        computeConditionalInnerHashWithPost(
+                          leftKeysToUse, rightKeysToUse, leftTable, rightTable,
+                          compiledCondition, originalJoinType, isFallback = true)
+                      }
+                    case _ =>
+                      // Use existing mixed join methods
+                      computeConditionalMixedJoin(
+                        leftKeysToUse, rightKeysToUse, leftTable, rightTable,
+                        compiledCondition, originalJoinType)
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }

@@ -715,6 +715,16 @@ val GPU_COREDUMP_PIPE_PATTERN = conf("spark.rapids.gpu.coreDump.pipePattern")
     .booleanConf
     .createWithDefault(false)
 
+  val ENABLE_JOIN_KEY_REMAPPING = conf("spark.rapids.sql.join.enableKeyRemapping")
+    .doc("Enable join key remapping to convert complex key types (String, Decimal, " +
+      "multi-column composite keys) to dense integers for potentially faster joins. " +
+      "This optimization can improve performance for joins with complex key types but may " +
+      "not always be beneficial depending on the data characteristics. " +
+      "This is an experimental feature and is disabled by default.")
+    .internal()
+    .booleanConf
+    .createWithDefault(false)
+
   val JOIN_GATHERER_SIZE_ESTIMATE_THRESHOLD =
     conf("spark.rapids.sql.join.gatherer.sizeEstimateThreshold")
     .doc("When a join is gathered we try to output a batch that is close to the target batch " +
@@ -3070,7 +3080,8 @@ val SHUFFLE_COMPRESSION_LZ4_CHUNK_SIZE = conf("spark.rapids.shuffle.compression.
     val strategy = JoinStrategy.withName(strategyStr)
     val logCardinality = LOG_JOIN_CARDINALITY.get(conf)
     val sizeEstimateThreshold = JOIN_GATHERER_SIZE_ESTIMATE_THRESHOLD.get(conf)
-    JoinOptions(strategy, targetSize, logCardinality, sizeEstimateThreshold)
+    val enableKeyRemapping = ENABLE_JOIN_KEY_REMAPPING.get(conf)
+    JoinOptions(strategy, targetSize, logCardinality, sizeEstimateThreshold, enableKeyRemapping)
   }
 }
 
@@ -3167,7 +3178,8 @@ class RapidsConf(conf: Map[String, String]) extends Logging {
     val strategy = JoinStrategy.withName(strategyStr)
     val logCardinality = get(LOG_JOIN_CARDINALITY)
     val sizeEstimateThreshold = get(JOIN_GATHERER_SIZE_ESTIMATE_THRESHOLD)
-    JoinOptions(strategy, targetSize, logCardinality, sizeEstimateThreshold)
+    val enableKeyRemapping = get(ENABLE_JOIN_KEY_REMAPPING)
+    JoinOptions(strategy, targetSize, logCardinality, sizeEstimateThreshold, enableKeyRemapping)
   }
 
   lazy val sizedJoinPartitionAmplification: Double = get(SIZED_JOIN_PARTITION_AMPLIFICATION)
