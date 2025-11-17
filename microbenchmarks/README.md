@@ -292,7 +292,13 @@ Runtime: approximately 2-4 hours (150 configs, ~20 strategy combinations each, 5
   - `AutoPickSmallerIfAllowed` - Pick smaller side when allowed
   - `AutoMeetJoinRequirement` - Always use required side
 - ✅ Build holder pattern with caching support
-- ✅ AST-based conditional joins (keys + filtering)
+- ✅ **AST-based conditional joins (keys + filtering):**
+  - `HashDirectStrategy`: Inner, LeftOuter, RightOuter, LeftSemi, LeftAnti (uses direct mixed join APIs)
+  - `HashObjectWithPostStrategy`, `HashDirectWithPostStrategy`, `SortDirectWithPostStrategy`: All join types (uses inner join + AST filter + post-processing)
+  - Note: FullOuter with AST requires post-processing strategies
+- ✅ **Non-conditional joins:**
+  - `HashDirectStrategy`: Supports all join types including LeftSemi, LeftAnti (uses direct Table APIs)
+  - `HashObjectStrategy`: Supports all join types with cacheable join objects
 - ✅ Multi-threaded execution with per-thread build holders
 - ✅ TSV output for spreadsheet analysis
 

@@ -103,7 +103,11 @@ def load_and_filter_data(tsv_path):
         'NumKeyColumns', 'KeyOverlapPct',
         'MedianTimeMs', 'AvgTimeMs', 'StdDevMs', 'OutputRows', 'Iterations', 'ErrorMessage',
         'BuildTimeMs', 'ProbeTimeMs', 'RemapStructureMs', 'RemapBuildKeysMs',
-        'RemapProbeKeysMs', 'CreateBuildObjectMs', 'ExecuteJoinMs'
+        'RemapProbeKeysMs', 'CreateBuildObjectMs', 'ExecuteJoinMs',
+        'BuildMaxKeyCount', 'BuildKeyCountStdDev', 'BuildKeyCountP99', 'BuildKeyCountP95',
+        'BuildKeyCountP90', 'BuildKeyCountP75', 'BuildKeyCountP50',
+        'ProbeMaxKeyCount', 'ProbeKeyCountStdDev', 'ProbeKeyCountP99', 'ProbeKeyCountP95',
+        'ProbeKeyCountP90', 'ProbeKeyCountP75', 'ProbeKeyCountP50'
     ]
     
     # Try reading with headers first to check
@@ -362,20 +366,55 @@ def create_build_probe_features(df):
         - 'int,long' → 1 | 2 = 3 (32-bit + 64-bit)
         - 'int,string' → 1 | 8 = 9 (32-bit + variable)
         - 'int,long,string' → 1 | 2 | 8 = 11 (all three widths)
+        - 'decimal(18,2)' → 2 (single type, comma is inside parentheses)
         
         This preserves information about which bit widths are present,
         unlike taking max().
         """
-        if ',' in key_type_str:
-            # Mixed keys: bitwise OR of all type flags
-            types = [t.strip() for t in key_type_str.split(',')]
-            score = 0
-            for t in types:
-                score |= key_type_flags.get(t, 1)
-            return score
-        else:
+        if ',' not in key_type_str:
             # Single key type
             return key_type_flags.get(key_type_str, 1)
+        
+        # Check if comma is inside parentheses (e.g., decimal(18,2))
+        paren_depth = 0
+        has_comma_outside = False
+        for char in key_type_str:
+            if char == '(':
+                paren_depth += 1
+            elif char == ')':
+                paren_depth -= 1
+            elif char == ',' and paren_depth == 0:
+                has_comma_outside = True
+                break
+        
+        # If no comma outside parentheses, it's a single type (e.g., decimal(18,2))
+        if not has_comma_outside:
+            return key_type_flags.get(key_type_str, 1)
+        
+        # Mixed keys: split only on commas outside parentheses
+        types = []
+        current = []
+        paren_depth = 0
+        for char in key_type_str:
+            if char == '(':
+                paren_depth += 1
+                current.append(char)
+            elif char == ')':
+                paren_depth -= 1
+                current.append(char)
+            elif char == ',' and paren_depth == 0:
+                types.append(''.join(current).strip())
+                current = []
+            else:
+                current.append(char)
+        if current:
+            types.append(''.join(current).strip())
+        
+        # Bitwise OR of all type flags
+        score = 0
+        for t in types:
+            score |= key_type_flags.get(t, 1)
+        return score
     
     features['BuildKeyTypeScore'] = df.apply(
         lambda row: compute_key_type_score(
@@ -402,11 +441,46 @@ def create_build_probe_features(df):
         - 'int,int' → 0 (multiple columns, but all int - homogeneous)
         - 'int,string' → 1 (multiple columns with different types - heterogeneous!)
         - 'int,int,string' → 1 (not all same type)
+        - 'decimal(18,2)' → 0 (single type, comma is inside parentheses)
         """
         if ',' not in key_type_str:
             return 0  # Single column, can't be mixed
         
-        types = [t.strip() for t in key_type_str.split(',')]
+        # Check if comma is inside parentheses (e.g., decimal(18,2))
+        paren_depth = 0
+        has_comma_outside = False
+        for char in key_type_str:
+            if char == '(':
+                paren_depth += 1
+            elif char == ')':
+                paren_depth -= 1
+            elif char == ',' and paren_depth == 0:
+                has_comma_outside = True
+                break
+        
+        # If no comma outside parentheses, it's a single type
+        if not has_comma_outside:
+            return 0
+        
+        # Split only on commas outside parentheses
+        types = []
+        current = []
+        paren_depth = 0
+        for char in key_type_str:
+            if char == '(':
+                paren_depth += 1
+                current.append(char)
+            elif char == ')':
+                paren_depth -= 1
+                current.append(char)
+            elif char == ',' and paren_depth == 0:
+                types.append(''.join(current).strip())
+                current = []
+            else:
+                current.append(char)
+        if current:
+            types.append(''.join(current).strip())
+        
         unique_types = set(types)
         
         # Mixed if more than one unique type
@@ -418,6 +492,58 @@ def create_build_probe_features(df):
     features['BuildHighCardinality'] = (features['BuildCardinalityPct'] > 0.5).astype(int)
     features['BuildLowCardinality'] = (features['BuildCardinalityPct'] < 0.1).astype(int)
     features['BuildVeryLowCardinality'] = (features['BuildCardinalityPct'] < 0.05).astype(int)
+    
+    # Key count statistics (if available)
+    # Map left/right to build/probe based on which side is smaller
+    key_count_cols = [
+        'BuildMaxKeyCount', 'BuildKeyCountStdDev', 'BuildKeyCountP99', 'BuildKeyCountP95',
+        'BuildKeyCountP90', 'BuildKeyCountP75', 'BuildKeyCountP50',
+        'ProbeMaxKeyCount', 'ProbeKeyCountStdDev', 'ProbeKeyCountP99', 'ProbeKeyCountP95',
+        'ProbeKeyCountP90', 'ProbeKeyCountP75', 'ProbeKeyCountP50'
+    ]
+    
+    # Check if key count columns exist (they may not be in older TSV files)
+    if all(col in df.columns for col in key_count_cols):
+        # Key count stats are already mapped to build/probe in the TSV
+        features['BuildMaxKeyCount'] = pd.to_numeric(df['BuildMaxKeyCount'], errors='coerce').fillna(0)
+        features['BuildKeyCountStdDev'] = pd.to_numeric(df['BuildKeyCountStdDev'], errors='coerce').fillna(0)
+        features['BuildKeyCountP99'] = pd.to_numeric(df['BuildKeyCountP99'], errors='coerce').fillna(0)
+        features['BuildKeyCountP95'] = pd.to_numeric(df['BuildKeyCountP95'], errors='coerce').fillna(0)
+        features['BuildKeyCountP90'] = pd.to_numeric(df['BuildKeyCountP90'], errors='coerce').fillna(0)
+        features['BuildKeyCountP75'] = pd.to_numeric(df['BuildKeyCountP75'], errors='coerce').fillna(0)
+        features['BuildKeyCountP50'] = pd.to_numeric(df['BuildKeyCountP50'], errors='coerce').fillna(0)
+        
+        features['ProbeMaxKeyCount'] = pd.to_numeric(df['ProbeMaxKeyCount'], errors='coerce').fillna(0)
+        features['ProbeKeyCountStdDev'] = pd.to_numeric(df['ProbeKeyCountStdDev'], errors='coerce').fillna(0)
+        features['ProbeKeyCountP99'] = pd.to_numeric(df['ProbeKeyCountP99'], errors='coerce').fillna(0)
+        features['ProbeKeyCountP95'] = pd.to_numeric(df['ProbeKeyCountP95'], errors='coerce').fillna(0)
+        features['ProbeKeyCountP90'] = pd.to_numeric(df['ProbeKeyCountP90'], errors='coerce').fillna(0)
+        features['ProbeKeyCountP75'] = pd.to_numeric(df['ProbeKeyCountP75'], errors='coerce').fillna(0)
+        features['ProbeKeyCountP50'] = pd.to_numeric(df['ProbeKeyCountP50'], errors='coerce').fillna(0)
+        
+        # Derived features from key count stats
+        # Ratio of max to median (skew indicator)
+        features['BuildKeyCountSkew'] = features['BuildMaxKeyCount'] / features['BuildKeyCountP50'].replace(0, 1)
+        features['ProbeKeyCountSkew'] = features['ProbeMaxKeyCount'] / features['ProbeKeyCountP50'].replace(0, 1)
+        
+        # Coefficient of variation (stddev / mean, using P50 as proxy for mean)
+        features['BuildKeyCountCV'] = features['BuildKeyCountStdDev'] / features['BuildKeyCountP50'].replace(0, 1)
+        features['ProbeKeyCountCV'] = features['ProbeKeyCountStdDev'] / features['ProbeKeyCountP50'].replace(0, 1)
+        
+        # Ratio of high percentiles to median (tail heaviness)
+        features['BuildKeyCountTailHeavy'] = features['BuildKeyCountP99'] / features['BuildKeyCountP50'].replace(0, 1)
+        features['ProbeKeyCountTailHeavy'] = features['ProbeKeyCountP99'] / features['ProbeKeyCountP50'].replace(0, 1)
+    else:
+        # Key count stats not available - fill with zeros
+        print("WARNING: Key count statistics columns not found in TSV. These features will be set to 0.")
+        for col in key_count_cols:
+            features[col] = 0
+        features['BuildKeyCountSkew'] = 0
+        features['ProbeKeyCountSkew'] = 0
+        features['BuildKeyCountCV'] = 0
+        features['ProbeKeyCountCV'] = 0
+        features['BuildKeyCountTailHeavy'] = 0
+        features['ProbeKeyCountTailHeavy'] = 0
     
     # Handle any NaN or inf values
     features = features.replace([np.inf, -np.inf], np.nan)
@@ -729,99 +855,139 @@ def analyze_timing_outliers(df):
                 print(f"    Interpretation: Lower values = more selective join (fewer matches)")
             print()
         
-        # Correlation analysis
+        # Correlation analysis - Combined all metrics into single ranked lists
         print("="*80)
         print("CORRELATION ANALYSIS: How Metrics Impact Build and Probe Times")
         print("="*80)
         print()
-        
-        # Calculate correlations for build time
-        print("Build Time Correlations:")
-        print("  (What impacts how long it takes to build the join object?)")
+        print("  All metrics (basic stats, key type/size, key count statistics, and derived features)")
+        print("  are combined into single ranked lists to show which features are most useful for prediction.")
         print()
+        
+        # Collect ALL metrics for build time correlation
         build_correlations = {}
-        build_metrics = ['BuildRows', 'BuildDistinctKeys', 'BuildCardinalityPct', 'ProbeRows', 'ProbeDistinctKeys', 'ProbeCardinalityPct']
+        
+        # Basic metrics
+        build_metrics = ['BuildRows', 'BuildDistinctKeys', 'BuildCardinalityPct', 
+                        'ProbeRows', 'ProbeDistinctKeys', 'ProbeCardinalityPct',
+                        'BuildProbeRowRatio', 'BuildProbeCardinalityRatio']
         # Add output rows if available
         if 'OutputRows' in strategy_df.columns:
-            build_metrics.extend(['OutputRows', 'OutputBuildRatio', 'JoinSelectivity'])
-        for metric in build_metrics:
+            build_metrics.extend(['OutputRows', 'OutputBuildRatio', 'OutputProbeRatio', 'JoinSelectivity'])
+        
+        # Key type and key size metrics (if available)
+        key_type_metrics = ['BuildKeyTypeScore', 'ProbeKeyTypeScore', 'MaxKeyTypeScore', 
+                           'BuildAvgKeyBytes', 'ProbeAvgKeyBytes', 'MixedKeys']
+        available_key_type_metrics = [m for m in key_type_metrics if m in strategy_df.columns]
+        
+        # Key count statistics (if available)
+        key_count_metrics = [
+            'BuildMaxKeyCount', 'BuildKeyCountStdDev', 'BuildKeyCountP99', 'BuildKeyCountP95',
+            'BuildKeyCountP90', 'BuildKeyCountP75', 'BuildKeyCountP50',
+            'ProbeMaxKeyCount', 'ProbeKeyCountStdDev', 'ProbeKeyCountP99', 'ProbeKeyCountP95',
+            'ProbeKeyCountP90', 'ProbeKeyCountP75', 'ProbeKeyCountP50'
+        ]
+        available_key_count_metrics = [m for m in key_count_metrics if m in strategy_df.columns]
+        
+        # Derived key count features (if available)
+        derived_features = ['BuildKeyCountSkew', 'ProbeKeyCountSkew', 'BuildKeyCountCV', 
+                          'ProbeKeyCountCV', 'BuildKeyCountTailHeavy', 'ProbeKeyCountTailHeavy']
+        available_derived = [f for f in derived_features if f in strategy_df.columns]
+        
+        # Calculate correlations for all metrics with build time
+        all_build_metrics = build_metrics + available_key_type_metrics + available_key_count_metrics + available_derived
+        for metric in all_build_metrics:
             if metric in strategy_df.columns:
                 corr = strategy_df['BuildTimeMs'].corr(strategy_df[metric])
                 if pd.notna(corr):
                     build_correlations[metric] = corr
         
-        # Sort by absolute correlation
-        sorted_build_corr = sorted(build_correlations.items(), key=lambda x: abs(x[1]), reverse=True)
-        for metric, corr in sorted_build_corr:
-            metric_name = metric.replace('Build', 'Build ').replace('Probe', 'Probe ').replace('Pct', '%')
-            direction = "positive" if corr > 0 else "negative"
-            strength = "strong" if abs(corr) > 0.7 else "moderate" if abs(corr) > 0.4 else "weak"
-            print(f"    {metric_name:30s}: {corr:>7.3f} ({strength} {direction} correlation)")
-        print()
-        
-        # Calculate correlations for probe time
-        print("Probe Time Correlations:")
-        print("  (What impacts how long it takes to probe the join object?)")
-        print("  NOTE: Probe time may be impacted by build-side metrics and output size!")
-        print()
+        # Collect ALL metrics for probe time correlation
         probe_correlations = {}
+        
+        # Basic metrics (same as build, plus some probe-specific)
         probe_metrics = ['BuildRows', 'BuildDistinctKeys', 'BuildCardinalityPct', 
                         'ProbeRows', 'ProbeDistinctKeys', 'ProbeCardinalityPct',
                         'BuildProbeRowRatio', 'BuildProbeCardinalityRatio']
-        # Add output rows if available (output size likely impacts probe time significantly)
+        # Add output rows if available
         if 'OutputRows' in strategy_df.columns:
             probe_metrics.extend(['OutputRows', 'OutputBuildRatio', 'OutputProbeRatio', 'JoinSelectivity'])
-        for metric in probe_metrics:
+        
+        # Calculate correlations for all metrics with probe time
+        all_probe_metrics = probe_metrics + available_key_type_metrics + available_key_count_metrics + available_derived
+        for metric in all_probe_metrics:
             if metric in strategy_df.columns:
                 corr = strategy_df['ProbeTimeMs'].corr(strategy_df[metric])
                 if pd.notna(corr):
                     probe_correlations[metric] = corr
         
-        # Sort by absolute correlation
-        sorted_probe_corr = sorted(probe_correlations.items(), key=lambda x: abs(x[1]), reverse=True)
-        for metric, corr in sorted_probe_corr:
-            metric_name = metric.replace('Build', 'Build ').replace('Probe', 'Probe ').replace('Pct', '%').replace('Ratio', 'Ratio')
+        # Helper function to format metric names
+        def format_metric_name(metric):
+            """Format metric name for display."""
+            name = metric.replace('Build', 'Build ').replace('Probe', 'Probe ')
+            name = name.replace('Pct', '%').replace('Ratio', 'Ratio')
+            name = name.replace('KeyCount', 'Key Count ')
+            name = name.replace('StdDev', 'Std Dev')
+            name = name.replace('CV', 'CV').replace('Skew', 'Skew')
+            name = name.replace('TailHeavy', 'Tail Heavy')
+            return name
+        
+        # Print combined build time correlations (all metrics ranked together)
+        print("Build Time Correlations (All Metrics Ranked):")
+        print("  (What impacts how long it takes to build the join object?)")
+        print("  Metrics include: basic stats, key type/size, key count statistics, and derived features")
+        print()
+        sorted_build_corr = sorted(build_correlations.items(), key=lambda x: abs(x[1]), reverse=True)
+        for rank, (metric, corr) in enumerate(sorted_build_corr, 1):
+            metric_name = format_metric_name(metric)
             direction = "positive" if corr > 0 else "negative"
             strength = "strong" if abs(corr) > 0.7 else "moderate" if abs(corr) > 0.4 else "weak"
-            print(f"    {metric_name:30s}: {corr:>7.3f} ({strength} {direction} correlation)")
+            print(f"  {rank:<2d}. {metric_name:35s}: {corr:>7.3f} ({strength} {direction})")
         print()
         
-        # Focus on build-side impact on probe time
-        print("Build-Side Impact on Probe Time:")
-        print("  (How much does the build side affect probe performance?)")
+        # Print combined probe time correlations (all metrics ranked together)
+        print("Probe Time Correlations (All Metrics Ranked):")
+        print("  (What impacts how long it takes to probe the join object?)")
+        print("  NOTE: Probe time may be impacted by build-side metrics and output size!")
+        print("  Metrics include: basic stats, key type/size, key count statistics, and derived features")
         print()
-        build_impact_metrics = ['BuildRows', 'BuildDistinctKeys', 'BuildCardinalityPct']
-        for metric in build_impact_metrics:
-            if metric in strategy_df.columns:
-                corr = strategy_df['ProbeTimeMs'].corr(strategy_df[metric])
-                if pd.notna(corr):
-                    metric_name = metric.replace('Build', 'Build ').replace('Pct', '%')
-                    direction = "increases" if corr > 0 else "decreases"
-                    strength = "strongly" if abs(corr) > 0.7 else "moderately" if abs(corr) > 0.4 else "weakly"
-                    print(f"    {metric_name:30s}: {corr:>7.3f} - Probe time {strength} {direction} with {metric_name.lower()}")
+        sorted_probe_corr = sorted(probe_correlations.items(), key=lambda x: abs(x[1]), reverse=True)
+        for rank, (metric, corr) in enumerate(sorted_probe_corr, 1):
+            metric_name = format_metric_name(metric)
+            direction = "positive" if corr > 0 else "negative"
+            strength = "strong" if abs(corr) > 0.7 else "moderate" if abs(corr) > 0.4 else "weak"
+            print(f"  {rank:<2d}. {metric_name:35s}: {corr:>7.3f} ({strength} {direction})")
         print()
         
-        # Output rows impact on timing (if available)
-        if 'OutputRows' in strategy_df.columns:
-            print("Output Rows Impact on Timing:")
-            print("  (How much does the join result size affect build and probe performance?)")
+        # Summary insights
+        print("Summary Insights:")
+        if sorted_build_corr:
+            top_build = sorted_build_corr[0]
+            top_name = format_metric_name(top_build[0])
+            print(f"  Build time: Most correlated with {top_name} (r={top_build[1]:.3f})")
+        if sorted_probe_corr:
+            top_probe = sorted_probe_corr[0]
+            top_name = format_metric_name(top_probe[0])
+            print(f"  Probe time: Most correlated with {top_name} (r={top_probe[1]:.3f})")
+        
+        # Count metrics by category
+        build_basic = sum(1 for m in sorted_build_corr if m[0] not in available_key_count_metrics and m[0] not in available_derived)
+        build_key_count = sum(1 for m in sorted_build_corr if m[0] in available_key_count_metrics)
+        build_derived = sum(1 for m in sorted_build_corr if m[0] in available_derived)
+        probe_basic = sum(1 for m in sorted_probe_corr if m[0] not in available_key_count_metrics and m[0] not in available_derived)
+        probe_key_count = sum(1 for m in sorted_probe_corr if m[0] in available_key_count_metrics)
+        probe_derived = sum(1 for m in sorted_probe_corr if m[0] in available_derived)
+        
+        print()
+        print("  Metric counts by category:")
+        print(f"    Build time: {build_basic} basic, {build_key_count} key count, {build_derived} derived")
+        print(f"    Probe time: {probe_basic} basic, {probe_key_count} key count, {probe_derived} derived")
+        
+        if not available_key_count_metrics:
             print()
-            output_metrics = ['OutputRows', 'OutputBuildRatio', 'OutputProbeRatio', 'JoinSelectivity']
-            for metric in output_metrics:
-                if metric in strategy_df.columns:
-                    build_corr = strategy_df['BuildTimeMs'].corr(strategy_df[metric])
-                    probe_corr = strategy_df['ProbeTimeMs'].corr(strategy_df[metric])
-                    if pd.notna(build_corr):
-                        metric_name = metric.replace('Output', 'Output ').replace('Ratio', 'Ratio').replace('Selectivity', 'Selectivity')
-                        direction = "increases" if build_corr > 0 else "decreases"
-                        strength = "strongly" if abs(build_corr) > 0.7 else "moderately" if abs(build_corr) > 0.4 else "weakly"
-                        print(f"    {metric_name:30s} vs Build: {build_corr:>7.3f} - Build time {strength} {direction}")
-                    if pd.notna(probe_corr):
-                        metric_name = metric.replace('Output', 'Output ').replace('Ratio', 'Ratio').replace('Selectivity', 'Selectivity')
-                        direction = "increases" if probe_corr > 0 else "decreases"
-                        strength = "strongly" if abs(probe_corr) > 0.7 else "moderately" if abs(probe_corr) > 0.4 else "weakly"
-                        print(f"    {metric_name:30s} vs Probe: {probe_corr:>7.3f} - Probe time {strength} {direction}")
-            print()
+            print("  NOTE: Key count statistics not available in this dataset.")
+            print("        Run the updated benchmark to include these metrics.")
+        print()
         
         # Identify outliers in total time
         total_outliers, total_lower, total_upper, total_q1, total_q3 = identify_outliers(strategy_df['TotalTimeMs'])
@@ -847,13 +1013,22 @@ def analyze_timing_outliers(df):
             
             # Check if OutputRows is available
             has_output_rows = 'OutputRows' in strategy_df.columns
+            has_build_max_key_count = 'BuildMaxKeyCount' in strategy_df.columns
             
             if has_output_rows:
-                print(f"{'Test Name':<23s} {'Total':>10s} {'Build':>10s} {'Probe':>10s} {'B/P':>7s} {'B Rows':>13s} {'P Rows':>13s} {'Out Rows':>13s} {'B Card%':>9s} {'P Card%':>9s}")
-                print("-" * 140)
+                if has_build_max_key_count:
+                    print(f"{'Test Name':<23s} {'Total':>10s} {'Build':>10s} {'Probe':>10s} {'B/P':>7s} {'B Rows':>13s} {'P Rows':>13s} {'Out Rows':>13s} {'B Card%':>9s} {'P Card%':>9s} {'B MaxKC':>10s}")
+                    print("-" * 150)
+                else:
+                    print(f"{'Test Name':<23s} {'Total':>10s} {'Build':>10s} {'Probe':>10s} {'B/P':>7s} {'B Rows':>13s} {'P Rows':>13s} {'Out Rows':>13s} {'B Card%':>9s} {'P Card%':>9s}")
+                    print("-" * 140)
             else:
-                print(f"{'Test Name':<25s} {'Total':>10s} {'Build':>10s} {'Probe':>10s} {'B/P':>7s} {'B Rows':>15s} {'P Rows':>15s} {'B/P':>7s} {'B Card%':>9s} {'P Card%':>9s}")
-                print("-" * 130)
+                if has_build_max_key_count:
+                    print(f"{'Test Name':<25s} {'Total':>10s} {'Build':>10s} {'Probe':>10s} {'B/P':>7s} {'B Rows':>15s} {'P Rows':>15s} {'B/P':>7s} {'B Card%':>9s} {'P Card%':>9s} {'B MaxKC':>10s}")
+                    print("-" * 140)
+                else:
+                    print(f"{'Test Name':<25s} {'Total':>10s} {'Build':>10s} {'Probe':>10s} {'B/P':>7s} {'B Rows':>15s} {'P Rows':>15s} {'B/P':>7s} {'B Card%':>9s} {'P Card%':>9s}")
+                    print("-" * 130)
             
             for idx, row in outlier_df_sorted.iterrows():
                 test_name = row.get('TestName', 'unknown')[:21 if has_output_rows else 23]  # Truncate if too long
@@ -867,6 +1042,7 @@ def analyze_timing_outliers(df):
                 build_card = row.get('BuildCardinalityPct', np.nan) * 100 if pd.notna(row.get('BuildCardinalityPct', np.nan)) else np.nan
                 probe_card = row.get('ProbeCardinalityPct', np.nan) * 100 if pd.notna(row.get('ProbeCardinalityPct', np.nan)) else np.nan
                 output_rows = row.get('OutputRows', np.nan) if has_output_rows else np.nan
+                build_max_key_count = pd.to_numeric(row.get('BuildMaxKeyCount', np.nan), errors='coerce') if has_build_max_key_count else np.nan
                 
                 ratio_str = f"{ratio:.2f}" if pd.notna(ratio) else "N/A"
                 build_rows_str = f"{build_rows:,.0f}" if pd.notna(build_rows) else "N/A"
@@ -875,15 +1051,26 @@ def analyze_timing_outliers(df):
                 build_card_str = f"{build_card:.2f}%" if pd.notna(build_card) else "N/A"
                 probe_card_str = f"{probe_card:.2f}%" if pd.notna(probe_card) else "N/A"
                 output_rows_str = f"{output_rows:,.0f}" if pd.notna(output_rows) else "N/A"
+                build_max_key_count_str = f"{build_max_key_count:,.0f}" if pd.notna(build_max_key_count) else "N/A"
                 
                 if has_output_rows:
-                    print(f"{test_name:<23s} {total:>10.1f} {build:>10.1f} {probe:>10.1f} {ratio_str:>7s} "
-                          f"{build_rows_str:>13s} {probe_rows_str:>13s} {output_rows_str:>13s} "
-                          f"{build_card_str:>9s} {probe_card_str:>9s}")
+                    if has_build_max_key_count:
+                        print(f"{test_name:<23s} {total:>10.1f} {build:>10.1f} {probe:>10.1f} {ratio_str:>7s} "
+                              f"{build_rows_str:>13s} {probe_rows_str:>13s} {output_rows_str:>13s} "
+                              f"{build_card_str:>9s} {probe_card_str:>9s} {build_max_key_count_str:>10s}")
+                    else:
+                        print(f"{test_name:<23s} {total:>10.1f} {build:>10.1f} {probe:>10.1f} {ratio_str:>7s} "
+                              f"{build_rows_str:>13s} {probe_rows_str:>13s} {output_rows_str:>13s} "
+                              f"{build_card_str:>9s} {probe_card_str:>9s}")
                 else:
-                    print(f"{test_name:<25s} {total:>10.1f} {build:>10.1f} {probe:>10.1f} {ratio_str:>7s} "
-                          f"{build_rows_str:>15s} {probe_rows_str:>15s} {row_ratio_str:>7s} "
-                          f"{build_card_str:>9s} {probe_card_str:>9s}")
+                    if has_build_max_key_count:
+                        print(f"{test_name:<25s} {total:>10.1f} {build:>10.1f} {probe:>10.1f} {ratio_str:>7s} "
+                              f"{build_rows_str:>15s} {probe_rows_str:>15s} {row_ratio_str:>7s} "
+                              f"{build_card_str:>9s} {probe_card_str:>9s} {build_max_key_count_str:>10s}")
+                    else:
+                        print(f"{test_name:<25s} {total:>10.1f} {build:>10.1f} {probe:>10.1f} {ratio_str:>7s} "
+                              f"{build_rows_str:>15s} {probe_rows_str:>15s} {row_ratio_str:>7s} "
+                              f"{build_card_str:>9s} {probe_card_str:>9s}")
             
             print()
             
@@ -927,26 +1114,43 @@ def analyze_timing_outliers(df):
                 build_outlier_df = strategy_df[build_outliers].nlargest(10, 'BuildTimeMs')
                 print(f"    Top 10 build time outliers:")
                 has_output_rows = 'OutputRows' in strategy_df.columns
+                has_build_max_key_count = 'BuildMaxKeyCount' in strategy_df.columns
                 if has_output_rows:
-                    print(f"    {'Test Name':<28s} {'Build':>10s} {'B Rows':>13s} {'B Card%':>10s} {'Out Rows':>13s}")
-                    print("    " + "-" * 90)
+                    if has_build_max_key_count:
+                        print(f"    {'Test Name':<28s} {'Build':>10s} {'B Rows':>13s} {'B Card%':>10s} {'Out Rows':>13s} {'B MaxKC':>10s}")
+                        print("    " + "-" * 100)
+                    else:
+                        print(f"    {'Test Name':<28s} {'Build':>10s} {'B Rows':>13s} {'B Card%':>10s} {'Out Rows':>13s}")
+                        print("    " + "-" * 90)
                 else:
-                    print(f"    {'Test Name':<30s} {'Build':>10s} {'B Rows':>15s} {'B Card%':>10s} {'B DistKeys':>15s}")
-                    print("    " + "-" * 90)
+                    if has_build_max_key_count:
+                        print(f"    {'Test Name':<30s} {'Build':>10s} {'B Rows':>15s} {'B Card%':>10s} {'B DistKeys':>15s} {'B MaxKC':>10s}")
+                        print("    " + "-" * 100)
+                    else:
+                        print(f"    {'Test Name':<30s} {'Build':>10s} {'B Rows':>15s} {'B Card%':>10s} {'B DistKeys':>15s}")
+                        print("    " + "-" * 90)
                 for idx, row in build_outlier_df.iterrows():
                     test_name = row.get('TestName', 'unknown')[:26 if has_output_rows else 28]
                     build_rows = row.get('BuildRows', np.nan)
                     build_card = row.get('BuildCardinalityPct', np.nan) * 100 if pd.notna(row.get('BuildCardinalityPct', np.nan)) else np.nan
                     build_distinct = row.get('BuildDistinctKeys', np.nan)
                     output_rows = row.get('OutputRows', np.nan) if has_output_rows else np.nan
+                    build_max_key_count = pd.to_numeric(row.get('BuildMaxKeyCount', np.nan), errors='coerce') if has_build_max_key_count else np.nan
                     build_rows_str = f"{build_rows:,.0f}" if pd.notna(build_rows) else "N/A"
                     build_card_str = f"{build_card:.2f}%" if pd.notna(build_card) else "N/A"
                     build_distinct_str = f"{build_distinct:,.0f}" if pd.notna(build_distinct) else "N/A"
                     output_rows_str = f"{output_rows:,.0f}" if pd.notna(output_rows) else "N/A"
+                    build_max_key_count_str = f"{build_max_key_count:,.0f}" if pd.notna(build_max_key_count) else "N/A"
                     if has_output_rows:
-                        print(f"    {test_name:<28s} {row['BuildTimeMs']:>10.2f} {build_rows_str:>13s} {build_card_str:>10s} {output_rows_str:>13s}")
+                        if has_build_max_key_count:
+                            print(f"    {test_name:<28s} {row['BuildTimeMs']:>10.2f} {build_rows_str:>13s} {build_card_str:>10s} {output_rows_str:>13s} {build_max_key_count_str:>10s}")
+                        else:
+                            print(f"    {test_name:<28s} {row['BuildTimeMs']:>10.2f} {build_rows_str:>13s} {build_card_str:>10s} {output_rows_str:>13s}")
                     else:
-                        print(f"    {test_name:<30s} {row['BuildTimeMs']:>10.2f} {build_rows_str:>15s} {build_card_str:>10s} {build_distinct_str:>15s}")
+                        if has_build_max_key_count:
+                            print(f"    {test_name:<30s} {row['BuildTimeMs']:>10.2f} {build_rows_str:>15s} {build_card_str:>10s} {build_distinct_str:>15s} {build_max_key_count_str:>10s}")
+                        else:
+                            print(f"    {test_name:<30s} {row['BuildTimeMs']:>10.2f} {build_rows_str:>15s} {build_card_str:>10s} {build_distinct_str:>15s}")
             print()
             
             # Identify outliers where probe time is unusually high
@@ -2004,9 +2208,11 @@ def train_and_evaluate_model(best_df, test_size=TEST_SIZE):
             hi_cm = cm(high_impact_y, high_impact_pred)
             print("High-Impact Cases Confusion Matrix:")
             print(f"  True Hash / Pred Hash: {hi_cm[0][0] if len(hi_cm) > 0 and len(hi_cm[0]) > 0 else 0}")
-            print(f"  True Hash / Pred Sort: {hi_cm[0][1] if len(hi_cm) > 0 and len(hi_cm[0]) > 1 else 0} ← BAD (chose sort when hash was much faster)")
+            true_hash_pred_sort = hi_cm[0][1] if len(hi_cm) > 0 and len(hi_cm[0]) > 1 else 0
+            print(f"  True Hash / Pred Sort: {true_hash_pred_sort} ← BAD (chose sort when hash was much faster)")
             if len(hi_cm) > 1:
-                print(f"  True Sort / Pred Hash: {hi_cm[1][0] if len(hi_cm[1]) > 0 else 0} ← BAD (chose hash when sort was much faster)")
+                true_sort_pred_hash = hi_cm[1][0] if len(hi_cm[1]) > 0 else 0
+                print(f"  True Sort / Pred Hash: {true_sort_pred_hash} ← BAD (chose hash when sort was much faster)")
                 print(f"  True Sort / Pred Sort: {hi_cm[1][1] if len(hi_cm[1]) > 1 else 0}")
             print()
         
@@ -2016,6 +2222,8 @@ def train_and_evaluate_model(best_df, test_size=TEST_SIZE):
         
         error_costs_ms = []
         error_costs_pct = []
+        error_details = []  # Store details of each error
+        
         for idx in range(len(high_impact_test_df)):
             row = high_impact_test_df.iloc[idx]
             pred = high_impact_pred_reset.iloc[idx]
@@ -2033,14 +2241,34 @@ def train_and_evaluate_model(best_df, test_size=TEST_SIZE):
                 if pred == 0:  # Predicted hash
                     chosen_time = hash_time
                     best_time = sort_time
+                    pred_strategy = 'hash_object'
                 else:  # Predicted sort
                     chosen_time = sort_time
                     best_time = hash_time
+                    pred_strategy = 'sort_object_post'
                 
                 cost_ms = chosen_time - best_time
                 cost_pct = (cost_ms / best_time) * 100
                 error_costs_ms.append(cost_ms)
                 error_costs_pct.append(cost_pct)
+                
+                # Store error details
+                error_details.append({
+                    'test_name': row.get('TestName', 'unknown'),
+                    'best_strategy': row['BestStrategy'],
+                    'predicted_strategy': pred_strategy,
+                    'best_time': best_time,
+                    'chosen_time': chosen_time,
+                    'cost_ms': cost_ms,
+                    'cost_pct': cost_pct,
+                    'time_diff_ms': row['AlternativeTime'] - row['BestTime'],
+                    'build_rows': row.get('LeftRows', 0) if row.get('LeftRows', 0) <= row.get('RightRows', 0) else row.get('RightRows', 0),
+                    'probe_rows': row.get('RightRows', 0) if row.get('LeftRows', 0) <= row.get('RightRows', 0) else row.get('LeftRows', 0),
+                    'build_card': row.get('LeftCardinalityPct', 0) if row.get('LeftRows', 0) <= row.get('RightRows', 0) else row.get('RightCardinalityPct', 0),
+                    'build_key_type': row.get('LeftKeyType', 'unknown') if row.get('LeftRows', 0) <= row.get('RightRows', 0) else row.get('RightKeyType', 'unknown'),
+                    'probe_key_type': row.get('RightKeyType', 'unknown') if row.get('LeftRows', 0) <= row.get('RightRows', 0) else row.get('LeftKeyType', 'unknown'),
+                    'num_key_cols': row.get('NumKeyColumns', 0)
+                })
         
         if error_costs_ms:
             print(f"Errors on high-impact cases: {len(error_costs_ms)} / {high_impact_count}")
@@ -2048,6 +2276,58 @@ def train_and_evaluate_model(best_df, test_size=TEST_SIZE):
             print(f"  Max cost of error:      {np.max(error_costs_ms):.2f} ms ({np.max(error_costs_pct):.1f}% slower)")
             print(f"  Total cost of errors:   {np.sum(error_costs_ms):.2f} ms")
             print(f"  These are the bad cases we're trying to avoid!")
+            print()
+            
+            # Print details of each error case
+            print("Detailed Error Cases (High-Impact with Wrong Predictions):")
+            print()
+            # Sort by cost (most expensive errors first)
+            error_details_sorted = sorted(error_details, key=lambda x: x['cost_ms'], reverse=True)
+            
+            print(f"{'Test Name':<30s} {'Best':<12s} {'Predicted':<12s} {'Cost (ms)':>12s} {'Cost %':>10s} {'B Rows':>12s} {'P Rows':>12s} {'B Card%':>10s} {'B KeyType':<20s} {'P KeyType':<20s}")
+            print("-" * 160)
+            
+            for err in error_details_sorted:
+                test_name = err['test_name'][:28] if len(err['test_name']) > 28 else err['test_name']
+                build_key_type = err['build_key_type'][:18] if len(str(err['build_key_type'])) > 18 else str(err['build_key_type'])
+                probe_key_type = err['probe_key_type'][:18] if len(str(err['probe_key_type'])) > 18 else str(err['probe_key_type'])
+                print(f"{test_name:<30s} {err['best_strategy']:<12s} {err['predicted_strategy']:<12s} "
+                      f"{err['cost_ms']:>12.2f} {err['cost_pct']:>9.1f}% "
+                      f"{err['build_rows']:>12,.0f} {err['probe_rows']:>12,.0f} "
+                      f"{err['build_card']*100:>9.2f}% {build_key_type:<20s} {probe_key_type:<20s}")
+            print()
+            
+            # Group errors by key type combination to see patterns
+            print("Error Patterns by Key Type Combination:")
+            type_error_counts = {}
+            for err in error_details:
+                build_type = err['build_key_type']
+                probe_type = err['probe_key_type']
+                num_cols = err['num_key_cols']
+                key = f"{build_type}|{probe_type}|{num_cols}cols"
+                if key not in type_error_counts:
+                    type_error_counts[key] = {
+                        'count': 0,
+                        'total_cost_ms': 0.0,
+                        'avg_cost_ms': 0.0,
+                        'max_cost_ms': 0.0
+                    }
+                type_error_counts[key]['count'] += 1
+                type_error_counts[key]['total_cost_ms'] += err['cost_ms']
+                type_error_counts[key]['max_cost_ms'] = max(type_error_counts[key]['max_cost_ms'], err['cost_ms'])
+            
+            for key, stats in type_error_counts.items():
+                stats['avg_cost_ms'] = stats['total_cost_ms'] / stats['count']
+            
+            # Sort by total cost
+            type_errors_sorted = sorted(type_error_counts.items(), key=lambda x: x[1]['total_cost_ms'], reverse=True)
+            
+            print(f"{'Key Type Combo':<50s} {'Errors':>8s} {'Total Cost (ms)':>18s} {'Avg Cost (ms)':>15s} {'Max Cost (ms)':>15s}")
+            print("-" * 110)
+            for key, stats in type_errors_sorted:
+                key_display = key[:48] if len(key) > 48 else key
+                print(f"{key_display:<50s} {stats['count']:>8d} {stats['total_cost_ms']:>18.2f} "
+                      f"{stats['avg_cost_ms']:>15.2f} {stats['max_cost_ms']:>15.2f}")
             print()
         else:
             print(f"No errors on high-impact cases! Model is perfect on cases >{HIGH_IMPACT_THRESHOLD_MS}ms")
@@ -2146,6 +2426,116 @@ def identify_refinement_regions(best_df, model, X):
     
     target_regions = []
     
+    # Strategy 0: Target low max key count gaps (NEW)
+    print("Max key count gap analysis:")
+    if 'BuildMaxKeyCount' in best_df.columns:
+        features_with_max = create_build_probe_features(best_df)
+        
+        # Key types are the same for left and right (join requirement), so just use LeftKeyType
+        if 'BuildKeyType' not in best_df.columns:
+            best_df['BuildKeyType'] = best_df['LeftKeyType']
+        
+        # Categorize by key type
+        def categorize_key_type(key_type_str):
+            """Categorize key type for analysis."""
+            if pd.isna(key_type_str) or key_type_str == '':
+                return 'unknown'
+            key_type_str = str(key_type_str)
+            # Check if it's a composite key (comma outside parentheses)
+            if ',' in key_type_str:
+                paren_depth = 0
+                has_comma_outside = False
+                for char in key_type_str:
+                    if char == '(':
+                        paren_depth += 1
+                    elif char == ')':
+                        paren_depth -= 1
+                    elif char == ',' and paren_depth == 0:
+                        has_comma_outside = True
+                        break
+                if has_comma_outside:
+                    return 'multiple'
+                else:
+                    return 'single_string' if 'string' in key_type_str.lower() else 'single_fixed'
+            else:
+                return 'single_string' if 'string' in key_type_str.lower() else 'single_fixed'
+        
+        best_df['KeyTypeCategory'] = best_df['BuildKeyType'].apply(categorize_key_type)
+        
+        # Analyze max key counts by category
+        for category in ['single_string', 'multiple']:
+            cat_df = best_df[best_df['KeyTypeCategory'] == category]
+            if len(cat_df) == 0:
+                continue
+            
+            # Check max key count distribution
+            max_key_counts = cat_df['BuildMaxKeyCount'].dropna()
+            if len(max_key_counts) == 0:
+                continue
+            
+            median_max = max_key_counts.median()
+            p75_max = max_key_counts.quantile(0.75)
+            p90_max = max_key_counts.quantile(0.90)
+            
+            # Compare to fixed-width baseline
+            fixed_df = best_df[best_df['KeyTypeCategory'] == 'single_fixed']
+            if len(fixed_df) > 0:
+                fixed_max = fixed_df['BuildMaxKeyCount'].dropna()
+                if len(fixed_max) > 0:
+                    fixed_median = fixed_max.median()
+                    fixed_p90 = fixed_max.quantile(0.90)
+                    
+                    # If strings/multi-keys have significantly lower max counts, target them
+                    if median_max < fixed_median * 0.5 or p90_max < fixed_p90 * 0.3:
+                        print(f"  {category}: Median max={median_max:.0f}, P90={p90_max:.0f}")
+                        print(f"    Fixed-width: Median={fixed_median:.0f}, P90={fixed_p90:.0f}")
+                        print(f"    → Targeting low max key count gaps")
+                        
+                        # Get typical characteristics of low max key count cases
+                        low_max_cases = cat_df[cat_df['BuildMaxKeyCount'] < p75_max]
+                        if len(low_max_cases) > 0:
+                            # Target regions with:
+                            # 1. Higher memory targets (more rows)
+                            # 2. Lower cardinality (fewer distinct keys = more duplicates)
+                            # 3. Skewed distributions (zipf/gaussian create higher max counts)
+                            
+                            build_rows_min = int(low_max_cases['BuildRows'].quantile(0.25))
+                            build_rows_max = int(low_max_cases['BuildRows'].quantile(0.75)) * 3  # 3x to get more rows
+                            probe_rows_min = int(low_max_cases['ProbeRows'].quantile(0.25))
+                            probe_rows_max = int(low_max_cases['ProbeRows'].quantile(0.75)) * 3
+                            
+                            # Target lower cardinality for more duplicates
+                            card_min = 0.001
+                            card_max = min(0.05, low_max_cases['BuildCardinalityPct'].quantile(0.75))
+                            
+                            # Determine key types to target
+                            if category == 'single_string':
+                                key_types = ['string']
+                                num_cols = [1]
+                            else:  # multiple
+                                # Get typical multi-key column counts
+                                num_cols_list = low_max_cases['NumKeyColumns'].unique().tolist()
+                                num_cols = num_cols_list if len(num_cols_list) > 0 else [2, 3]
+                                # Target mixed key types that include strings
+                                key_types = ['string', 'int,string', 'string,long', 'string,int,long']
+                            
+                            target_regions.append({
+                                'buildCardinalityMin': card_min,
+                                'buildCardinalityMax': card_max,
+                                'probeCardinalityMin': 0.0,
+                                'probeCardinalityMax': 1.0,
+                                'buildRowsMin': build_rows_min,
+                                'buildRowsMax': build_rows_max,
+                                'probeRowsMin': probe_rows_min,
+                                'probeRowsMax': probe_rows_max,
+                                'keyTypes': key_types,
+                                'numKeyColumns': num_cols,
+                                'importance': 0.9,
+                                'reason': f"{category} low max key count: median={median_max:.0f}, need more rows/lower cardinality"
+                            })
+        
+        print()
+    
     # Strategy 1: Target cardinality bins with low samples or high uncertainty
     print("Cardinality-based refinement:")
     for label, low, high in cardinality_bins:
@@ -2243,12 +2633,57 @@ def identify_refinement_regions(best_df, model, X):
         
         # Normalize key type representation (handle mixed keys)
         def normalize_key_type(key_type_str):
-            """Normalize key type to handle mixed keys."""
-            if ',' in key_type_str:
-                # Mixed keys: extract unique types and sort
-                types = sorted(set(t.strip() for t in key_type_str.split(',')))
-                return ','.join(types)
-            return key_type_str
+            """Normalize key type to handle mixed keys.
+            
+            Handles commas inside parentheses (e.g., decimal(18,2)) correctly.
+            Only splits on commas that are NOT inside parentheses.
+            """
+            if ',' not in key_type_str:
+                return key_type_str
+            
+            # Check if this is a single type with commas inside parentheses (e.g., decimal(18,2))
+            # If there's no comma outside parentheses, it's a single type
+            paren_depth = 0
+            has_comma_outside_parens = False
+            for char in key_type_str:
+                if char == '(':
+                    paren_depth += 1
+                elif char == ')':
+                    paren_depth -= 1
+                elif char == ',' and paren_depth == 0:
+                    has_comma_outside_parens = True
+                    break
+            
+            # If no comma outside parentheses, it's a single type (like decimal(18,2))
+            if not has_comma_outside_parens:
+                return key_type_str
+            
+            # Mixed keys: split only on commas outside parentheses
+            types = []
+            current_type = []
+            paren_depth = 0
+            
+            for char in key_type_str:
+                if char == '(':
+                    paren_depth += 1
+                    current_type.append(char)
+                elif char == ')':
+                    paren_depth -= 1
+                    current_type.append(char)
+                elif char == ',' and paren_depth == 0:
+                    # This comma separates types
+                    types.append(''.join(current_type).strip())
+                    current_type = []
+                else:
+                    current_type.append(char)
+            
+            # Add the last type
+            if current_type:
+                types.append(''.join(current_type).strip())
+            
+            # Extract unique types and sort
+            types = sorted(set(types))
+            return ','.join(types)
         
         left_norm = normalize_key_type(str(left_type))
         right_norm = normalize_key_type(str(right_type))
@@ -2285,7 +2720,20 @@ def identify_refinement_regions(best_df, model, X):
         error_pct = (error_count / count * 100) if count > 0 else 0
         
         # Identify problematic combinations
-        if count < 20 or uncertain_pct > 40 or error_pct > 30:
+        # Only flag if there are actual problems (uncertainty/errors) OR very low count with issues
+        # Don't flag combinations that have 0% uncertainty and 0% errors just because count is low
+        is_problematic = False
+        if uncertain_pct > 40 or error_pct > 30:
+            # High uncertainty or error rate - definitely problematic
+            is_problematic = True
+        elif count < 10 and (uncertain_pct > 20 or error_pct > 15):
+            # Very low count AND some uncertainty/errors - problematic
+            is_problematic = True
+        elif count < 5:
+            # Extremely low count (< 5) - flag even if no errors (might be missing coverage)
+            is_problematic = True
+        
+        if is_problematic:
             type_key = f"{build_type}|{probe_type}|{num_cols}"
             type_issues[type_key] = {
                 'build_type': build_type,
@@ -2305,24 +2753,75 @@ def identify_refinement_regions(best_df, model, X):
                   f"{info['count']:3d} samples, {info['uncertain_pct']:.0f}% uncertain, {info['error_pct']:.0f}% errors")
             
             # Extract key types to target
-            build_types = info['build_type'].split(',')
-            probe_types = info['probe_type'].split(',')
+            # Use the same logic as normalize_key_type to split correctly
+            def split_types_safely(type_str):
+                """Split type string on commas, but not inside parentheses."""
+                if ',' not in type_str:
+                    return [type_str]
+                
+                # Check if there's a comma outside parentheses
+                paren_depth = 0
+                has_comma_outside = False
+                for char in type_str:
+                    if char == '(':
+                        paren_depth += 1
+                    elif char == ')':
+                        paren_depth -= 1
+                    elif char == ',' and paren_depth == 0:
+                        has_comma_outside = True
+                        break
+                
+                if not has_comma_outside:
+                    return [type_str]
+                
+                # Split on commas outside parentheses
+                types = []
+                current = []
+                paren_depth = 0
+                for char in type_str:
+                    if char == '(':
+                        paren_depth += 1
+                        current.append(char)
+                    elif char == ')':
+                        paren_depth -= 1
+                        current.append(char)
+                    elif char == ',' and paren_depth == 0:
+                        types.append(''.join(current).strip())
+                        current = []
+                    else:
+                        current.append(char)
+                if current:
+                    types.append(''.join(current).strip())
+                return types
+            
+            build_types = split_types_safely(info['build_type'])
+            probe_types = split_types_safely(info['probe_type'])
             all_types = sorted(set(build_types + probe_types))
             
             # Map to allowed types in Scala benchmark
+            # Preserve decimal types instead of mapping them to int/long
+            # The Scala benchmark supports: int, long, decimal(9,2), decimal(18,2), decimal(38,2), string
             allowed_types = []
-            type_mapping = {
+            supported_types = {
                 'int': 'int',
                 'long': 'long',
-                'decimal(9,2)': 'int',  # Map to int for simplicity
-                'decimal(18,2)': 'long',  # Map to long
-                'decimal(38,2)': 'long',  # Map to long
+                'decimal(9,2)': 'decimal(9,2)',
+                'decimal(18,2)': 'decimal(18,2)',
+                'decimal(38,2)': 'decimal(38,2)',
                 'string': 'string'
             }
             for t in all_types:
-                mapped = type_mapping.get(t.strip(), 'int')
-                if mapped not in allowed_types:
-                    allowed_types.append(mapped)
+                t_stripped = t.strip()
+                # Check if it's a supported type (exact match)
+                if t_stripped in supported_types:
+                    mapped = supported_types[t_stripped]
+                    if mapped not in allowed_types:
+                        allowed_types.append(mapped)
+                else:
+                    # Fallback: try to map unknown types
+                    # For backward compatibility, map unknown types to int
+                    if 'int' not in allowed_types:
+                        allowed_types.append('int')
             
             if not allowed_types:
                 allowed_types = ['int', 'long', 'string']
@@ -2369,9 +2868,14 @@ def identify_refinement_regions(best_df, model, X):
     
     # Analyze key type coverage (original analysis)
     print("Coverage by Key Type:")
-    for key_type in ['int', 'long', 'decimal(18,2)', 'string']:
+    for key_type in ['int', 'long', 'decimal(9,2)', 'decimal(18,2)', 'decimal(38,2)', 'string']:
         # Use left key type as representative
-        type_mask = best_df['LeftKeyType'].str.contains(key_type, na=False)
+        # For decimal types, need exact match to avoid matching decimal(18,2) when searching for decimal(9,2)
+        if key_type.startswith('decimal'):
+            # Exact match for decimal types (they contain commas, so simple contains won't work)
+            type_mask = best_df['LeftKeyType'] == key_type
+        else:
+            type_mask = best_df['LeftKeyType'].str.contains(key_type, na=False)
         count = type_mask.sum()
         sort_count = (type_mask & sort_wins).sum()
         type_mask_indices = np.where(type_mask.values)[0] if isinstance(type_mask, pd.Series) else np.where(type_mask)[0]
@@ -2448,10 +2952,29 @@ def generate_refinement_config(target_regions, output_path=REFINEMENT_CONFIG_PAT
     for region in target_regions:
         region['num_tests'] = max(10, int(total_budget * region['importance'] / total_importance))
     
+    # Convert numpy types to native Python types for JSON serialization
+    def convert_to_native(obj):
+        """Recursively convert numpy types to native Python types."""
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {key: convert_to_native(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_to_native(item) for item in obj]
+        else:
+            return obj
+    
+    # Convert target_regions to native types
+    target_regions_native = [convert_to_native(region) for region in target_regions]
+    
     # Write JSON config
     config = {
-        'targetRegions': target_regions,
-        'numTestsPerRegion': max(r['num_tests'] for r in target_regions)
+        'targetRegions': target_regions_native,
+        'numTestsPerRegion': int(max(r['num_tests'] for r in target_regions))
     }
     
     with open(output_path, 'w') as f:
@@ -2498,6 +3021,17 @@ def main():
     
     # Load and filter data
     df = load_and_filter_data(tsv_path)
+    
+    # Add build/probe features (including key type scores and key count stats)
+    # This ensures all features are available for correlation analysis
+    features = create_build_probe_features(df)
+    # Merge features back into dataframe
+    for col in features.columns:
+        if col not in df.columns:
+            df[col] = features[col]
+        else:
+            # Update existing columns (features may override raw columns)
+            df[col] = features[col]
     
     # Analyze timing outliers (build vs probe time analysis)
     analyze_timing_outliers(df)

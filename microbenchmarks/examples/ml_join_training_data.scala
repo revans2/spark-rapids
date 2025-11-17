@@ -308,8 +308,9 @@ def generateRandomTestConfig(testId: Int): MLTestConfig = {
   }
   
   // Calculate target memory for each side
-  val leftTargetMemory = minMemoryTarget + random.nextLong() % (maxMemoryTarget - minMemoryTarget)
-  val rightTargetMemory = minMemoryTarget + random.nextLong() % (maxMemoryTarget - minMemoryTarget)
+  // Use math.abs to ensure non-negative modulo result (random.nextLong() can be negative)
+  val leftTargetMemory = minMemoryTarget + math.abs(random.nextLong()) % (maxMemoryTarget - minMemoryTarget)
+  val rightTargetMemory = minMemoryTarget + math.abs(random.nextLong()) % (maxMemoryTarget - minMemoryTarget)
   
   // Calculate row counts based on memory target
   val leftRows = calculateTargetRows(leftTargetMemory, leftKeyType, numKeys)

@@ -35,7 +35,8 @@ import com.nvidia.spark.rapids.benchmarks.JoinBenchmarkDataGen._
 import com.nvidia.spark.rapids.benchmarks.JoinBenchmarkRunner._
 import org.apache.spark.sql.tests.datagen._
 import org.apache.spark.sql.SparkSession
-import scala.util.Random
+import org.apache.spark.sql.functions._
+import scala.util.{Random, Try}
 import java.io.{File, PrintWriter}
 import java.nio.file.{Files, Paths, StandardCopyOption}
 import org.json4s._
@@ -54,10 +55,10 @@ var random = new Random(42)
 // ============================================================================
 
 // Number of tests to generate (if not using refinement config)
-val numTests = 600
+val numTests = 2000
 
 // Iterations per benchmark (for statistical significance)
-val benchmarkIterations = 5
+val benchmarkIterations = 1
 
 // Memory targets (in bytes) - 1MiB to 1GiB
 val minMemoryTarget = 1L * 1024 * 1024
@@ -142,6 +143,8 @@ val keyTypes = Seq(
   KeyTypeSpec("string", 60, true)  // Variable length, will be set per test
 )
 
+val keyTypeSpecMap: Map[String, KeyTypeSpec] = keyTypes.map(kt => kt.typeName -> kt).toMap
+
 case class DistributionSpec(
   name: String,
   description: String
@@ -186,6 +189,22 @@ case class TableStats(
   distribution: String
 )
 
+case class TableCountSummary(
+  rows: Long,
+  distinctKeys: Long,
+  avgStringLengths: Map[Int, Double]
+)
+
+case class KeyCountStats(
+  maxCount: Long,
+  stdDev: Double,
+  p99: Double,
+  p95: Double,
+  p90: Double,
+  p75: Double,
+  p50: Double
+)
+
 case class BenchmarkResult(
   testName: String,
   // Configuration
@@ -212,7 +231,10 @@ case class BenchmarkResult(
   remapBuildKeysMs: Option[Double] = None,
   remapProbeKeysMs: Option[Double] = None,
   createBuildObjectMs: Option[Double] = None,
-  executeJoinMs: Option[Double] = None
+  executeJoinMs: Option[Double] = None,
+  // Key count statistics (build and probe sides)
+  buildKeyCountStats: Option[KeyCountStats] = None,
+  probeKeyCountStats: Option[KeyCountStats] = None
 )
 
 // ============================================================================
@@ -374,20 +396,22 @@ def generateRandomTestConfig(testId: Int, weightLowCardinality: Boolean = true):
   // Types and string lengths must be same for left and right (join requirement)
   val (keyTypeNames, stringLengths) = pickMixedKeyTypes(numKeys)
   
-  // Calculate average bytes per key column for memory estimation
-  val avgBytesPerKey = keyTypeNames.zip(stringLengths).map { case (typeName, stringLen) =>
+  // Calculate bytes per row (sum of bytes for all key columns)
+  val bytesPerRow = keyTypeNames.zip(stringLengths).map { case (typeName, stringLen) =>
     val keyTypeSpec = keyTypes.find(_.typeName == typeName).get
     stringLen.getOrElse(keyTypeSpec.avgBytes)
-  }.sum.toDouble / numKeys
+  }.sum.toDouble
   
   // Calculate target memory for each side
-  val leftTargetMemory = minMemoryTarget + random.nextLong() % (maxMemoryTarget - minMemoryTarget)
-  val rightTargetMemory = minMemoryTarget + random.nextLong() % (maxMemoryTarget - minMemoryTarget)
+  // Use math.abs to ensure non-negative modulo result (random.nextLong() can be negative)
+  val leftTargetMemory = minMemoryTarget + math.abs(random.nextLong()) % (maxMemoryTarget - minMemoryTarget)
+  val rightTargetMemory = minMemoryTarget + math.abs(random.nextLong()) % (maxMemoryTarget - minMemoryTarget)
   
   // Calculate row counts based on memory target
-  val bytesPerRow = avgBytesPerKey * numKeys
-  val leftRows = math.max(10000, leftTargetMemory / bytesPerRow).toLong
-  val rightRows = math.max(10000, rightTargetMemory / bytesPerRow).toLong
+  // Ensure we meet the minimum memory target (don't use hardcoded 10k rows)
+  val minRowsForTarget = (minMemoryTarget / bytesPerRow).toLong
+  val leftRows = math.max(minRowsForTarget, leftTargetMemory / bytesPerRow).toLong
+  val rightRows = math.max(minRowsForTarget, rightTargetMemory / bytesPerRow).toLong
   
   // Calculate distinct keys with continuous weighting
   val leftCardPct = pickCardinalityPct(weightLowCardinality)
@@ -567,11 +591,11 @@ def generateTestsFromRefinementConfig(config: RefinementConfig, startId: Int): S
       val allowedKeyTypes = if (region.keyTypes.nonEmpty) Some(region.keyTypes) else None
       val (keyTypeNames, stringLengths) = pickMixedKeyTypes(numKeys, allowedKeyTypes)
       
-      // Calculate average bytes per key column for memory estimation
-      val avgBytesPerKey = keyTypeNames.zip(stringLengths).map { case (typeName, stringLen) =>
+      // Calculate bytes per row (sum of bytes for all key columns)
+      val bytesPerRow = keyTypeNames.zip(stringLengths).map { case (typeName, stringLen) =>
         val keyTypeSpec = keyTypes.find(_.typeName == typeName).get
         stringLen.getOrElse(keyTypeSpec.avgBytes)
-      }.sum.toDouble / numKeys
+      }.sum.toDouble
       
       // Calculate distinct keys
       val leftDistinct = math.max(10, (leftRows * leftCard).toLong)
@@ -585,7 +609,6 @@ def generateTestsFromRefinementConfig(config: RefinementConfig, startId: Int): S
       val keyOverlap = pickKeyOverlapPct()
       
       // Calculate memory
-      val bytesPerRow = avgBytesPerKey * numKeys
       val leftMem = (leftRows * bytesPerRow) / (1024.0 * 1024.0)
       val rightMem = (rightRows * bytesPerRow) / (1024.0 * 1024.0)
       
@@ -682,10 +705,27 @@ def generateTestData(config: TestConfig): Unit = {
     
     // Generate left table
     val leftTable = dbgen.addTable("left", leftDDL, config.leftRows)
+    
+    // Build list of key column names
+    val leftKeyNames = (1 to config.numKeyColumns).map(i => s"key$i").toSeq
+    
+    // Use CorrelatedKeyGroup for multi-key columns to prevent cartesian product explosion
+    // For single keys, this still works correctly and ensures consistent behavior
+    if (config.numKeyColumns > 1) {
+      // Multi-key: Use CorrelatedKeyGroup so same seed generates correlated values across columns
+      // This ensures distinct combinations = distinct keys (seed range), not cartesian product
+      leftTable.configureKeyGroup(leftKeyNames, CorrelatedKeyGroup(1, leftMinSeed, leftMaxSeed), leftDist)
+    } else {
+      // Single key: Set seed range and mapping individually (works the same, but simpler)
+      leftTable(leftKeyNames.head).setSeedRange(leftMinSeed, leftMaxSeed)
+      leftTable(leftKeyNames.head).setSeedMapping(leftDist)
+    }
+    
+    // Set string lengths for all key columns
+    // Note: For single keys, seed range/mapping already set above.
+    //       For multi-keys, CorrelatedKeyGroup handles seed range, but we can still set per-column properties like string length.
     for (i <- 0 until config.numKeyColumns) {
       val colName = s"key${i+1}"
-      leftTable(colName).setSeedRange(leftMinSeed, leftMaxSeed)
-      leftTable(colName).setSeedMapping(leftDist)
       
       // Set string length if this column is a string
       config.stringLengths(i).foreach { len =>
@@ -695,14 +735,24 @@ def generateTestData(config: TestConfig): Unit = {
     val leftDf = leftTable.toDF(spark)
     leftDf.repartition(1).write.mode("overwrite").parquet(s"$baseDir/${config.name}/left")
     
-    // Generate right table
+    // Generate right table (same approach as left)
     val rightTable = dbgen.addTable("right", rightDDL, config.rightRows)
+    val rightKeyNames = (1 to config.numKeyColumns).map(i => s"key$i").toSeq
+    
+    if (config.numKeyColumns > 1) {
+      // Multi-key: Use CorrelatedKeyGroup
+      rightTable.configureKeyGroup(rightKeyNames, CorrelatedKeyGroup(1, rightMinSeed, rightMaxSeed), rightDist)
+    } else {
+      // Single key: Set seed range and mapping individually
+      rightTable(rightKeyNames.head).setSeedRange(rightMinSeed, rightMaxSeed)
+      rightTable(rightKeyNames.head).setSeedMapping(rightDist)
+    }
+    
+    // Set string lengths for all key columns
+    // Note: For single keys, seed range/mapping already set above.
+    //       For multi-keys, CorrelatedKeyGroup handles seed range, but we can still set per-column properties like string length.
     for (i <- 0 until config.numKeyColumns) {
       val colName = s"key${i+1}"
-      rightTable(colName).setSeedRange(rightMinSeed, rightMaxSeed)
-      rightTable(colName).setSeedMapping(rightDist)
-      
-      // Set string length if this column is a string (same as left)
       config.stringLengths(i).foreach { len =>
         rightTable(colName).setLength(len)
       }
@@ -721,101 +771,252 @@ def generateTestData(config: TestConfig): Unit = {
 // Statistics Collection
 // ============================================================================
 
-def collectTableStats(config: TestConfig, side: String): TableStats = {
-  val (rows, distinctKeys, dist) = side match {
-    case "left" => (config.leftRows, config.leftDistinctKeys, config.leftDistribution)
-    case "right" => (config.rightRows, config.rightDistinctKeys, config.rightDistribution)
+def collectTableStats(config: TestConfig, side: String, summary: TableCountSummary): TableStats = {
+  val dist = side match {
+    case "left" => config.leftDistribution
+    case "right" => config.rightDistribution
+    case other => throw new IllegalArgumentException(s"Unknown side for stats collection: $other")
   }
-  
-  val cardPct = distinctKeys.toDouble / rows.toDouble
-  val memMB = if (side == "left") config.leftMemoryMB else config.rightMemoryMB
-  
-  // For mixed keys, compute total bytes across all columns
-  val totalKeyBytes = config.keyTypes.zip(config.stringLengths).map { case (typeName, stringLen) =>
-    val keyTypeSpec = keyTypes.find(_.typeName == typeName).get
-    stringLen.getOrElse(keyTypeSpec.avgBytes)
+  val rowCount = summary.rows
+  val distinctKeys = summary.distinctKeys
+  val cardinalityPct =
+    if (rowCount == 0) 0.0 else distinctKeys.toDouble / rowCount.toDouble
+
+  val avgKeyBytesValue = config.keyTypes.zipWithIndex.map { case (typeName, idx) =>
+    val spec = keyTypeSpecMap.getOrElse(typeName, KeyTypeSpec(typeName, 0, false))
+    if (spec.isVariableWidth) {
+      val measured = summary.avgStringLengths.getOrElse(idx, 0.0)
+      val fallbackLength = config.stringLengths(idx).map(_.toDouble).getOrElse(spec.avgBytes.toDouble)
+      if (measured > 0.0) measured else fallbackLength
+    } else {
+      spec.avgBytes.toDouble
+    }
   }.sum
-  
-  // Create a string representation of key types (e.g., "int,string,long" or just "int" for single column)
+
+  val avgKeyBytes = math.max(1, math.round(avgKeyBytesValue).toInt)
+  val memoryMB =
+    if (rowCount == 0) 0.0 else (rowCount.toDouble * avgKeyBytesValue) / (1024.0 * 1024.0)
+
   val keyTypeStr = if (config.keyTypes.size == 1) {
     config.keyTypes.head
   } else {
     config.keyTypes.mkString(",")
   }
-  
+
   TableStats(
-    rows = rows,
+    rows = rowCount,
     distinctKeys = distinctKeys,
-    cardinalityPct = cardPct,
+    cardinalityPct = cardinalityPct,
     keyType = keyTypeStr,
-    avgKeyBytes = totalKeyBytes,
-    memoryMB = memMB,
+    avgKeyBytes = avgKeyBytes,
+    memoryMB = memoryMB,
     distribution = dist
   )
+}
+
+// ============================================================================
+// Key Count Statistics Calculation
+// ============================================================================
+
+def calculateKeyCountStats(config: TestConfig): (KeyCountStats, KeyCountStats, Long, TableCountSummary, TableCountSummary) = {
+  /**
+   * Calculate key count statistics for both left and right tables.
+   * OPTIMIZED: Only 1 query per side (2 total) + 1 for join output = 3 queries total
+   * Returns (leftStats, rightStats, outputRows, leftSummary, rightSummary)
+   */
+  
+  val leftPath = s"$baseDir/${config.name}/left"
+  val rightPath = s"$baseDir/${config.name}/right"
+  
+  val leftDf = spark.read.parquet(leftPath)
+  val rightDf = spark.read.parquet(rightPath)
+  val stringKeyIndices = config.keyTypes.zipWithIndex.collect {
+    case (typeName, idx) if keyTypeSpecMap.get(typeName).exists(_.isVariableWidth) => idx
+  }
+  
+  // Build key column references
+  val leftKeyCols = (1 to config.numKeyColumns).map(i => col(s"key$i"))
+  val rightKeyCols = (1 to config.numKeyColumns).map(i => col(s"key$i"))
+  
+  // Helper functions
+  def getPercentile(row: org.apache.spark.sql.Row, colName: String): Double = {
+    val value = row.get(row.fieldIndex(colName))
+    value match {
+      case l: Long => l.toDouble
+      case d: Double => d
+      case null => 0.0
+      case _ => Option(value).map(_.toString.toDouble).getOrElse(0.0)
+    }
+  }
+  
+  def extractLong(row: org.apache.spark.sql.Row, colName: String): Long = {
+    val idx = row.fieldIndex(colName)
+    if (row.isNullAt(idx)) {
+      0L
+    } else {
+      row.get(idx) match {
+        case l: Long => l
+        case i: Int => i.toLong
+        case s: Short => s.toLong
+        case b: Byte => b.toLong
+        case d: Double => d.toLong
+        case f: Float => f.toLong
+        case bd: java.math.BigDecimal => bd.longValue()
+        case bd: BigDecimal => bd.longValue()
+        case value => Try(value.toString.toLong).getOrElse(0L)
+      }
+    }
+  }
+
+  def extractDouble(row: org.apache.spark.sql.Row, colName: String): Double = {
+    val idx = row.fieldIndex(colName)
+    if (row.isNullAt(idx)) 0.0
+    else {
+      row.get(idx) match {
+        case d: Double => d
+        case f: Float => f.toDouble
+        case l: Long => l.toDouble
+        case i: Int => i.toDouble
+        case s: Short => s.toDouble
+        case b: Byte => b.toDouble
+        case bd: java.math.BigDecimal => bd.doubleValue()
+        case bd: BigDecimal => bd.doubleValue()
+        case value => Try(value.toString.toDouble).getOrElse(0.0)
+      }
+    }
+  }
+
+  // OPTIMIZATION: Single query per side that computes ALL stats at once
+  def computeAllStats(df: org.apache.spark.sql.DataFrame, keyCols: Seq[org.apache.spark.sql.Column], countColName: String, stringIndices: Seq[Int]): (org.apache.spark.sql.Row, org.apache.spark.sql.DataFrame) = {
+    // Build aggregation for groupBy: count rows per key AND avg string lengths in same pass
+    val countExpr = count("*").alias(countColName)
+    val stringExprs = stringIndices.map { idx =>
+      avg(length(col(s"key${idx + 1}"))).alias(s"avg_len_${idx}")
+    }
+    
+    // Group by keys and compute counts + string averages in single pass
+    val keyCounts = if (stringExprs.isEmpty) {
+      df.groupBy(keyCols: _*).agg(countExpr)
+    } else {
+      df.groupBy(keyCols: _*).agg(countExpr, stringExprs: _*)
+    }
+    
+    // Now aggregate the grouped results to get percentiles and summary stats
+    val percentileExprs = Seq(
+      max(col(countColName)).alias("max_count"),
+      stddev_pop(col(countColName)).alias("std_dev"),
+      expr(s"percentile_approx($countColName, 0.99)").alias("p99"),
+      expr(s"percentile_approx($countColName, 0.95)").alias("p95"),
+      expr(s"percentile_approx($countColName, 0.90)").alias("p90"),
+      expr(s"percentile_approx($countColName, 0.75)").alias("p75"),
+      expr(s"percentile_approx($countColName, 0.50)").alias("p50"),
+      sum(col(countColName)).alias("total_rows"),
+      count(lit(1)).alias("distinct_keys")
+    )
+    
+    // Also aggregate the string lengths (avg of avgs weighted by count)
+    val stringAggExprs = stringIndices.map { idx =>
+      // Weighted average: sum(avg_len * count) / sum(count)
+      (sum(col(s"avg_len_${idx}") * col(countColName)) / sum(col(countColName))).alias(s"avg_len_${idx}")
+    }
+    
+    val allExprs = percentileExprs ++ stringAggExprs
+    
+    // Execute single aggregation that computes everything
+    val statsRow = keyCounts.agg(allExprs.head, allExprs.tail: _*).collect()(0)
+    
+    (statsRow, keyCounts)
+  }
+  
+  // Execute single query per side
+  val (leftStatsRow, leftKeyCounts) = computeAllStats(leftDf, leftKeyCols, "l_count", stringKeyIndices)
+  val (rightStatsRow, rightKeyCounts) = computeAllStats(rightDf, rightKeyCols, "r_count", stringKeyIndices)
+  
+  // Extract string averages from the same row
+  val leftStringAverages = stringKeyIndices.map { idx =>
+    idx -> extractDouble(leftStatsRow, s"avg_len_${idx}")
+  }.toMap
+  
+  val rightStringAverages = stringKeyIndices.map { idx =>
+    idx -> extractDouble(rightStatsRow, s"avg_len_${idx}")
+  }.toMap
+  
+  // Build summaries
+  val leftSummary = TableCountSummary(
+    rows = extractLong(leftStatsRow, "total_rows"),
+    distinctKeys = extractLong(leftStatsRow, "distinct_keys"),
+    avgStringLengths = leftStringAverages
+  )
+  
+  val rightSummary = TableCountSummary(
+    rows = extractLong(rightStatsRow, "total_rows"),
+    distinctKeys = extractLong(rightStatsRow, "distinct_keys"),
+    avgStringLengths = rightStringAverages
+  )
+
+  // Build key count stats
+  val leftStats = KeyCountStats(
+    maxCount = Option(leftStatsRow.getAs[Long]("max_count")).getOrElse(0L),
+    stdDev = Option(leftStatsRow.getAs[Double]("std_dev")).getOrElse(0.0),
+    p99 = getPercentile(leftStatsRow, "p99"),
+    p95 = getPercentile(leftStatsRow, "p95"),
+    p90 = getPercentile(leftStatsRow, "p90"),
+    p75 = getPercentile(leftStatsRow, "p75"),
+    p50 = getPercentile(leftStatsRow, "p50")
+  )
+  
+  val rightStats = KeyCountStats(
+    maxCount = Option(rightStatsRow.getAs[Long]("max_count")).getOrElse(0L),
+    stdDev = Option(rightStatsRow.getAs[Double]("std_dev")).getOrElse(0.0),
+    p99 = getPercentile(rightStatsRow, "p99"),
+    p95 = getPercentile(rightStatsRow, "p95"),
+    p90 = getPercentile(rightStatsRow, "p90"),
+    p75 = getPercentile(rightStatsRow, "p75"),
+    p50 = getPercentile(rightStatsRow, "p50")
+  )
+  
+  // Join the two count tables and calculate output rows (3rd and final query)
+  val joinConditions = (1 to config.numKeyColumns).map(i => 
+    leftKeyCounts(s"key$i") === rightKeyCounts(s"key$i")
+  ).reduce(_ && _)
+  
+  val joinedCounts = leftKeyCounts
+    .join(rightKeyCounts, joinConditions, "inner")
+    .select((col("l_count") * col("r_count")).alias("product"))
+  
+  val outputRowsResult = joinedCounts.agg(sum(col("product")).alias("sum_product")).collect()(0)
+  val outputRows = extractLong(outputRowsResult, "sum_product")
+  
+  (leftStats, rightStats, outputRows, leftSummary, rightSummary)
 }
 
 // ============================================================================
 // Join Size Validation
 // ============================================================================
 
-def validateJoinSize(config: TestConfig): (Boolean, Long, String) = {
+def validateJoinSize(outputRows: Long): (Boolean, String) = {
   /**
    * Validates that the join won't produce too many rows or run out of memory.
-   * Returns (isValid, estimatedRows, reason)
+   * Returns (isValid, reason)
    * 
-   * Uses a quick CPU Spark count to check actual join output size.
+   * Uses the output rows calculated from calculateKeyCountStats.
    * Skips the test if output would exceed Int.MaxValue rows (gather map limit).
    */
   
-  // Save current GPU setting and disable GPU for validation
-  val rapidsEnabled = spark.conf.getOption("spark.rapids.sql.enabled").getOrElse("true")
+  val maxRows = Int.MaxValue.toLong  // 2,147,483,647
+  val warningThreshold = maxRows / 2  // Warn at 1B rows
   
-  try {
-    // Force CPU execution for validation
-    spark.conf.set("spark.rapids.sql.enabled", "false")
-    
-    val leftPath = s"$baseDir/${config.name}/left"
-    val rightPath = s"$baseDir/${config.name}/right"
-    
-    // Read the data (CPU, no GPU involved)
-    val leftDf = spark.read.parquet(leftPath)
-    val rightDf = spark.read.parquet(rightPath)
-    
-    // Build join condition
-    val keyColumns = (1 to config.numKeyColumns).map(i => s"key$i")
-    val joinCondition = keyColumns.map(col => 
-      leftDf(col) === rightDf(col)
-    ).reduce(_ && _)
-    
-    // Do the join and count (CPU only, should be fast)
-    println(s"    Validating join output size (CPU count)...")
-    val outputRows = leftDf.join(rightDf, joinCondition, "inner").count()
-    
-    // Check against limits
-    val maxRows = Int.MaxValue.toLong  // 2,147,483,647
-    val warningThreshold = maxRows / 2  // Warn at 1B rows
-    
-    if (outputRows > maxRows) {
-      val reason = f"Output too large: $outputRows%,d rows (> Int.MaxValue = $maxRows%,d)"
-      println(s"    ✗ SKIP: $reason")
-      (false, outputRows, reason)
-    } else if (outputRows > warningThreshold) {
-      val reason = f"Large output: $outputRows%,d rows (close to limit)"
-      println(s"    ⚠ WARNING: $reason (will attempt anyway)")
-      (true, outputRows, reason)
-    } else {
-      println(f"    ✓ Join output: $outputRows%,d rows (within limits)")
-      (true, outputRows, "OK")
-    }
-    
-  } catch {
-    case e: Exception =>
-      val reason = s"Validation failed: ${e.getMessage}"
-      println(s"    ✗ ERROR during validation: ${e.getMessage}")
-      (false, 0L, reason)
-  } finally {
-    // Restore original GPU setting
-    spark.conf.set("spark.rapids.sql.enabled", rapidsEnabled)
+  if (outputRows > maxRows) {
+    val reason = f"Output too large: $outputRows%,d rows (> Int.MaxValue = $maxRows%,d)"
+    println(s"    ✗ SKIP: $reason")
+    (false, reason)
+  } else if (outputRows > warningThreshold) {
+    val reason = f"Large output: $outputRows%,d rows (close to limit)"
+    println(s"    ⚠ WARNING: $reason (will attempt anyway)")
+    (true, reason)
+  } else {
+    println(f"    ✓ Join output: $outputRows%,d rows (within limits)")
+    (true, "OK")
   }
 }
 
@@ -823,10 +1024,14 @@ def validateJoinSize(config: TestConfig): (Boolean, Long, String) = {
 // Benchmark Execution
 // ============================================================================
 
-def runSingleBenchmark(config: TestConfig, strategy: String): BenchmarkResult = {
+def runSingleBenchmark(
+    config: TestConfig,
+    strategy: String,
+    leftStats: TableStats,
+    rightStats: TableStats,
+    buildKeyCountStats: Option[KeyCountStats] = None,
+    probeKeyCountStats: Option[KeyCountStats] = None): BenchmarkResult = {
   val testName = s"${config.name}_${strategy}"
-  val leftStats = collectTableStats(config, "left")
-  val rightStats = collectTableStats(config, "right")
   
   try {
     val keyIndices = (0 until config.numKeyColumns).toSeq
@@ -866,11 +1071,6 @@ def runSingleBenchmark(config: TestConfig, strategy: String): BenchmarkResult = 
       collectDetailedTimings = collectTimings
     )
     
-    // Warmup
-    val warmupConfig = benchConfig.copy(iterations = 1)
-    runBenchmark(warmupConfig, spark)
-    
-    // Actual benchmark
     val result = runBenchmark(benchConfig, spark)
     
     val timingBreakdown = result.detailedTimings.map { dt =>
@@ -899,7 +1099,9 @@ def runSingleBenchmark(config: TestConfig, strategy: String): BenchmarkResult = 
       remapBuildKeysMs = timingBreakdown.map(_._3.remapBuildKeysMs),
       remapProbeKeysMs = timingBreakdown.map(_._3.remapProbeKeysMs),
       createBuildObjectMs = timingBreakdown.map(_._3.createBuildObjectMs),
-      executeJoinMs = timingBreakdown.map(_._3.executeJoinMs)
+      executeJoinMs = timingBreakdown.map(_._3.executeJoinMs),
+      buildKeyCountStats = buildKeyCountStats,
+      probeKeyCountStats = probeKeyCountStats
     )
     
   } catch {
@@ -924,11 +1126,16 @@ def runSingleBenchmark(config: TestConfig, strategy: String): BenchmarkResult = 
   }
 }
 
-def runBothStrategiesForConfig(config: TestConfig): Seq[BenchmarkResult] = {
+def runBothStrategiesForConfig(
+    config: TestConfig,
+    leftStats: TableStats,
+    rightStats: TableStats,
+    buildKeyCountStats: Option[KeyCountStats] = None,
+    probeKeyCountStats: Option[KeyCountStats] = None): Seq[BenchmarkResult] = {
   val strategies = Seq("hash_object", "sort_object_post")
   val results = strategies.map { strategy =>
     println(s"  Running: ${strategy}")
-    runSingleBenchmark(config, strategy)
+    runSingleBenchmark(config, strategy, leftStats, rightStats, buildKeyCountStats, probeKeyCountStats)
   }
   results
 }
@@ -977,8 +1184,15 @@ val timingColumns = Seq(
   "ExecuteJoinMs"
 )
 
+val keyCountColumns = Seq(
+  "BuildMaxKeyCount", "BuildKeyCountStdDev", "BuildKeyCountP99", "BuildKeyCountP95",
+  "BuildKeyCountP90", "BuildKeyCountP75", "BuildKeyCountP50",
+  "ProbeMaxKeyCount", "ProbeKeyCountStdDev", "ProbeKeyCountP99", "ProbeKeyCountP95",
+  "ProbeKeyCountP90", "ProbeKeyCountP75", "ProbeKeyCountP50"
+)
+
 val legacyHeader = baseColumns.mkString("\t")
-val expectedHeader = (baseColumns ++ timingColumns).mkString("\t")
+val expectedHeader = (baseColumns ++ timingColumns ++ keyCountColumns).mkString("\t")
 
 def upgradeLegacyTSV(path: String): Unit = {
   val file = new File(path)
@@ -1019,7 +1233,7 @@ def upgradeLegacyTSV(path: String): Unit = {
       iter.next() // skip old header
     }
     writer.println(expectedHeader)
-    val extra = "\t" + Seq.fill(timingColumns.length)("").mkString("\t")
+    val extra = "\t" + Seq.fill(timingColumns.length + keyCountColumns.length)("").mkString("\t")
     while (iter.hasNext) {
       val line = iter.next()
       writer.println(line + extra)
@@ -1032,7 +1246,7 @@ def upgradeLegacyTSV(path: String): Unit = {
   if (!tempFile.renameTo(file)) {
     Files.move(tempFile.toPath, file.toPath, StandardCopyOption.REPLACE_EXISTING)
   }
-  println(s"Upgraded TSV header to include timing columns: $path")
+  println(s"Upgraded TSV header to include timing and key count columns: $path")
 }
 
 def initializeTSV(path: String): Unit = {
@@ -1109,6 +1323,20 @@ def formatOptionalDouble(value: Option[Double]): String = {
   value.map(v => f"$v%.4f").getOrElse("")
 }
 
+def formatKeyCountStats(stats: Option[KeyCountStats]): Seq[String] = {
+  stats.map { s =>
+    Seq(
+      s.maxCount.toString,
+      f"${s.stdDev}%.6f",
+      f"${s.p99}%.6f",
+      f"${s.p95}%.6f",
+      f"${s.p90}%.6f",
+      f"${s.p75}%.6f",
+      f"${s.p50}%.6f"
+    )
+  }.getOrElse(Seq.fill(7)(""))
+}
+
 def appendResultToTSV(path: String, result: BenchmarkResult): Unit = {
   val file = new File(path)
   
@@ -1142,7 +1370,7 @@ def appendResultToTSV(path: String, result: BenchmarkResult): Unit = {
   
   val writer = new PrintWriter(new java.io.FileWriter(path, true))
   
-  writer.println(Seq(
+  val line = (Seq(
     result.testName,
     result.status,
     result.joinStrategy,
@@ -1180,8 +1408,9 @@ def appendResultToTSV(path: String, result: BenchmarkResult): Unit = {
     formatOptionalDouble(result.remapProbeKeysMs),
     formatOptionalDouble(result.createBuildObjectMs),
     formatOptionalDouble(result.executeJoinMs)
-  ).mkString("\t"))
+  ) ++ formatKeyCountStats(result.buildKeyCountStats) ++ formatKeyCountStats(result.probeKeyCountStats)).mkString("\t")
   
+  writer.println(line)
   writer.close()
 }
 
@@ -1199,15 +1428,42 @@ def runConfigWithCleanup(config: TestConfig, configNum: Int, totalConfigs: Int):
   generateTestData(config)
   val genTimeMs = (System.nanoTime() - genStartTime) / 1e6
   println(f"  Data generation took: ${genTimeMs}%.2f ms")
+
+  // Calculate key count statistics and output rows (optimized approach - single query)
+  println(s"  Calculating key count statistics and output rows...")
+  val (leftKeyStats, rightKeyStats, calculatedOutputRows, leftSummary, rightSummary) = try {
+    calculateKeyCountStats(config)
+  } catch {
+    case e: Exception =>
+      println(s"    ERROR: Failed to calculate key count stats: ${e.getMessage}")
+      e.printStackTrace()
+      (
+        KeyCountStats(0L, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        KeyCountStats(0L, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        0L,
+        TableCountSummary(config.leftRows, config.leftDistinctKeys, Map.empty),
+        TableCountSummary(config.rightRows, config.rightDistinctKeys, Map.empty)
+      )
+  }
+  
+  println(s"  Collecting measured table statistics...")
+  val leftStats = collectTableStats(config, "left", leftSummary)
+  val rightStats = collectTableStats(config, "right", rightSummary)
+  
+  // Determine build and probe sides (smaller side is build)
+  val (buildKeyStats, probeKeyStats) =
+    if (leftSummary.rows <= rightSummary.rows) {
+      (Some(leftKeyStats), Some(rightKeyStats))
+    } else {
+      (Some(rightKeyStats), Some(leftKeyStats))
+    }
   
   // Validate join size before running expensive GPU benchmarks
-  val (isValid, estimatedRows, reason) = validateJoinSize(config)
+  val (isValid, reason) = validateJoinSize(calculatedOutputRows)
   
   val results = if (!isValid) {
     // Skip benchmark, return FAILED results for both strategies
     println(s"  Skipping benchmark due to validation failure: $reason")
-    val leftStats = collectTableStats(config, "left")
-    val rightStats = collectTableStats(config, "right")
     
     Seq("hash_object", "sort_object_post").map { strategy =>
       BenchmarkResult(
@@ -1221,17 +1477,19 @@ def runConfigWithCleanup(config: TestConfig, configNum: Int, totalConfigs: Int):
         medianTimeMs = 0.0,
         avgTimeMs = 0.0,
         stdDevMs = 0.0,
-        outputRows = estimatedRows,
+        outputRows = calculatedOutputRows,
         actualBuildSide = "UNKNOWN",
         iterations = 0,
-        errorMessage = s"SKIPPED: $reason"
+        errorMessage = s"SKIPPED: $reason",
+        buildKeyCountStats = buildKeyStats,
+        probeKeyCountStats = probeKeyStats
       )
     }
   } else {
     // Run both strategies
     println(s"  Running benchmarks...")
     val benchStartTime = System.nanoTime()
-    val benchResults = runBothStrategiesForConfig(config)
+    val benchResults = runBothStrategiesForConfig(config, leftStats, rightStats, buildKeyStats, probeKeyStats)
     val benchTimeMs = (System.nanoTime() - benchStartTime) / 1e6
     println(f"  Benchmark time: ${benchTimeMs}%.2f ms")
     benchResults
@@ -1289,112 +1547,117 @@ def runConfigWithCleanup(config: TestConfig, configNum: Int, totalConfigs: Int):
 // Main Execution
 // ============================================================================
 
-println("="*80)
-println("SIMPLIFIED HASH vs SORT BENCHMARK")
-println("="*80)
-println()
-println("Configuration:")
-println("  - Only HashObject vs SortObjectPost")
-println("  - Only Inner joins")
-println("  - Swap always ON, remapping always OFF, distinct join always OFF")
-println("  - Supports: Uniform, Zipf, Gaussian distributions")
-println(s"  - Output TSV: $outputTsvPath")
-println()
+def runMain(): Unit = {
+  println("="*80)
+  println("SIMPLIFIED HASH vs SORT BENCHMARK")
+  println("="*80)
+  println()
+  println("Configuration:")
+  println("  - Only HashObject vs SortObjectPost")
+  println("  - Only Inner joins")
+  println("  - Swap always ON, remapping always OFF, distinct join always OFF")
+  println("  - Supports: Uniform, Zipf, Gaussian distributions")
+  println(s"  - Output TSV: $outputTsvPath")
+  println()
 
-// Initialize TSV output (or append if exists)
-initializeTSV(outputTsvPath)
+  // Initialize TSV output (or append if exists)
+  initializeTSV(outputTsvPath)
 
-// Count existing tests to determine starting ID and random seed
-val existingFile = new File(outputTsvPath)
-val existingCount = if (existingFile.exists()) {
-  scala.io.Source.fromFile(existingFile).getLines().size - 1  // -1 for header
-} else {
-  0
-}
-val startId = existingCount / 2  // Divide by 2 since we have 2 results per config
-
-// Reinitialize random generator with seed based on startId
-// This ensures each iteration generates DIFFERENT tests
-// Run 1 (startId=0):  Random(42)
-// Run 2 (startId=20): Random(62)
-// Run 3 (startId=40): Random(82)
-random = new Random(42 + startId)
-println(s"Initializing random generator with seed ${42 + startId} (startId=$startId)")
-println()
-
-// Check for refinement config
-val refinementConfig = loadRefinementConfig()
-
-val configs = refinementConfig match {
-  case Some(refConfig) =>
-    // Generate tests from refinement config
-    generateTestsFromRefinementConfig(refConfig, startId)
-    
-  case None =>
-    // Generate random tests with weighting toward low cardinality
-    println(s"No refinement config found, generating $numTests random tests")
-    println("  Weighted toward low cardinality (<1%, <2%, <5%) where sort typically wins")
-    println()
-    (0 until numTests).map(i => generateRandomTestConfig(startId + i, weightLowCardinality = true))
-}
-
-println(s"Generated ${configs.size} test configurations")
-println(s"Processing configs one at a time (generate → test → cleanup)")
-println()
-
-// Process configs one at a time
-val startTime = System.nanoTime()
-val allResults = configs.zipWithIndex.flatMap { case (config, idx) =>
-  val results = runConfigWithCleanup(config, idx + 1, configs.size)
-  
-  // Print estimated time remaining
-  val elapsedSec = (System.nanoTime() - startTime) / 1e9
-  val avgSecPerConfig = elapsedSec / (idx + 1)
-  val remainingConfigs = configs.size - (idx + 1)
-  val estimatedRemainingSec = avgSecPerConfig * remainingConfigs
-  val estimatedRemainingMin = estimatedRemainingSec / 60
-  
-  if (remainingConfigs > 0) {
-    println(f"  Estimated time remaining: ${estimatedRemainingMin}%.1f minutes ($remainingConfigs configs left)")
+  // Count existing tests to determine starting ID and random seed
+  val existingFile = new File(outputTsvPath)
+  val existingCount = if (existingFile.exists()) {
+    scala.io.Source.fromFile(existingFile).getLines().size - 1  // -1 for header
+  } else {
+    0
   }
-  
-  results
-}
+  val startId = existingCount / 2  // Divide by 2 since we have 2 results per config
 
-val elapsedSec = (System.nanoTime() - startTime) / 1e9
-val elapsedMin = elapsedSec / 60
+  // Reinitialize random generator with seed based on startId
+  // This ensures each iteration generates DIFFERENT tests
+  // Run 1 (startId=0):  Random(42)
+  // Run 2 (startId=20): Random(62)
+  // Run 3 (startId=40): Random(82)
+  random = new Random(42 + startId)
+  println(s"Initializing random generator with seed ${42 + startId} (startId=$startId)")
+  println()
 
-println()
-println("="*80)
-println("BENCHMARK COMPLETE")
-println("="*80)
-println(s"Total results: ${allResults.size}")
-val successCount = allResults.count(_.status == "SUCCESS")
-val failedCount = allResults.count(_.status == "FAILED")
-val skippedCount = allResults.count(_.errorMessage.startsWith("SKIPPED:"))
-val actualFailedCount = failedCount - skippedCount
+  // Check for refinement config
+  val refinementConfig = loadRefinementConfig()
 
-println(s"  Success: $successCount")
-if (skippedCount > 0) {
-  println(s"  Failed: $actualFailedCount")
-  println(s"  Skipped: $skippedCount (join output too large)")
-} else {
-  println(s"  Failed: $failedCount")
-}
-println(f"  Total time: ${elapsedMin}%.2f minutes")
-println()
+  val configs = refinementConfig match {
+    case Some(refConfig) =>
+      // Generate tests from refinement config
+      generateTestsFromRefinementConfig(refConfig, startId)
+      
+    case None =>
+      // Generate random tests with weighting toward low cardinality
+      println(s"No refinement config found, generating $numTests random tests")
+      println("  Weighted toward low cardinality (<1%, <2%, <5%) where sort typically wins")
+      println()
+      (0 until numTests).map(i => generateRandomTestConfig(startId + i, weightLowCardinality = true))
+  }
 
-if (skippedCount > 0) {
-  println("Note: Some tests were skipped because the join output would exceed Int.MaxValue rows.")
-  println("      This is expected with very low cardinality + large data sizes.")
-  println("      The Python analysis will filter these out automatically.")
+  println(s"Generated ${configs.size} test configurations")
+  println(s"Processing configs one at a time (generate → test → cleanup)")
+  println()
+
+  // Process configs one at a time
+  val startTime = System.nanoTime()
+  val allResults = configs.zipWithIndex.flatMap { case (config, idx) =>
+    val results = runConfigWithCleanup(config, idx + 1, configs.size)
+    
+    // Print estimated time remaining
+    val elapsedSec = (System.nanoTime() - startTime) / 1e9
+    val avgSecPerConfig = elapsedSec / (idx + 1)
+    val remainingConfigs = configs.size - (idx + 1)
+    val estimatedRemainingSec = avgSecPerConfig * remainingConfigs
+    val estimatedRemainingMin = estimatedRemainingSec / 60
+    
+    if (remainingConfigs > 0) {
+      println(f"  Estimated time remaining: ${estimatedRemainingMin}%.1f minutes ($remainingConfigs configs left)")
+    }
+    
+    results
+  }
+
+  val elapsedSec = (System.nanoTime() - startTime) / 1e9
+  val elapsedMin = elapsedSec / 60
+
+  println()
+  println("="*80)
+  println("BENCHMARK COMPLETE")
+  println("="*80)
+  println(s"Total results: ${allResults.size}")
+  val successCount = allResults.count(_.status == "SUCCESS")
+  val failedCount = allResults.count(_.status == "FAILED")
+  val skippedCount = allResults.count(_.errorMessage.startsWith("SKIPPED:"))
+  val actualFailedCount = failedCount - skippedCount
+
+  println(s"  Success: $successCount")
+  if (skippedCount > 0) {
+    println(s"  Failed: $actualFailedCount")
+    println(s"  Skipped: $skippedCount (join output too large)")
+  } else {
+    println(s"  Failed: $failedCount")
+  }
+  println(f"  Total time: ${elapsedMin}%.2f minutes")
+  println()
+
+  if (skippedCount > 0) {
+    println("Note: Some tests were skipped because the join output would exceed Int.MaxValue rows.")
+    println("      This is expected with very low cardinality + large data sizes.")
+    println("      The Python analysis will filter these out automatically.")
+    println()
+  }
+
+  println(s"Results written to: $outputTsvPath")
+  println()
+  println("Next step:")
+  println("  Run: python iterative_model_trainer.py")
+  println("  This will analyze results, train a model, and generate refinement config if needed")
   println()
 }
 
-println(s"Results written to: $outputTsvPath")
-println()
-println("Next step:")
-println("  Run: python iterative_model_trainer.py")
-println("  This will analyze results, train a model, and generate refinement config if needed")
-println()
+// Execute main function after all definitions are processed
+runMain()
 

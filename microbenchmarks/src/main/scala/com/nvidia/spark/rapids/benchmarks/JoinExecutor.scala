@@ -1302,6 +1302,92 @@ private class FullOuterHashDirectBuildHolder(
 }
 
 /**
+ * Build holder for left semi joins using Table direct APIs (no join object).
+ * Uses Table.leftSemiJoinGatherMap().
+ * Cannot cache join objects.
+ */
+private class LeftSemiHashDirectBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  tablesWereSwapped: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder with RemappingSupport {
+  
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      initializeRemapping(buildKeys, optimizations)
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+    val actualProbeKeys = getActualProbeKeys(probeKeys, buildKeys, optimizations)
+    
+    try {
+      Array(actualBuildKeys.leftSemiJoinGatherMap(actualProbeKeys, compareNullsEqual))
+    } finally {
+      actualBuildKeys.close()
+      actualProbeKeys.close()
+    }
+  }
+  
+  def close(): Unit = {
+    closeRemappingResources()
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
+ * Build holder for left anti joins using Table direct APIs (no join object).
+ * Uses Table.leftAntiJoinGatherMap().
+ * Cannot cache join objects.
+ */
+private class LeftAntiHashDirectBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  compareNullsEqual: Boolean,
+  tablesWereSwapped: Boolean,
+  optimizations: JoinOptimizations
+) extends NonConditionalBuildHolder with RemappingSupport {
+  
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      initializeRemapping(buildKeys, optimizations)
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+    val actualProbeKeys = getActualProbeKeys(probeKeys, buildKeys, optimizations)
+    
+    try {
+      Array(actualBuildKeys.leftAntiJoinGatherMap(actualProbeKeys, compareNullsEqual))
+    } finally {
+      actualBuildKeys.close()
+      actualProbeKeys.close()
+    }
+  }
+  
+  def close(): Unit = {
+    closeRemappingResources()
+    buildKeys.close()
+    buildTable.close()
+  }
+}
+
+/**
  * Post-processing build holder for all join types.
  * Does inner join first, then applies post-processing (makeLeftOuter, makeSemi, etc.).
  * Supports both hash and sort-merge strategies with distinct join optimization.
@@ -1686,6 +1772,210 @@ private class MixedInnerHashBuildHolder(
 }
 
 /**
+ * Mixed conditional build holder for left outer joins using HashDirectStrategy.
+ * Uses Table.mixedLeftJoinGatherMaps() (keys for matching + AST for filtering).
+ */
+private class MixedLeftOuterHashBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  val astExpression: CompiledExpression,
+  compareNullsEqual: Boolean,
+  optimizations: JoinOptimizations
+) extends MixedConditionalBuildHolder with RemappingSupport {
+  
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      initializeRemapping(buildKeys, optimizations)
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table, probeTable: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+    val actualProbeKeys = getActualProbeKeys(probeKeys, buildKeys, optimizations)
+    
+    try {
+      val nullEq = if (compareNullsEqual) NullEquality.EQUAL else NullEquality.UNEQUAL
+      Table.mixedLeftJoinGatherMaps(
+        /* leftKeys  = */ actualBuildKeys,
+        /* rightKeys = */ actualProbeKeys,
+        /* leftCond  = */ buildTable,
+        /* rightCond = */ probeTable,
+        /* condition = */ astExpression,
+        /* nullEq    = */ nullEq)
+    } finally {
+      actualBuildKeys.close()
+      actualProbeKeys.close()
+    }
+  }
+  
+  def close(): Unit = {
+    closeRemappingResources()
+    buildKeys.close()
+    buildTable.close()
+    // astExpression is a reference, not owned by holder
+  }
+}
+
+/**
+ * Mixed conditional build holder for right outer joins using HashDirectStrategy.
+ * Right outer join is implemented as left outer join with swapped sides.
+ * Uses Table.mixedLeftJoinGatherMaps() (keys for matching + AST for filtering).
+ */
+private class MixedRightOuterHashBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  val astExpression: CompiledExpression,
+  compareNullsEqual: Boolean,
+  optimizations: JoinOptimizations
+) extends MixedConditionalBuildHolder with RemappingSupport {
+  
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      initializeRemapping(buildKeys, optimizations)
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table, probeTable: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+    val actualProbeKeys = getActualProbeKeys(probeKeys, buildKeys, optimizations)
+    
+    try {
+      val nullEq = if (compareNullsEqual) NullEquality.EQUAL else NullEquality.UNEQUAL
+      // Right outer join is implemented as left outer join with swapped sides
+      val result = Table.mixedLeftJoinGatherMaps(
+        /* leftKeys  = */ actualBuildKeys,
+        /* rightKeys = */ actualProbeKeys,
+        /* leftCond  = */ buildTable,
+        /* rightCond = */ probeTable,
+        /* condition = */ astExpression,
+        /* nullEq    = */ nullEq)
+      // Swap the gather maps to convert left outer to right outer
+      Array(result(1), result(0))
+    } finally {
+      actualBuildKeys.close()
+      actualProbeKeys.close()
+    }
+  }
+  
+  def close(): Unit = {
+    closeRemappingResources()
+    buildKeys.close()
+    buildTable.close()
+    // astExpression is a reference, not owned by holder
+  }
+}
+
+/**
+ * Mixed conditional build holder for left semi joins using HashDirectStrategy.
+ * Uses Table.mixedLeftSemiJoinGatherMap() (keys for matching + AST for filtering).
+ */
+private class MixedLeftSemiHashBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  val astExpression: CompiledExpression,
+  compareNullsEqual: Boolean,
+  optimizations: JoinOptimizations
+) extends MixedConditionalBuildHolder with RemappingSupport {
+  
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      initializeRemapping(buildKeys, optimizations)
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table, probeTable: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+    val actualProbeKeys = getActualProbeKeys(probeKeys, buildKeys, optimizations)
+    
+    try {
+      val nullEq = if (compareNullsEqual) NullEquality.EQUAL else NullEquality.UNEQUAL
+      Array(Table.mixedLeftSemiJoinGatherMap(
+        /* leftKeys  = */ actualBuildKeys,
+        /* rightKeys = */ actualProbeKeys,
+        /* leftCond  = */ buildTable,
+        /* rightCond = */ probeTable,
+        /* condition = */ astExpression,
+        /* nullEq    = */ nullEq))
+    } finally {
+      actualBuildKeys.close()
+      actualProbeKeys.close()
+    }
+  }
+  
+  def close(): Unit = {
+    closeRemappingResources()
+    buildKeys.close()
+    buildTable.close()
+    // astExpression is a reference, not owned by holder
+  }
+}
+
+/**
+ * Mixed conditional build holder for left anti joins using HashDirectStrategy.
+ * Uses Table.mixedLeftAntiJoinGatherMap() (keys for matching + AST for filtering).
+ */
+private class MixedLeftAntiHashBuildHolder(
+  val buildTable: Table,
+  val buildKeys: Table,
+  val astExpression: CompiledExpression,
+  compareNullsEqual: Boolean,
+  optimizations: JoinOptimizations
+) extends MixedConditionalBuildHolder with RemappingSupport {
+  
+  private var initialized = false
+  
+  private def ensureInitialized(): Unit = {
+    if (!initialized) {
+      initializeRemapping(buildKeys, optimizations)
+      initialized = true
+    }
+  }
+  
+  def join(probeKeys: Table, probeTable: Table): Array[GatherMap] = {
+    ensureInitialized()
+    
+    val actualBuildKeys = getActualBuildKeys(buildKeys, optimizations)
+    val actualProbeKeys = getActualProbeKeys(probeKeys, buildKeys, optimizations)
+    
+    try {
+      val nullEq = if (compareNullsEqual) NullEquality.EQUAL else NullEquality.UNEQUAL
+      Array(Table.mixedLeftAntiJoinGatherMap(
+        /* leftKeys  = */ actualBuildKeys,
+        /* rightKeys = */ actualProbeKeys,
+        /* leftCond  = */ buildTable,
+        /* rightCond = */ probeTable,
+        /* condition = */ astExpression,
+        /* nullEq    = */ nullEq))
+    } finally {
+      actualBuildKeys.close()
+      actualProbeKeys.close()
+    }
+  }
+  
+  def close(): Unit = {
+    closeRemappingResources()
+    buildKeys.close()
+    buildTable.close()
+    // astExpression is a reference, not owned by holder
+  }
+}
+
+/**
  * Mixed conditional build holder using post-processing approach.
  * Does inner join first, then applies AST filter, then applies join type post-processing.
  * Supports all join types with distinct optimization.
@@ -1936,6 +2226,27 @@ private[benchmarks] class JoinExecutor(
             new MixedInnerHashBuildHolder(buildTable, buildKeys, ast, compareNullsEqual,
               optimizations)
           
+          case (LeftOuterJoin, HashDirectStrategy) =>
+            new MixedLeftOuterHashBuildHolder(buildTable, buildKeys, ast, compareNullsEqual,
+              optimizations)
+          
+          case (RightOuterJoin, HashDirectStrategy) =>
+            new MixedRightOuterHashBuildHolder(buildTable, buildKeys, ast, compareNullsEqual,
+              optimizations)
+          
+          case (LeftSemiJoin, HashDirectStrategy) =>
+            new MixedLeftSemiHashBuildHolder(buildTable, buildKeys, ast, compareNullsEqual,
+              optimizations)
+          
+          case (LeftAntiJoin, HashDirectStrategy) =>
+            new MixedLeftAntiHashBuildHolder(buildTable, buildKeys, ast, compareNullsEqual,
+              optimizations)
+          
+          case (FullOuterJoin, HashDirectStrategy) =>
+            throw new UnsupportedOperationException(
+              s"HashDirectStrategy with AST does not support FullOuterJoin. " +
+              s"Use HashDirectWithPostStrategy for full outer joins with AST filtering.")
+          
           case (_, HashObjectWithPostStrategy | SortObjectWithPostStrategy |
                    HashDirectWithPostStrategy | SortDirectWithPostStrategy) =>
             // All join types supported with post-processing (inner join + AST filter)
@@ -1947,7 +2258,8 @@ private[benchmarks] class JoinExecutor(
             throw new IllegalArgumentException(
               s"Mixed conditional joins not supported for: $joinType with $strategy. " +
               s"HashObjectStrategy does not support mixed joins. " +
-              s"Use HashDirectStrategy, HashObjectWithPostStrategy, SortObjectWithPostStrategy, " +
+              s"Use HashDirectStrategy (for Inner/LeftOuter/RightOuter/LeftSemi/LeftAnti), " +
+              s"HashObjectWithPostStrategy, SortObjectWithPostStrategy, " +
               s"HashDirectWithPostStrategy, or SortDirectWithPostStrategy for mixed joins.")
         }
         Right(holder)
@@ -1997,10 +2309,13 @@ private[benchmarks] class JoinExecutor(
             new FullOuterHashDirectBuildHolder(buildTable, buildKeys, compareNullsEqual,
               tablesWereSwapped, optimizations)
           
-          case (LeftSemiJoin | LeftAntiJoin, HashDirectStrategy) =>
-            throw new UnsupportedOperationException(
-              s"HashDirectStrategy does not support $joinType. " +
-              s"Use HashDirectWithPostStrategy for semi/anti joins.")
+          case (LeftSemiJoin, HashDirectStrategy) =>
+            new LeftSemiHashDirectBuildHolder(buildTable, buildKeys, compareNullsEqual,
+              tablesWereSwapped, optimizations)
+          
+          case (LeftAntiJoin, HashDirectStrategy) =>
+            new LeftAntiHashDirectBuildHolder(buildTable, buildKeys, compareNullsEqual,
+              tablesWereSwapped, optimizations)
           
           case (_, HashDirectWithPostStrategy | SortDirectWithPostStrategy) =>
             // All join types supported with post-processing

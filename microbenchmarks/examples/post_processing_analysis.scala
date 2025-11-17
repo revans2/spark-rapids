@@ -50,8 +50,10 @@ import com.nvidia.spark.rapids.benchmarks.JoinBenchmarkRunner._
 import org.apache.spark.sql.tests.datagen._
 import org.apache.spark.sql.SparkSession
 import ai.rapids.cudf.ast._
+import java.io.{File, PrintWriter}
 
 val baseDir = "/data/tmp/post_processing_benchmark"
+val outputTsvPath = s"$baseDir/results.tsv"
 
 // Test configuration for AST conditional filtering
 case class AstTestConfig(
@@ -411,7 +413,42 @@ val astTestConfigs = Seq(
   AstTestConfig("AST_VCOMPLEX_25pct_5M_hash", 5000000, 0.50, "very_complex", 0.25, "hash"),
 )
 
-val joinTypeTestConfigs = Seq(
+// ========== SIZE SWEEP TESTS ==========
+// These mirror join_type_sweep_benchmark.scala structure
+// Total rows ~92,680, sweep left from 1% to 99%, fixed 100% cardinality
+// This data enables visualization showing build-side crossover points
+
+val totalRowsForSweep = 92680L
+val leftRowDistributionSweep = Seq(
+  1L, 10L, 100L, 1000L, 4634L, 9268L, 18536L, 30893L, 46340L,
+  61787L, 74144L, 83412L, 88046L, 91753L, 92580L, 92670L, 92679L
+)
+
+// Generate sweep configs for each left row count
+val sizeSweepConfigs = leftRowDistributionSweep.flatMap { leftRows =>
+  val rightRows = totalRowsForSweep - leftRows
+  val leftPct = (leftRows.toDouble / totalRowsForSweep * 100).toInt
+  
+  Seq(
+    // Inner join without AST (baseline for all comparisons)
+    JoinTypeTestConfig(
+      s"SWEEP_INNER_L${leftPct}pct_no_ast",
+      leftRows, rightRows, 1.0, "inner", "hash"
+    ),
+    // Inner join with AST (shows AST overhead)
+    JoinTypeTestConfig(
+      s"SWEEP_INNER_L${leftPct}pct_with_ast",
+      leftRows, rightRows, 1.0, "inner_with_ast", "hash"
+    ),
+    // Left Outer with post-processing (shows build-side flexibility)
+    JoinTypeTestConfig(
+      s"SWEEP_LEFT_OUTER_L${leftPct}pct_post",
+      leftRows, rightRows, 1.0, "left_outer", "hash"
+    )
+  )
+}
+
+val joinTypeTestConfigs = sizeSweepConfigs ++ Seq(
   // ========== Left Outer Join ==========
   JoinTypeTestConfig("LEFT_OUTER_1M_10pct_hash", 1000000, 1000000, 0.10, "left_outer", "hash"),
   JoinTypeTestConfig("LEFT_OUTER_1M_50pct_hash", 1000000, 1000000, 0.50, "left_outer", "hash"),
@@ -677,6 +714,53 @@ def baselineStrategyForJoinType(s: String): JoinStrategySpec = s match {
 
 // Run join type test: post-processing vs direct implementation
 def runJoinTypeTest(config: JoinTypeTestConfig, printHeader: Boolean, iterations: Int = 20): Seq[BenchmarkResults] = {
+  // Special handling for "inner_with_ast" - this is inner join with AST filtering
+  if (config.joinType == "inner_with_ast") {
+    // Generate a simple AST condition (25% selectivity) for the sweep
+    val astCondition = generateCondition("simple", 0.25)
+    
+    // Warmup
+    val warmupConfig = JoinBenchmarkConfig(
+      testName = s"warmup_${config.name}",
+      leftParquetPath = s"$baseDir/${config.name}/left",
+      rightParquetPath = s"$baseDir/${config.name}/right",
+      joinType = InnerJoin,
+      joinStrategy = strategyWithPost(config.joinStrategy),
+      buildSide = LeftBuild,
+      optimizations = JoinOptimizations(allowBuildSideSwap = false),
+      conditionalFilter = Some(astCondition),
+      leftKeyIndices = Seq(0),
+      rightKeyIndices = Seq(0),
+      iterations = 1,
+      numThreads = 1,
+      printHeader = false
+    )
+    runBenchmark(warmupConfig, spark)
+    
+    // Only run the with-AST version (no "direct" for this)
+    val withAst = runBenchmark(
+      JoinBenchmarkConfig(
+        testName = s"${config.name}_with_post",
+        leftParquetPath = s"$baseDir/${config.name}/left",
+        rightParquetPath = s"$baseDir/${config.name}/right",
+        joinType = InnerJoin,
+        joinStrategy = strategyWithPost(config.joinStrategy),
+        buildSide = LeftBuild,
+        optimizations = JoinOptimizations(allowBuildSideSwap = false),
+        conditionalFilter = Some(astCondition),
+        leftKeyIndices = Seq(0),
+        rightKeyIndices = Seq(0),
+        iterations = iterations,
+        numThreads = 1,
+        printHeader = printHeader
+      ),
+      spark
+    )
+    
+    return Seq(withAst)
+  }
+  
+  // Normal join type test path
   warmupJoinType(config)
   
   val jType = joinTypeFromString(config.joinType)
@@ -725,14 +809,82 @@ def runJoinTypeTest(config: JoinTypeTestConfig, printHeader: Boolean, iterations
 }
 
 // ============================================================================
+// TSV Output Setup
+// ============================================================================
+
+// Create output directory if needed
+new File(baseDir).mkdirs()
+
+// Open TSV file for writing
+val tsvWriter = new PrintWriter(new File(outputTsvPath))
+println(s"Writing TSV output to: $outputTsvPath")
+println()
+
+// Helper to write to both console and file
+def writeLine(line: String): Unit = {
+  println(line)
+  tsvWriter.println(line)
+}
+
+// Helper to print results to both console and file
+def printResultsToFile(result: BenchmarkResults): Unit = {
+  printResultsTSV(result)  // Print to console
+  
+  // Also write to file - use the same format as printResultsTSV
+  if (result.status == SUCCESS) {
+    val joinType = result.joinType match {
+      case InnerJoin => "InnerJoin"
+      case LeftOuterJoin => "LeftOuterJoin"
+      case RightOuterJoin => "RightOuterJoin"
+      case FullOuterJoin => "FullOuterJoin"
+      case LeftSemiJoin => "LeftSemiJoin"
+      case LeftAntiJoin => "LeftAntiJoin"
+    }
+    
+    val strategy = result.joinStrategy match {
+      case HashObjectStrategy => "hash_object"
+      case HashObjectWithPostStrategy => "hash_object_with_post"
+      case SortObjectWithPostStrategy => "sort_object_post"
+      case HashDirectStrategy => "hash_direct"
+      case HashDirectWithPostStrategy => "hash_direct_with_post"
+      case SortDirectWithPostStrategy => "sort_direct_with_post"
+    }
+    
+    val buildSideConfig = result.buildSideConfig match {
+      case LeftBuild => "LeftBuild"
+      case RightBuild => "RightBuild"
+      case AutoPickSmallerIfAllowed => "Auto"
+      case AutoMeetJoinRequirement => "AutoRequirement"
+    }
+    
+    val actualBuild = result.actualBuildSide.getOrElse("N/A")
+    val optimizations = result.optimizations.toString
+    
+    val line = s"${result.testName}\t${result.status}\t" +
+      s"${result.leftRows}\t${result.rightRows}\t${result.outputRows}\t" +
+      s"${result.numThreads}\t${result.iterations}\t" +
+      f"${result.wallClockMs}%.2f\t${result.averageMs}%.2f\t" +
+      f"${result.medianMs}%.2f\t${result.minMs}%.2f\t" +
+      f"${result.maxMs}%.2f\t${result.stdDevMs}%.2f\t" +
+      s"$joinType\t$strategy\t$buildSideConfig\t$actualBuild\t$optimizations"
+    
+    tsvWriter.println(line)
+  } else {
+    tsvWriter.println(s"${result.testName}\t${result.status}\tERROR\t${result.errorMessage.getOrElse("Unknown error")}")
+  }
+  tsvWriter.flush()  // Flush after each result for real-time monitoring
+}
+
+// ============================================================================
 // Benchmark Execution
 // ============================================================================
 
 println("Running benchmarks...")
 println()
 
-// Print TSV header
-println("TestName\tStatus\tLeftRows\tRightRows\tOutputRows\tNumThreads\tIterations\tWallClockMs\tAvgTimeMs\tMedianTimeMs\tMinTimeMs\tMaxTimeMs\tStdDevMs\tJoinType\tStrategy\tBuildSideConfig\tActualBuildSide\tOptimizations")
+// Print TSV header to both console and file
+val tsvHeader = "TestName\tStatus\tLeftRows\tRightRows\tOutputRows\tNumThreads\tIterations\tWallClockMs\tAvgTimeMs\tMedianTimeMs\tMinTimeMs\tMaxTimeMs\tStdDevMs\tJoinType\tStrategy\tBuildSideConfig\tActualBuildSide\tOptimizations"
+writeLine(tsvHeader)
 
 println("\n" + "="*80)
 println("PART 1: INNER JOIN + AST POST-FILTERING")
@@ -744,7 +896,7 @@ val astResults = astTestConfigs.zipWithIndex.flatMap { case (config, idx) =>
   val key = s"${config.conditionComplexity}_${config.outputSelectivity}"
   val condition = astConditions(key)
   val results = runAstTest(config, condition, printHeader = false)
-  results.foreach(printResultsTSV)
+  results.foreach(printResultsToFile)
   results
 }
 
@@ -756,7 +908,7 @@ println()
 val joinTypeResults = joinTypeTestConfigs.zipWithIndex.flatMap { case (config, idx) =>
   println(s"Testing: ${config.name}")
   val results = runJoinTypeTest(config, printHeader = false)
-  results.foreach(printResultsTSV)
+  results.foreach(printResultsToFile)
   results
 }
 
@@ -795,46 +947,59 @@ case class JoinTypeStats(
   def hasSignificantOverhead: Boolean = overheadPct > 5.0
 }
 
-val astStats = astTestConfigs.map { config =>
-  val withPost = astResults.find(_.testName == s"${config.name}_with_post").get
-  val innerOnly = astResults.find(_.testName == s"${config.name}_inner_only").get
+val astStats = astTestConfigs.flatMap { config =>
+  val withPostOpt = astResults.find(_.testName == s"${config.name}_with_post")
+  val innerOnlyOpt = astResults.find(_.testName == s"${config.name}_inner_only")
   
-  val overhead = withPost.medianMs - innerOnly.medianMs
-  val overheadPct = (overhead / innerOnly.medianMs) * 100.0
-  
-  AstStats(
-    testName = config.name,
-    rows = config.rows,
-    cardinalityPct = config.cardinalityPct,
-    complexity = config.conditionComplexity,
-    selectivity = config.outputSelectivity,
-    joinStrategy = config.joinStrategy,
-    withPostMs = withPost.medianMs,
-    innerOnlyMs = innerOnly.medianMs,
-    overheadMs = overhead,
-    overheadPct = overheadPct
-  )
+  // Only create stats if both results exist
+  for {
+    withPost <- withPostOpt
+    innerOnly <- innerOnlyOpt
+  } yield {
+    val overhead = withPost.medianMs - innerOnly.medianMs
+    val overheadPct = (overhead / innerOnly.medianMs) * 100.0
+    
+    AstStats(
+      testName = config.name,
+      rows = config.rows,
+      cardinalityPct = config.cardinalityPct,
+      complexity = config.conditionComplexity,
+      selectivity = config.outputSelectivity,
+      joinStrategy = config.joinStrategy,
+      withPostMs = withPost.medianMs,
+      innerOnlyMs = innerOnly.medianMs,
+      overheadMs = overhead,
+      overheadPct = overheadPct
+    )
+  }
 }
 
-val joinTypeStats = joinTypeTestConfigs.map { config =>
-  val withPost = joinTypeResults.find(_.testName == s"${config.name}_with_post").get
-  val direct = joinTypeResults.find(_.testName == s"${config.name}_direct").get
+val joinTypeStats = joinTypeTestConfigs.flatMap { config =>
+  val withPostOpt = joinTypeResults.find(_.testName == s"${config.name}_with_post")
+  val directOpt = joinTypeResults.find(_.testName == s"${config.name}_direct")
   
-  val overhead = withPost.medianMs - direct.medianMs
-  val overheadPct = (overhead / direct.medianMs) * 100.0
-  
-  JoinTypeStats(
-    testName = config.name,
-    joinType = config.joinType,
-    leftRows = config.leftRows,
-    rightRows = config.rightRows,
-    cardinalityPct = config.cardinalityPct,
-    joinStrategy = config.joinStrategy,
-    withPostMs = withPost.medianMs,
-    directMs = direct.medianMs,
-    overheadMs = overhead,
-    overheadPct = overheadPct
-  )
+  // Only create stats if both results exist
+  // (sweep tests with "inner_with_ast" only have _with_post, so they'll be skipped)
+  for {
+    withPost <- withPostOpt
+    direct <- directOpt
+  } yield {
+    val overhead = withPost.medianMs - direct.medianMs
+    val overheadPct = (overhead / direct.medianMs) * 100.0
+    
+    JoinTypeStats(
+      testName = config.name,
+      joinType = config.joinType,
+      leftRows = config.leftRows,
+      rightRows = config.rightRows,
+      cardinalityPct = config.cardinalityPct,
+      joinStrategy = config.joinStrategy,
+      withPostMs = withPost.medianMs,
+      directMs = direct.medianMs,
+      overheadMs = overhead,
+      overheadPct = overheadPct
+    )
+  }
 }
 
 println("\n" + "="*80)
@@ -1053,4 +1218,9 @@ astConditions.values.foreach { condition =>
   }
 }
 println(s"Closed ${astConditions.size} AST conditions")
+
+// Close TSV file
+tsvWriter.close()
+println(s"\nTSV results written to: $outputTsvPath")
+println(s"File size: ${new File(outputTsvPath).length() / 1024} KB")
 

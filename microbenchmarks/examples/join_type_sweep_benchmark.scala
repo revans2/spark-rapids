@@ -21,7 +21,7 @@
 //
 // Test Coverage:
 // - Join Types: Inner, FullOuter, LeftOuter, LeftSemi, LeftAnti
-// - Strategy: HashObject (not HashObjectWithPost or SortObjectWithPost)
+// - Strategies: HashObject AND HashObjectWithPost (both tested for comparison)
 // - Total Rows: ~92,680 (fixed across all tests)
 // - Row Distribution: Sweep from 1 row on left to 1 row on right (17 steps)
 // - Cardinality: 100% cardinality (1 key only)
@@ -30,8 +30,13 @@
 // - Optimizations: ALL DISABLED
 //
 // Build Side Configuration:
-// - Inner, FullOuter: Test both LeftBuild and RightBuild
-// - LeftOuter, LeftSemi, LeftAnti: Use RightBuild (required for left-side joins)
+// - HashObject:
+//   * Inner, FullOuter: Test both LeftBuild and RightBuild
+//   * LeftOuter, LeftSemi, LeftAnti: Use RightBuild (required for left-side joins)
+// - HashObjectWithPost:
+//   * Inner, FullOuter: Test both LeftBuild and RightBuild
+//   * LeftOuter: Test BOTH LeftBuild and RightBuild (post-processing enables build side flexibility!)
+//   * LeftSemi, LeftAnti: Use RightBuild
 //
 // Output: TSV file with detailed timing breakdowns
 
@@ -82,40 +87,85 @@ val overlapScenarios = Seq(NoOverlap, FullOverlap)
 case class JoinTypeConfig(
   name: String,
   joinType: JBR.JoinTypeSpec,
+  strategy: JBR.JoinStrategySpec,
   testBuildSides: Seq[String],  // Which build sides to test
   description: String
 )
 
+// Create configs for both HashObject and HashObjectWithPost
 val joinTypeConfigs = Seq(
+  // HashObject configs (original tests)
   JoinTypeConfig(
     name = "Inner",
     joinType = JBR.InnerJoin,
-    testBuildSides = Seq("LeftBuild", "RightBuild"),  // Test both
+    strategy = JBR.HashObjectStrategy,
+    testBuildSides = Seq("LeftBuild", "RightBuild"),
     description = "Inner join - both build sides supported"
   ),
   JoinTypeConfig(
     name = "FullOuter",
     joinType = JBR.FullOuterJoin,
-    testBuildSides = Seq("LeftBuild", "RightBuild"),  // Test both
+    strategy = JBR.HashObjectStrategy,
+    testBuildSides = Seq("LeftBuild", "RightBuild"),
     description = "Full outer join - both build sides supported"
   ),
   JoinTypeConfig(
     name = "LeftOuter",
     joinType = JBR.LeftOuterJoin,
-    testBuildSides = Seq("RightBuild"),  // Only right build supported
+    strategy = JBR.HashObjectStrategy,
+    testBuildSides = Seq("RightBuild"),
     description = "Left outer join - requires right as build side"
   ),
   JoinTypeConfig(
     name = "LeftSemi",
     joinType = JBR.LeftSemiJoin,
-    testBuildSides = Seq("RightBuild"),  // Only right build supported
+    strategy = JBR.HashObjectStrategy,
+    testBuildSides = Seq("RightBuild"),
     description = "Left semi join - requires right as build side"
   ),
   JoinTypeConfig(
     name = "LeftAnti",
     joinType = JBR.LeftAntiJoin,
-    testBuildSides = Seq("RightBuild"),  // Only right build supported
+    strategy = JBR.HashObjectStrategy,
+    testBuildSides = Seq("RightBuild"),
     description = "Left anti join - requires right as build side"
+  ),
+  
+  // HashObjectWithPost configs (new tests with post-processing)
+  JoinTypeConfig(
+    name = "Inner",
+    joinType = JBR.InnerJoin,
+    strategy = JBR.HashObjectWithPostStrategy,
+    testBuildSides = Seq("LeftBuild", "RightBuild"),
+    description = "Inner join with post-processing - both build sides supported"
+  ),
+  JoinTypeConfig(
+    name = "FullOuter",
+    joinType = JBR.FullOuterJoin,
+    strategy = JBR.HashObjectWithPostStrategy,
+    testBuildSides = Seq("LeftBuild", "RightBuild"),
+    description = "Full outer join with post-processing - both build sides supported"
+  ),
+  JoinTypeConfig(
+    name = "LeftOuter",
+    joinType = JBR.LeftOuterJoin,
+    strategy = JBR.HashObjectWithPostStrategy,
+    testBuildSides = Seq("LeftBuild", "RightBuild"),  // Both sides now possible with post-processing!
+    description = "Left outer join with post-processing - both build sides now supported"
+  ),
+  JoinTypeConfig(
+    name = "LeftSemi",
+    joinType = JBR.LeftSemiJoin,
+    strategy = JBR.HashObjectWithPostStrategy,
+    testBuildSides = Seq("RightBuild"),
+    description = "Left semi join with post-processing - requires right as build side"
+  ),
+  JoinTypeConfig(
+    name = "LeftAnti",
+    joinType = JBR.LeftAntiJoin,
+    strategy = JBR.HashObjectWithPostStrategy,
+    testBuildSides = Seq("RightBuild"),
+    description = "Left anti join with post-processing - requires right as build side"
   )
 )
 
@@ -242,7 +292,7 @@ def runBenchmark(
     leftParquetPath = leftPath,
     rightParquetPath = rightPath,
     joinType = joinTypeConfig.joinType,
-    joinStrategy = JBR.HashObjectStrategy,  // Use HashObject, not HashObjectWithPost
+    joinStrategy = joinTypeConfig.strategy,  // Use strategy from config (HashObject or HashObjectWithPost)
     buildSide = getBuildSideSpec(buildSideName),
     optimizations = JBR.JoinOptimizations(
       allowBuildSideSwap = false,
@@ -400,7 +450,8 @@ def runFullBenchmark(): Unit = {
       
       val leftPct = (leftRows.toDouble / totalRows * 100).toInt
       val rightPct = (rightRows.toDouble / totalRows * 100).toInt
-      val testName = f"L${leftPct}%03d_R${rightPct}%03d_100pct_card_${overlap.name}_${joinTypeConfig.name}_${buildSideName}"
+      val strategyName = formatJoinStrategy(joinTypeConfig.strategy)
+      val testName = f"L${leftPct}%03d_R${rightPct}%03d_100pct_card_${overlap.name}_${joinTypeConfig.name}_${buildSideName}_${strategyName}"
       
       println(s"\n\n=== TEST $testCount / $totalTests ===")
       println(s"Test: $testName")
@@ -436,16 +487,18 @@ def runFullBenchmark(): Unit = {
       } catch {
         case e: OutOfMemoryError =>
           println(s"OOM ERROR in test: $testName")
+          val strategyName = formatJoinStrategy(joinTypeConfig.strategy)
           tsvWriter.println(s"$testName\tOOM_ERROR\t$leftRows\t$rightRows\t0\t1\t0\t0.0\t0.0\t0.0\t0.0\t0.0\t0.0\t" +
-            s"${joinTypeConfig.name}\tHashObject\t$buildSideName\tN/A\tnone\t\t\t\t\t")
+            s"${joinTypeConfig.name}\t$strategyName\t$buildSideName\tN/A\tnone\t\t\t\t\t")
           tsvWriter.flush()
           System.gc()
           Thread.sleep(2000)
         case e: Exception =>
           println(s"ERROR in test: $testName - ${e.getMessage}")
           e.printStackTrace()
+          val strategyName = formatJoinStrategy(joinTypeConfig.strategy)
           tsvWriter.println(s"$testName\tERROR\t$leftRows\t$rightRows\t0\t1\t0\t0.0\t0.0\t0.0\t0.0\t0.0\t0.0\t" +
-            s"${joinTypeConfig.name}\tHashObject\t$buildSideName\tN/A\tnone\t\t\t\t\t")
+            s"${joinTypeConfig.name}\t$strategyName\t$buildSideName\tN/A\tnone\t\t\t\t\t")
           tsvWriter.flush()
       }
       

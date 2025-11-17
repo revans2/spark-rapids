@@ -46,7 +46,8 @@ def load_data(tsv_path):
                 'Cardinality': parts[2] + '_' + parts[3],
                 'Overlap': parts[4] + '_' + parts[5],
                 'JoinTypeName': parts[6],
-                'BuildSide': parts[7]
+                'BuildSide': parts[7],
+                'Strategy': parts[8] if len(parts) > 8 else 'HashObject'  # Default for old data
             }
         except (IndexError, ValueError) as e:
             print(f"Warning: Could not parse test name: {name}")
@@ -56,7 +57,8 @@ def load_data(tsv_path):
                 'Cardinality': 'unknown',
                 'Overlap': 'unknown',
                 'JoinTypeName': 'unknown',
-                'BuildSide': 'unknown'
+                'BuildSide': 'unknown',
+                'Strategy': 'unknown'
             }
     
     parsed = df_success['TestName'].apply(parse_test_name)
@@ -108,21 +110,49 @@ def plot_join_types_by_overlap(df, overlap, output_dir):
         ax = axes[idx]
         join_data = subset[subset['JoinTypeName'] == join_type]
         
-        # Group by build side if there are multiple
-        build_sides = sorted(join_data['BuildSide'].dropna().unique())
-        
-        for build_side in build_sides:
-            data = join_data[join_data['BuildSide'] == build_side].sort_values('LeftPct')
-            if len(data) > 0:
-                label = f"{build_side}" if len(build_sides) > 1 else join_type
-                ax.plot(data['LeftPct'], data['MedianTimeMs'],
-                       marker='o', label=label, linewidth=2, markersize=6)
+        # For LeftOuter, show strategy+build side combinations
+        # For others, only show HashObject strategy (filter out HashObjectWithPost)
+        if join_type == 'LeftOuter':
+            # Show HashObject+RightBuild, HashObjectWithPost+RightBuild, HashObjectWithPost+LeftBuild
+            strategies = sorted(join_data['Strategy'].dropna().unique())
+            
+            for strategy in strategies:
+                strategy_data = join_data[join_data['Strategy'] == strategy]
+                build_sides = sorted(strategy_data['BuildSide'].dropna().unique())
+                
+                for build_side in build_sides:
+                    data = strategy_data[strategy_data['BuildSide'] == build_side].sort_values('LeftPct')
+                    if len(data) > 0:
+                        # Create descriptive labels
+                        strategy_short = 'Hash' if strategy == 'HashObject' else 'Hash+Post'
+                        build_short = 'L' if build_side == 'LeftBuild' else 'R'
+                        label = f"{strategy_short} ({build_short})"
+                        
+                        # Use different line styles for different strategies
+                        linestyle = '-' if strategy == 'HashObject' else '--'
+                        ax.plot(data['LeftPct'], data['MedianTimeMs'],
+                               marker='o', label=label, linewidth=2, markersize=6,
+                               linestyle=linestyle)
+            
+            ax.legend(fontsize=8)
+        else:
+            # For non-LeftOuter joins, only show HashObject strategy
+            hash_obj_data = join_data[join_data['Strategy'] == 'HashObject']
+            build_sides = sorted(hash_obj_data['BuildSide'].dropna().unique())
+            
+            for build_side in build_sides:
+                data = hash_obj_data[hash_obj_data['BuildSide'] == build_side].sort_values('LeftPct')
+                if len(data) > 0:
+                    label = f"{build_side}" if len(build_sides) > 1 else join_type
+                    ax.plot(data['LeftPct'], data['MedianTimeMs'],
+                           marker='o', label=label, linewidth=2, markersize=6)
+            
+            if len(build_sides) > 1:
+                ax.legend(fontsize=9)
         
         ax.set_xlabel('Left Table Percentage (%)', fontsize=10)
         ax.set_ylabel('Median Time (ms)', fontsize=10)
         ax.set_title(f'{join_type}', fontsize=12, fontweight='bold')
-        if len(build_sides) > 1:
-            ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
         ax.set_xscale('log')
         ax.axvline(x=50, color='gray', linestyle='--', alpha=0.5)
@@ -159,24 +189,58 @@ def plot_join_type_comparison(df, overlap, output_dir):
     for idx, join_type in enumerate(join_types):
         join_data = subset[subset['JoinTypeName'] == join_type]
         
-        # If multiple build sides, pick one (prefer RightBuild for consistency)
-        build_sides = sorted(join_data['BuildSide'].dropna().unique())
-        chosen_build_side = 'RightBuild' if 'RightBuild' in build_sides else build_sides[0]
-        
-        data = join_data[join_data['BuildSide'] == chosen_build_side].sort_values('LeftPct')
-        
-        if len(data) > 0:
-            label = join_type
-            if len(build_sides) > 1:
-                label += f" ({chosen_build_side})"
-            ax.plot(data['LeftPct'], data['MedianTimeMs'],
-                   marker='o', label=label, linewidth=2, markersize=6, color=colors[idx])
+        # For LeftOuter, show multiple strategy+build combinations
+        if join_type == 'LeftOuter':
+            # Show HashObject+RightBuild and HashObjectWithPost+LeftBuild (the interesting comparison)
+            # HashObject + RightBuild (baseline)
+            hash_obj_data = join_data[
+                (join_data['Strategy'] == 'HashObject') & 
+                (join_data['BuildSide'] == 'RightBuild')
+            ].sort_values('LeftPct')
+            if len(hash_obj_data) > 0:
+                ax.plot(hash_obj_data['LeftPct'], hash_obj_data['MedianTimeMs'],
+                       marker='o', label='LeftOuter (Hash, R)', linewidth=2, markersize=6,
+                       color=colors[idx], linestyle='-')
+            
+            # HashObjectWithPost + LeftBuild (shows benefit of build side swap)
+            hash_post_left = join_data[
+                (join_data['Strategy'] == 'HashObjectPost') & 
+                (join_data['BuildSide'] == 'LeftBuild')
+            ].sort_values('LeftPct')
+            if len(hash_post_left) > 0:
+                ax.plot(hash_post_left['LeftPct'], hash_post_left['MedianTimeMs'],
+                       marker='s', label='LeftOuter (Hash+Post, L)', linewidth=2, markersize=6,
+                       color=colors[idx], linestyle='--')
+            
+            # HashObjectWithPost + RightBuild (shows overhead of post-processing)
+            hash_post_right = join_data[
+                (join_data['Strategy'] == 'HashObjectPost') & 
+                (join_data['BuildSide'] == 'RightBuild')
+            ].sort_values('LeftPct')
+            if len(hash_post_right) > 0:
+                ax.plot(hash_post_right['LeftPct'], hash_post_right['MedianTimeMs'],
+                       marker='^', label='LeftOuter (Hash+Post, R)', linewidth=2, markersize=6,
+                       color=colors[idx], linestyle=':')
+        else:
+            # For other join types, only show HashObject strategy
+            hash_obj_data = join_data[join_data['Strategy'] == 'HashObject']
+            build_sides = sorted(hash_obj_data['BuildSide'].dropna().unique())
+            chosen_build_side = 'RightBuild' if 'RightBuild' in build_sides else build_sides[0]
+            
+            data = hash_obj_data[hash_obj_data['BuildSide'] == chosen_build_side].sort_values('LeftPct')
+            
+            if len(data) > 0:
+                label = join_type
+                if len(build_sides) > 1:
+                    label += f" ({chosen_build_side})"
+                ax.plot(data['LeftPct'], data['MedianTimeMs'],
+                       marker='o', label=label, linewidth=2, markersize=6, color=colors[idx])
     
     ax.set_xlabel('Left Table Percentage (%)', fontsize=12)
     ax.set_ylabel('Median Time (ms)', fontsize=12)
-    ax.set_title(f'Join Type Comparison: {overlap}\n(100% Cardinality, HashObject)',
+    ax.set_title(f'Join Type Comparison: {overlap}\n(100% Cardinality)',
                 fontsize=14, fontweight='bold')
-    ax.legend(fontsize=11)
+    ax.legend(fontsize=10)
     ax.grid(True, alpha=0.3)
     ax.set_xscale('log')
     ax.axvline(x=50, color='gray', linestyle='--', alpha=0.5)
@@ -193,11 +257,12 @@ def plot_join_type_comparison(df, overlap, output_dir):
 def plot_build_side_comparison_for_join_type(df, join_type, overlap, output_dir):
     """
     For join types that support both build sides (Inner, FullOuter),
-    compare LeftBuild vs RightBuild.
+    compare LeftBuild vs RightBuild (using HashObject strategy only).
     """
     subset = df[
         (df['JoinTypeName'] == join_type) &
-        (df['Overlap'] == overlap)
+        (df['Overlap'] == overlap) &
+        (df['Strategy'] == 'HashObject')  # Only show HashObject for non-LeftOuter comparisons
     ].copy()
     
     if len(subset) == 0:
@@ -232,6 +297,69 @@ def plot_build_side_comparison_for_join_type(df, join_type, overlap, output_dir)
     plt.close()
 
 
+def plot_left_outer_strategy_comparison(df, overlap, output_dir):
+    """
+    Dedicated plot for LeftOuter showing the benefit of HashObjectWithPost
+    with build side flexibility.
+    """
+    subset = df[
+        (df['JoinTypeName'] == 'LeftOuter') &
+        (df['Overlap'] == overlap)
+    ].copy()
+    
+    if len(subset) == 0:
+        return
+    
+    fig, ax = plt.subplots(1, 1, figsize=(14, 8))
+    
+    # HashObject + RightBuild (baseline - only option without post-processing)
+    hash_obj = subset[
+        (subset['Strategy'] == 'HashObject') & 
+        (subset['BuildSide'] == 'RightBuild')
+    ].sort_values('LeftPct')
+    if len(hash_obj) > 0:
+        ax.plot(hash_obj['LeftPct'], hash_obj['MedianTimeMs'],
+               marker='o', label='HashObject + RightBuild (baseline)', 
+               linewidth=2.5, markersize=8, color='blue', linestyle='-')
+    
+    # HashObjectWithPost + RightBuild (shows post-processing overhead)
+    hash_post_right = subset[
+        (subset['Strategy'] == 'HashObjectPost') & 
+        (subset['BuildSide'] == 'RightBuild')
+    ].sort_values('LeftPct')
+    if len(hash_post_right) > 0:
+        ax.plot(hash_post_right['LeftPct'], hash_post_right['MedianTimeMs'],
+               marker='^', label='HashObjectWithPost + RightBuild (with overhead)', 
+               linewidth=2.5, markersize=8, color='orange', linestyle='--')
+    
+    # HashObjectWithPost + LeftBuild (shows benefit when left is smaller)
+    hash_post_left = subset[
+        (subset['Strategy'] == 'HashObjectPost') & 
+        (subset['BuildSide'] == 'LeftBuild')
+    ].sort_values('LeftPct')
+    if len(hash_post_left) > 0:
+        ax.plot(hash_post_left['LeftPct'], hash_post_left['MedianTimeMs'],
+               marker='s', label='HashObjectWithPost + LeftBuild (build side flexibility!)', 
+               linewidth=2.5, markersize=8, color='green', linestyle='-.')
+    
+    ax.set_xlabel('Left Table Percentage (%)', fontsize=13)
+    ax.set_ylabel('Median Time (ms)', fontsize=13)
+    ax.set_title(f'LeftOuter Join: Strategy & Build Side Comparison\n{overlap} (100% Cardinality)',
+                fontsize=15, fontweight='bold')
+    ax.legend(fontsize=11, loc='best')
+    ax.grid(True, alpha=0.3)
+    ax.set_xscale('log')
+    ax.axvline(x=50, color='gray', linestyle='--', alpha=0.5, label='50% split')
+    
+    plt.tight_layout()
+    
+    filename = f"left_outer_strategy_comparison_{overlap}.png"
+    filepath = os.path.join(output_dir, filename)
+    plt.savefig(filepath, dpi=150, bbox_inches='tight')
+    print(f"  Saved: {filename}")
+    plt.close()
+
+
 def print_summary_statistics(df):
     """Print summary statistics about join type performance."""
     print("\n" + "="*80)
@@ -246,19 +374,40 @@ def print_summary_statistics(df):
         print("-" * 40)
         
         for join_type in join_types:
-            subset = df[
-                (df['JoinTypeName'] == join_type) &
-                (df['Overlap'] == overlap)
-            ]
-            
-            if len(subset) == 0:
-                continue
-            
-            median_times = subset['MedianTimeMs']
-            print(f"  {join_type}:")
-            print(f"    Avg median time: {median_times.mean():.2f} ms")
-            print(f"    Min median time: {median_times.min():.2f} ms")
-            print(f"    Max median time: {median_times.max():.2f} ms")
+            # For LeftOuter, show stats for both strategies
+            if join_type == 'LeftOuter':
+                strategies = ['HashObject', 'HashObjectPost']
+                for strategy in strategies:
+                    subset = df[
+                        (df['JoinTypeName'] == join_type) &
+                        (df['Overlap'] == overlap) &
+                        (df['Strategy'] == strategy)
+                    ]
+                    
+                    if len(subset) == 0:
+                        continue
+                    
+                    median_times = subset['MedianTimeMs']
+                    print(f"  {join_type} ({strategy}):")
+                    print(f"    Avg median time: {median_times.mean():.2f} ms")
+                    print(f"    Min median time: {median_times.min():.2f} ms")
+                    print(f"    Max median time: {median_times.max():.2f} ms")
+            else:
+                # For other join types, only show HashObject stats
+                subset = df[
+                    (df['JoinTypeName'] == join_type) &
+                    (df['Overlap'] == overlap) &
+                    (df['Strategy'] == 'HashObject')
+                ]
+                
+                if len(subset) == 0:
+                    continue
+                
+                median_times = subset['MedianTimeMs']
+                print(f"  {join_type}:")
+                print(f"    Avg median time: {median_times.mean():.2f} ms")
+                print(f"    Min median time: {median_times.min():.2f} ms")
+                print(f"    Max median time: {median_times.max():.2f} ms")
 
 
 def main():
@@ -291,6 +440,10 @@ def main():
     for overlap in overlaps:
         for join_type in ['Inner', 'FullOuter']:
             plot_build_side_comparison_for_join_type(df, join_type, overlap, output_dir)
+    
+    print("\nGenerating LeftOuter strategy comparison plots...")
+    for overlap in overlaps:
+        plot_left_outer_strategy_comparison(df, overlap, output_dir)
     
     # Print summary
     print_summary_statistics(df)
