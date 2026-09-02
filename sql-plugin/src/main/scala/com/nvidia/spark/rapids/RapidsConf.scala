@@ -691,6 +691,29 @@ val GPU_COREDUMP_PIPE_PATTERN = conf("spark.rapids.gpu.coreDump.pipePattern")
     .checkValue(v => v > 0, "Batch size must be positive")
     .createWithDefault(1 * 1024 * 1024 * 1024) // 1 GiB is the default
 
+  val HISTORY_PATH = conf("spark.rapids.sql.historyPath")
+    .doc("Local filesystem path where driver-side history metrics are saved when the application " +
+      "stops and restored when it starts. One file holds every recorded metric family. Unset " +
+      "disables history based learning. The file is unencrypted.")
+    .internal()
+    .stringConf
+    .createOptional
+
+  val HISTORY_MAX_AGE_DAYS = conf("spark.rapids.sql.history.maxAgeDays")
+    .doc("How old a recorded observation may be and still influence planning.")
+    .internal()
+    .integerConf
+    .checkValue(v => v > 0, "History max age must be positive")
+    .createWithDefault(7)
+
+  val HISTORY_PLANNING_TIMEOUT_MS = conf("spark.rapids.sql.history.planningTimeoutMillis")
+    .doc("Budget for one history lookup on the query planning path. Also the threshold above " +
+      "which a lookup counts as slow for the provider's circuit breaker.")
+    .internal()
+    .integerConf
+    .checkValue(v => v > 0, "History planning timeout must be positive")
+    .createWithDefault(100)
+
   val CHUNKED_READER = conf("spark.rapids.sql.reader.chunked")
     .doc("Enable a chunked reader where possible. A chunked reader allows " +
       "reading highly compressed data that could not be read otherwise, but at the expense " +
@@ -3555,6 +3578,12 @@ class RapidsConf(conf: Map[String, String]) extends Logging {
   lazy val needDecimalGuarantees: Boolean = get(NEED_DECIMAL_OVERFLOW_GUARANTEES)
 
   lazy val gpuTargetBatchSizeBytes: Long = get(GPU_BATCH_SIZE_BYTES)
+
+  lazy val historyPath: Option[String] = get(HISTORY_PATH)
+
+  lazy val historyMaxAgeDays: Int = get(HISTORY_MAX_AGE_DAYS)
+
+  lazy val historyPlanningTimeoutMs: Int = get(HISTORY_PLANNING_TIMEOUT_MS)
 
   lazy val isWindowCollectListEnabled: Boolean = get(ENABLE_WINDOW_COLLECT_LIST)
 

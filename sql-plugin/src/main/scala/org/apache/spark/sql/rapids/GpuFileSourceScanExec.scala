@@ -22,6 +22,7 @@ import scala.collection.mutable.HashMap
 
 import com.nvidia.spark.rapids._
 import com.nvidia.spark.rapids.filecache.FileCacheLocalityManager
+import com.nvidia.spark.rapids.perf.{ScanContext, ScanSplitHeuristic}
 import com.nvidia.spark.rapids.shims.{GpuDataSourceRDD, PartitionedFileUtilsShim, SparkShimImpl, StaticPartitionShims}
 import org.apache.hadoop.fs.Path
 
@@ -398,7 +399,9 @@ case class GpuFileSourceScanExec(
     "numFiles" -> createMetric(ESSENTIAL_LEVEL, "number of files read"),
     "metadataTime" -> createTimingMetric(ESSENTIAL_LEVEL, "metadata time"),
     "filesSize" -> createSizeMetric(ESSENTIAL_LEVEL, "size of files read"),
+    "scanMaxSplitBytes" -> createSizeMetric(DEBUG_LEVEL, "scan max split bytes"),
     GPU_DECODE_TIME -> createNanoTimingMetric(MODERATE_LEVEL, DESCRIPTION_GPU_DECODE_TIME),
+    GPU_OUTPUT_BATCH_BYTES -> createSizeMetric(MODERATE_LEVEL, DESCRIPTION_GPU_OUTPUT_BATCH_BYTES),
     BUFFER_TIME -> createNanoTimingMetric(MODERATE_LEVEL, DESCRIPTION_BUFFER_TIME),
     FILTER_TIME -> createNanoTimingMetric(DEBUG_LEVEL, DESCRIPTION_FILTER_TIME),
     SCHEDULE_TIME -> createNanoTimingMetric(DEBUG_LEVEL, DESCRIPTION_SCHEDULE_TIME),
@@ -554,13 +557,62 @@ case class GpuFileSourceScanExec(
    *                 not using the small file optimization.
    * @param fsRelation [[HadoopFsRelation]] associated with the read.
    */
+  /**
+   * Sizes this scan's split from the table's learned decode-expansion ratio, and registers the
+   * scan so its own ratio is recorded once the query succeeds.
+   *
+   * Returns `sparkMaxSplitBytes` unchanged whenever history is off, absent, stale, or unusable.
+   * The fallback is the whole decision, never a blend of history with static inputs.
+   */
+  private def historySizedSplit(fsRelation: HadoopFsRelation, sparkMaxSplitBytes: Long): Long = {
+    if (!ScanSplitHeuristic.isEnabled) {
+      sparkMaxSplitBytes
+    } else {
+      val minPartitionNum = fsRelation.sparkSession.sessionState.conf.filesMinPartitionNum
+        .getOrElse(fsRelation.sparkSession.leafNodeDefaultParallelism)
+      // Keyed on table + decoded columns + pushed filters, since all three move the ratio.
+      // requiredSchema excludes partition columns, which is right: those are synthesized
+      // constants, not decoded.
+      val ctx = ScanContext(
+        table = tableIdentifier.map(_.unquotedString)
+          .orElse(relation.location.rootPaths.headOption.map(_.toString))
+          .getOrElse(""),
+        columns = requiredSchema.fieldNames.toSeq,
+        filters = pushedDownFilters.map(_.toString),
+        listedBytes = dynamicallySelectedPartitions.flatMap(_.files.map(_.getLen)).sum,
+        batchSizeBytes = rapidsConf.gpuTargetBatchSizeBytes,
+        minPartitionNum = minPartitionNum.toLong,
+        maxSplitBytes = sparkMaxSplitBytes,
+        node = this)
+      val split = ScanSplitHeuristic.decide(ctx, System.currentTimeMillis())
+      if (split == sparkMaxSplitBytes) {
+        logDebug(s"Scan split $sparkMaxSplitBytes bytes from maxSplitBytes, no history applied")
+      } else {
+        logDebug(s"Scan split $split bytes from history, maxSplitBytes $sparkMaxSplitBytes")
+      }
+      // Scoped to this SQL execution so only its own end can drain it. A scan planned outside an
+      // execution has no id and is not tracked, because nothing would ever drain it.
+      val executionId =
+        Option(sparkContext.getLocalProperty(SQLExecution.EXECUTION_ID_KEY)).flatMap { id =>
+          try Some(id.toLong) catch { case _: NumberFormatException => None }
+        }
+      ScanSplitHeuristic.register(executionId, ctx)
+      split
+    }
+  }
+
   private def createNonBucketedReadRDD(
       readFile: Option[(PartitionedFile) => Iterator[InternalRow]],
       fsRelation: HadoopFsRelation): RDD[InternalRow] = {
     val partitions = StaticPartitionShims.getStaticPartitions(fsRelation).getOrElse {
       val openCostInBytes = fsRelation.sparkSession.sessionState.conf.filesOpenCostInBytes
-      val maxSplitBytes =
+      val sparkMaxSplitBytes =
         FilePartition.maxSplitBytes(fsRelation.sparkSession, dynamicallySelectedPartitions)
+      val maxSplitBytes = historySizedSplit(fsRelation, sparkMaxSplitBytes)
+      // Dropped from metrics below DEBUG level, and sendDriverMetrics indexes that map.
+      if (metrics.contains("scanMaxSplitBytes")) {
+        driverMetrics("scanMaxSplitBytes") = maxSplitBytes
+      }
       logInfo(s"Planning scan with bin packing, max size: $maxSplitBytes bytes, " +
         s"open cost is considered as scanning $openCostInBytes bytes.")
 

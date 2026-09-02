@@ -18,7 +18,7 @@ package com.nvidia.spark.rapids
 
 import java.lang.reflect.InvocationTargetException
 import java.net.URL
-import java.time.ZoneId
+import java.time.{Duration, ZoneId}
 import java.util.Properties
 import java.util.concurrent.ConcurrentHashMap
 
@@ -35,6 +35,7 @@ import com.nvidia.spark.rapids.ScalableTaskCompletion.onTaskCompletion
 import com.nvidia.spark.rapids.filecache.{FileCache, FileCacheLocalityManager, FileCacheLocalityMsg}
 import com.nvidia.spark.rapids.io.async.TrafficController
 import com.nvidia.spark.rapids.jni.{GpuTimeZoneDB, Hash, JSONUtils, RmmSpark, TaskPriority}
+import com.nvidia.spark.rapids.perf.{HistoryHeuristic, HistoryObservations, HistoryOwner, HistoryPolicy, ScanSplitHeuristic}
 import com.nvidia.spark.rapids.python.PythonWorkerSemaphore
 import com.nvidia.spark.rapids.shims.ShuffleManagerShimUtils
 import org.apache.commons.lang3.exception.ExceptionUtils
@@ -484,6 +485,10 @@ object RapidsPluginUtils extends Logging {
 class RapidsDriverPlugin extends DriverPlugin with Logging {
   var rapidsShuffleHeartbeatManager: RapidsShuffleHeartbeatManager = null
   var shuffleCleanupListener: ShuffleCleanupListener = null
+  private var historyOwner: Option[HistoryOwner] = None
+
+  /** Every heuristic that can learn from history. Add one here to enable it. */
+  private val HISTORY_HEURISTICS: Seq[HistoryHeuristic] = Seq(ScanSplitHeuristic)
   private lazy val extraDriverPlugins =
     RapidsPluginUtils.extraPlugins.map(_.driverPlugin()).filterNot(_ == null)
 
@@ -577,11 +582,45 @@ class RapidsDriverPlugin extends DriverPlugin with Logging {
 
     FileCacheLocalityManager.init(sc)
 
+    initHistoryMetrics(sc, conf)
+
     logDebug("Loading extra driver plugins: " +
       s"${extraDriverPlugins.map(_.getClass.getName).mkString(",")}")
     extraDriverPlugins.foreach(_.init(sc, pluginContext))
     TrampolineUtil.postEvent(sc, buildInfoEvent)
     conf.rapidsConfMap
+  }
+
+  /**
+   * Opens the history metrics store, restoring the previous application's snapshot when one
+   * exists, and enables history-backed scan split sizing. History is advisory: any failure here
+   * leaves planning on its existing static behavior.
+   */
+  private def initHistoryMetrics(sc: SparkContext, conf: RapidsConf): Unit = {
+    conf.historyPath.foreach { path =>
+      val policy = HistoryPolicy.of(
+        Duration.ofDays(conf.historyMaxAgeDays.toLong),
+        Duration.ofMillis(conf.historyPlanningTimeoutMs.toLong))
+      historyOwner = HistoryOwner.open(path, sc.applicationId,
+        Option(sc.applicationAttemptId).flatten, policy)
+      historyOwner.foreach { owner =>
+        // A rejected schema disables that heuristic only, so one bad family cannot take the
+        // others down with it.
+        val enabled = HISTORY_HEURISTICS.filter { h =>
+          h.metrics.forall(_.declare(owner.store, policy.planningMaxAge, policy.declareBudget))
+        }
+        enabled.foreach(_.enable(policy))
+        if (enabled.nonEmpty) {
+          HistoryObservations.start()
+          // On the SparkContext, not a session's listenerManager: this sees every SparkSession
+          // and every Structured Streaming micro-batch.
+          sc.addSparkListener(HistoryObservations.listener)
+          logInfo(s"History metrics enabled at $path for ${enabled.map(_.name).mkString(", ")}")
+        } else {
+          logWarning("No history metric schema accepted; planning stays static")
+        }
+      }
+    }
   }
 
   override def registerMetrics(appId: String, pluginContext: PluginContext): Unit = {
@@ -595,7 +634,11 @@ class RapidsDriverPlugin extends DriverPlugin with Logging {
           () => FileCacheLocalityManager.shutdown(),
           // Shutdown listener first to trigger cleanup for any remaining jobs
           () => Option(shuffleCleanupListener).foreach(_.shutdown()),
-          () => ShuffleCleanupManager.shutdown()))
+          () => ShuffleCleanupManager.shutdown(),
+          // Stop accepting observations before persisting, so the snapshot is not written while
+          // late query-end events are still arriving.
+          () => HistoryObservations.shutdown(),
+          () => historyOwner.foreach(_.shutdown())))
   }
 }
 

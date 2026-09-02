@@ -43,8 +43,22 @@ public final class HistoryMetricCatalog {
   private static final int MIN_ID = 1;
   private static final int MAX_ID = 0xFFFF;
   private static final int MAX_NAME_BYTES = 128;
+  /**
+   * Metric family 1: scan expansion ratio.
+   *
+   * <p>Observed quantity is decoded device bytes divided by listed file bytes for one scan
+   * execution, dimensioned by the scan's table label. The scan-split autotuner reads the most
+   * recent observation to size {@code maxPartitionBytes}. Permanent allocation; retire in source
+   * rather than reusing the ID.
+   */
+  public static final int SCAN_EXPANSION_RATIO_ID = 1;
+
+  /** Governed name for {@link #SCAN_EXPANSION_RATIO_ID}. */
+  public static final String SCAN_EXPANSION_RATIO_NAME = "scan.expansion.ratio";
+
   private static final HistoryMetricCatalog PRODUCTION =
-      new HistoryMetricCatalog(Collections.<MetricDefinition>emptyList());
+      new HistoryMetricCatalog(Collections.singletonList(
+          new MetricDefinition(SCAN_EXPANSION_RATIO_ID, SCAN_EXPANSION_RATIO_NAME, false)));
 
   private final List<MetricDefinition> entries;
   private final Map<Integer, MetricDefinition> entriesById;
