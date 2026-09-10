@@ -65,9 +65,12 @@ the level of compatibility with Apache Spark.  Those are covered [here](configs.
 Others are a part of Apache Spark itself and those are a bit harder to document.
 The work of updating this to cover that support is still ongoing.
 
-In general though if you ever have any question about why an operation is not running
-on the GPU you may set `spark.rapids.sql.explain` to ALL and it will try to give all of
-the reasons why this particular operator or expression is on the CPU or GPU.
+For debugging, set `spark.rapids.sql.explain` to ALL to report why
+operators or expressions run on the CPU or GPU. ALL can generate
+substantial driver log output for complex or high-volume workloads,
+potentially degrading driver performance or making the driver
+unresponsive. Do not enable ALL in production; use NOT_ON_GPU
+(the default) or NONE.
 
 # Key
 ## Types
@@ -9596,7 +9599,7 @@ are limited.
 <td rowSpan="3">In</td>
 <td rowSpan="3">`in`</td>
 <td rowSpan="3">IN operator</td>
-<td rowSpan="3">None</td>
+<td rowSpan="3">Non-literal list expressions must be deterministic and side-effect-free</td>
 <td rowSpan="3">project</td>
 <td>value</td>
 <td>S</td>
@@ -9622,17 +9625,17 @@ are limited.
 </tr>
 <tr>
 <td>list</td>
-<td><em>PS<br/>Literal value only</em></td>
-<td><em>PS<br/>Literal value only</em></td>
-<td><em>PS<br/>Literal value only</em></td>
-<td><em>PS<br/>Literal value only</em></td>
-<td><em>PS<br/>Literal value only</em></td>
-<td><em>PS<br/>Literal value only</em></td>
-<td><em>PS<br/>Literal value only</em></td>
-<td><em>PS<br/>Literal value only</em></td>
-<td><em>PS<br/>UTC is only supported TZ for TIMESTAMP;<br/>Literal value only</em></td>
-<td><em>PS<br/>Literal value only</em></td>
-<td><em>PS<br/>Literal value only</em></td>
+<td>S</td>
+<td>S</td>
+<td>S</td>
+<td>S</td>
+<td>S</td>
+<td>S</td>
+<td>S</td>
+<td>S</td>
+<td><em>PS<br/>UTC is only supported TZ for TIMESTAMP</em></td>
+<td>S</td>
+<td>S</td>
 <td><b>NS</b></td>
 <td><b>NS</b></td>
 <td><b>NS</b></td>
@@ -11260,7 +11263,7 @@ are limited.
 <td> </td>
 <td> </td>
 <td> </td>
-<td><em>PS<br/>Literal value only</em></td>
+<td>S</td>
 <td> </td>
 <td> </td>
 <td> </td>
