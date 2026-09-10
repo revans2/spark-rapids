@@ -24,6 +24,17 @@ application. The provider stamps application provenance, but does not decide the
 granularity or reduce task metrics. Summary requests combine matching stored observations; the
 heuristic chooses the dimensions, time window, limit, and whether the result is useful.
 
+The observed quantity, unit, occurrence, producer-side reduction, and timestamp meaning are semantic
+properties of an exact metric version. The metric owner defines and reviews them; the provider cannot
+infer or validate them from a scalar value. An incompatible change to any of those properties requires
+a new metric version.
+
+The provider validates the structural representation, isolates exact versions, stamps provenance,
+stores accepted observations, enforces its effective retention, applies request windows, dimensions,
+and limits, computes the API-defined summaries, and reports deadline or availability failures safely.
+It does not reduce task metrics, reinterpret scalar values, validate domain-specific units, combine
+metric versions, or decide whether the evidence is sufficient for a heuristic.
+
 There are three distinct roles:
 
 - The embedding plugin owns provider selection, construction, installation, persistence, and
