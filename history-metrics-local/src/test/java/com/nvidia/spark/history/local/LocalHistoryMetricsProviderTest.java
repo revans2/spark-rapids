@@ -16,14 +16,18 @@
 package com.nvidia.spark.history.local;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ServiceLoader;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.nvidia.spark.history.HistoryMetricsProvider;
 import com.nvidia.spark.history.MetricStore;
@@ -47,6 +51,50 @@ class LocalHistoryMetricsProviderTest {
         .findFirst()
         .orElseThrow(AssertionError::new);
     assertEquals("local", provider.name());
+  }
+
+  @Test
+  void shutdownRetainsOwnershipUntilCleanupCompletes() {
+    AtomicInteger shutdownCalls = new AtomicInteger();
+    LocalHistoryMetrics owner = new LocalHistoryMetrics() {
+      @Override
+      public MetricStore store() {
+        return null;
+      }
+
+      @Override
+      public LocalHistoryMetricsTestHandle testHandle() {
+        return null;
+      }
+
+      @Override
+      public void save(Path target, Duration timeout) {
+      }
+
+      @Override
+      public boolean drain(Duration timeout) {
+        return false;
+      }
+
+      @Override
+      public boolean shutdown(Duration timeout) {
+        int call = shutdownCalls.incrementAndGet();
+        if (call == 1) {
+          return false;
+        }
+        if (call == 2) {
+          throw new IllegalStateException("cleanup failed");
+        }
+        return true;
+      }
+    };
+    LocalHistoryMetricsProvider provider = new LocalHistoryMetricsProvider(owner);
+
+    assertFalse(provider.shutdown(Duration.ZERO));
+    assertThrows(IllegalStateException.class, () -> provider.shutdown(Duration.ZERO));
+    assertTrue(provider.shutdown(Duration.ZERO));
+    assertTrue(provider.shutdown(Duration.ZERO));
+    assertEquals(3, shutdownCalls.get());
   }
 
   @Test

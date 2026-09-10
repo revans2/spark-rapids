@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -172,6 +173,7 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
           stamped, observation.acceptanceOrdinal()));
     }
     backend.nextAcceptanceOrdinal = state.nextAcceptanceOrdinal();
+    backend.pruneExpired(providerClock.millis());
     return backend;
   }
 
@@ -312,8 +314,21 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
       return counted(WriteResult.unavailable(
           0, size, "acceptance ordinal space is exhausted"));
     }
+    long providerNowMs;
+    try {
+      providerNowMs = providerClock.millis();
+    } catch (RuntimeException failure) {
+      increment(rejectionReasons,
+          LocalBackendTestHandle.RejectionReason.BACKEND_FAILURE, size);
+      return counted(WriteResult.unavailable(0, size, "provider clock is unavailable"));
+    }
+    Set<MetricVersionId> affectedMetrics = new HashSet<MetricVersionId>();
     for (StampedObservation stamped : batch) {
       store(stamped);
+      affectedMetrics.add(stamped.observation().metric());
+    }
+    for (MetricVersionId metric : affectedMetrics) {
+      pruneExpired(metric, providerNowMs);
     }
     return counted(WriteResult.ok(size));
   }
@@ -398,6 +413,7 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
       if (hasEligibleRequest && !budget.expired() && !snapshotCopyAborted) {
         try {
           providerNowMs = providerClock.millis();
+          pruneExpired(providerNowMs);
         } catch (RuntimeException failure) {
           clockFailure = failure;
         }
@@ -471,6 +487,7 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
 
   synchronized List<LocalBackendTestHandle.StoredObservation> observations(
       MetricVersionId metric) {
+    pruneExpired(metric, providerClock.millis());
     List<LocalBackendTestHandle.StoredObservation> stored = observations.get(metric);
     if (stored == null) {
       return Collections.emptyList();
@@ -502,6 +519,7 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
   }
 
   synchronized List<LocalObservationSnapshot> observationSnapshots() {
+    pruneExpired(providerClock.millis());
     List<LocalBackendTestHandle.StoredObservation> ordered =
         new ArrayList<LocalBackendTestHandle.StoredObservation>();
     for (List<LocalBackendTestHandle.StoredObservation> metricObservations :
@@ -645,6 +663,32 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
     }
     stored.add(new LocalBackendTestHandle.StoredObservation(
         stamped, nextAcceptanceOrdinal++));
+  }
+
+  private void pruneExpired(long providerNowMs) {
+    for (MetricVersionId metric : declarations.keySet()) {
+      pruneExpired(metric, providerNowMs);
+    }
+  }
+
+  private void pruneExpired(MetricVersionId metric, long providerNowMs) {
+    Declaration declaration = declarations.get(metric);
+    List<LocalBackendTestHandle.StoredObservation> stored = observations.get(metric);
+    if (declaration == null || stored == null) {
+      return;
+    }
+    long cutoffMs = subtractAgeSaturated(
+        providerNowMs, declaration.effectiveRetention.storageRetention());
+    Iterator<LocalBackendTestHandle.StoredObservation> iterator = stored.iterator();
+    while (iterator.hasNext()) {
+      long timestampMs = iterator.next().internalStamped().observation().timestampMs();
+      if (timestampMs < cutoffMs) {
+        iterator.remove();
+      }
+    }
+    if (stored.isEmpty()) {
+      observations.remove(metric);
+    }
   }
 
   private WriteResult counted(WriteResult result) {

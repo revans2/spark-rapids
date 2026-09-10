@@ -27,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Collections;
@@ -40,6 +41,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
@@ -257,6 +259,36 @@ class LocalHistoryMetricsBackendTest {
           backend.testHandle().effectiveRetention(METRIC_V2).get());
       assertEquals(3, backend.testHandle().counters()
           .declarationOutcomeCount(SchemaStatus.Code.ACCEPTED));
+    } finally {
+      backend.close();
+    }
+  }
+
+  @Test
+  void effectiveStorageRetentionEvictsExpiredObservations() {
+    AtomicLong clockMs = new AtomicLong(NOW_MS);
+    LocalHistoryMetricsBackend backend = backend(mutableClock(clockMs));
+    try {
+      MetricSchema schema = schema(
+          METRIC_V1, dimensions("table", "bucket"),
+          Duration.ofMillis(5), Duration.ofMillis(10));
+      declare(backend, schema);
+      Map<String, DimValue> values = dimensions(DimValue.of("t"), DimValue.of("b"));
+
+      assertWrite(backend.record(Arrays.asList(
+          stamped(METRIC_V1, values, NOW_MS - 11),
+          stamped(METRIC_V1, values, NOW_MS - 10),
+          stamped(METRIC_V1, values, NOW_MS))), 3, 0, Status.Code.OK);
+      List<LocalBackendTestHandle.StoredObservation> retained =
+          backend.testHandle().observations(METRIC_V1);
+      assertEquals(2, retained.size());
+      assertEquals(NOW_MS - 10,
+          retained.get(0).stamped().observation().timestampMs());
+      assertEquals(NOW_MS, retained.get(1).stamped().observation().timestampMs());
+
+      clockMs.set(NOW_MS + 11);
+      assertTrue(backend.captureSnapshotState().observations().isEmpty());
+      assertTrue(backend.testHandle().observations(METRIC_V1).isEmpty());
     } finally {
       backend.close();
     }
@@ -512,6 +544,25 @@ class LocalHistoryMetricsBackendTest {
 
   private static Clock fixedClock() {
     return Clock.fixed(Instant.ofEpochMilli(NOW_MS), ZoneOffset.UTC);
+  }
+
+  private static Clock mutableClock(AtomicLong clockMs) {
+    return new Clock() {
+      @Override
+      public ZoneId getZone() {
+        return ZoneOffset.UTC;
+      }
+
+      @Override
+      public Clock withZone(ZoneId zone) {
+        return zone.equals(ZoneOffset.UTC) ? this : Clock.fixed(instant(), zone);
+      }
+
+      @Override
+      public Instant instant() {
+        return Instant.ofEpochMilli(clockMs.get());
+      }
+    };
   }
 
 }

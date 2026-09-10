@@ -17,6 +17,7 @@ package com.nvidia.spark.history.local;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Objects;
 
 import com.nvidia.spark.history.HistoryMetricCatalog;
 import com.nvidia.spark.history.HistoryMetricsProvider;
@@ -28,6 +29,13 @@ public final class LocalHistoryMetricsProvider implements HistoryMetricsProvider
   private static final Duration MAXIMUM_PLANNING_AGE = Duration.ofDays(7);
 
   private LocalHistoryMetrics owner;
+
+  public LocalHistoryMetricsProvider() {
+  }
+
+  LocalHistoryMetricsProvider(LocalHistoryMetrics owner) {
+    this.owner = Objects.requireNonNull(owner, "owner");
+  }
 
   @Override
   public String name() {
@@ -59,8 +67,14 @@ public final class LocalHistoryMetricsProvider implements HistoryMetricsProvider
       throw new NullPointerException("timeout");
     }
     LocalHistoryMetrics current = owner;
-    owner = null;
-    return current == null || current.shutdown(timeout);
+    if (current == null) {
+      return true;
+    }
+    boolean complete = current.shutdown(timeout);
+    if (complete) {
+      owner = null;
+    }
+    return complete;
   }
 
   static LocalProvenanceSource sparkProvenance(

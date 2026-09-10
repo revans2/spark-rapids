@@ -30,6 +30,8 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -150,7 +152,7 @@ class LocalSnapshotCodecTest {
   @Test
   void backendCaptureIsCoherentAndExcludesRuntimeCounters() throws Exception {
     LocalHistoryMetricsBackend backend = LocalHistoryMetricsBackend.create(
-        CATALOG, Clock.systemUTC(), MAXIMUM_AGE);
+        CATALOG, Clock.fixed(Instant.ofEpochMilli(12L), ZoneOffset.UTC), MAXIMUM_AGE);
     MetricSchema schema = new MetricSchema(
         METRIC,
         Collections.singletonList(new DimensionSpec("key", DimValue.Kind.STRING)),
