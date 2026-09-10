@@ -26,7 +26,6 @@ import org.apache.spark.SparkContext;
 /** Optional in-memory history metrics provider for testing and validation. */
 public final class LocalHistoryMetricsProvider implements HistoryMetricsProvider {
   private static final Duration MAXIMUM_PLANNING_AGE = Duration.ofDays(7);
-  private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
 
   private LocalHistoryMetrics owner;
 
@@ -44,35 +43,36 @@ public final class LocalHistoryMetricsProvider implements HistoryMetricsProvider
       throw new NullPointerException("sparkContext");
     }
 
-    String applicationId = nonemptyOrUnknown(sparkContext.applicationId());
-    String attemptId = sparkContext.applicationAttemptId().isDefined()
-        ? sparkContext.applicationAttemptId().get()
-        : null;
     String pluginVersion = implementationVersion();
-    LocalProvenanceIdentity identity =
-        LocalProvenanceIdentity.of(applicationId, attemptId, pluginVersion);
-
     LocalHistoryMetrics opened = LocalHistoryMetricsFactory.open(
         HistoryMetricCatalog.production(),
         Clock.systemUTC(),
-        new LocalProvenanceSource() {
-          @Override
-          public LocalProvenanceIdentity current() {
-            return identity;
-          }
-        },
+        sparkProvenance(sparkContext, pluginVersion),
         MAXIMUM_PLANNING_AGE);
     owner = opened;
     return opened.store();
   }
 
   @Override
-  public synchronized void shutdown() {
+  public synchronized boolean shutdown(Duration timeout) {
+    if (timeout == null) {
+      throw new NullPointerException("timeout");
+    }
     LocalHistoryMetrics current = owner;
     owner = null;
-    if (current != null) {
-      current.shutdown(SHUTDOWN_TIMEOUT);
-    }
+    return current == null || current.shutdown(timeout);
+  }
+
+  static LocalProvenanceSource sparkProvenance(
+      SparkContext sparkContext,
+      String pluginVersion) {
+    return new LocalProvenanceSource() {
+      @Override
+      public LocalProvenanceIdentity current() {
+        String applicationId = nonemptyOrUnknown(sparkContext.applicationId());
+        return LocalProvenanceIdentity.of(applicationId, null, pluginVersion);
+      }
+    };
   }
 
   private static String implementationVersion() {

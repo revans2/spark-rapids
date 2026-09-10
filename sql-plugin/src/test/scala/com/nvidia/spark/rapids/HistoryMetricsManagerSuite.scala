@@ -47,6 +47,7 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     assert(MetricStores.current() eq provider.store)
     manager.shutdown()
     assert(provider.shutdownCalls == 1)
+    assert(provider.shutdownTimeout == HistoryMetricsManager.PROVIDER_SHUTDOWN_TIMEOUT)
     assert(MetricStores.current() eq initial)
   }
 
@@ -72,6 +73,7 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
 
     assert(provider.openCalls == 1)
     assert(provider.shutdownCalls == 1)
+    assert(provider.shutdownTimeout == HistoryMetricsManager.PROVIDER_SHUTDOWN_TIMEOUT)
     assert(MetricStores.current() eq initial)
     manager.shutdown()
     assert(provider.shutdownCalls == 1)
@@ -94,9 +96,11 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
   private class TestProvider(
       providerName: String,
       val store: MetricStore,
-      failOpen: Boolean = false) extends HistoryMetricsProvider {
+      failOpen: Boolean = false,
+      shutdownResult: Boolean = true) extends HistoryMetricsProvider {
     var openCalls = 0
     var shutdownCalls = 0
+    var shutdownTimeout: Duration = _
 
     override def name(): String = providerName
 
@@ -108,8 +112,10 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
       store
     }
 
-    override def shutdown(): Unit = {
+    override def shutdown(timeout: Duration): Boolean = {
       shutdownCalls += 1
+      shutdownTimeout = timeout
+      shutdownResult
     }
   }
 

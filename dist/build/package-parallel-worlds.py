@@ -197,10 +197,9 @@ dist_dir = os.sep.join([source_basedir, 'dist'])
 iceberg_runtime = {}
 execfile(os.path.join(dist_dir, 'build', 'iceberg_runtime.py'), iceberg_runtime)
 runtime_manifest = os.path.join(project_build_dir, 'iceberg-audit-runtimes.txt')
-with open(os.sep.join([dist_dir, 'unshimmed-common-from-single-shim.txt']), 'r') as f:
-    from_single_shim = f.read().splitlines()
-with open(os.sep.join([dist_dir, 'unshimmed-from-each-spark3xx.txt']), 'r') as f:
-    from_each = f.read().splitlines()
+from_single_shim = read_patterns(
+    os.sep.join([dist_dir, 'unshimmed-common-from-single-shim.txt']))
+from_each = read_patterns(os.sep.join([dist_dir, 'unshimmed-from-each-spark3xx.txt']))
 root_safe_modules = read_patterns(os.sep.join([dist_dir, 'root-safe-module-classes.txt']))
 from_single_shim_or_each = from_single_shim + from_each
 iceberg_audit_runtimes = {}

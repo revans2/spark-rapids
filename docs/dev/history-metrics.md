@@ -34,9 +34,11 @@ There are three distinct roles:
   deliberately exposes.
 
 The RAPIDS driver plugin selects one provider by its stable name. Provider jars advertise a
-`HistoryMetricsProvider` through Java service metadata, but discovery does not enable them. RAPIDS
-constructs only the explicitly configured provider, installs its store, owns its shutdown, and keeps
-the built-in no-op store when selection or initialization fails.
+`HistoryMetricsProvider` through Java service metadata, but discovery does not enable them. The
+Java API is kept at the distribution root so application-classpath providers and parallel-world
+implementations share one API class identity. RAPIDS constructs only the explicitly configured
+provider, installs its store, owns its deadline-bounded shutdown, and keeps the built-in no-op store
+when selection or initialization fails.
 
 ## Artifact roles
 
@@ -65,9 +67,28 @@ spark.rapids.sql.history.metrics.provider=local
 ```
 
 A provider reads its own settings from the driver `SparkContext`, including Spark and Hadoop
-configuration. Provider-specific settings should use a provider-specific prefix. A jar on the
-classpath is only discoverable; it is never selected implicitly. Missing, duplicate, incompatible,
-or failing providers are logged and leave history-backed heuristics disabled on the no-op store.
+configuration. The SPI is Java so its `open(SparkContext)` descriptor is independent of the Scala
+binary version; a provider must still use only Spark methods supported by the Spark versions it
+claims to support. Provider jars must not bundle Spark or the history metrics API.
+
+Providers may be placed in the application jar or supplied before driver startup through `--jars`,
+`spark.jars`, `--packages`, `--driver-class-path`, `spark.driver.extraClassPath`, or an equivalent
+cluster library mechanism. The provider and RAPIDS distribution must be visible through compatible
+driver class loaders. In particular, do not put the provider only on the parent driver class path
+while supplying the RAPIDS distribution only through `--jars`: the parent cannot resolve the history
+metrics API from its child loader. Supplying both jars through the same mechanism avoids that
+asymmetry. Adding a provider later with `SparkContext.addJar()` cannot enable it, because provider
+selection occurs while the `SparkContext` is being initialized. A jar on the classpath is only
+discoverable; it is never selected implicitly. Discovery logs the configured name and every valid
+provider name and implementation it finds. Missing, duplicate, incompatible, or failing providers are
+logged with the no-op fallback reason and leave history-backed heuristics disabled.
+
+The current `local` service validates discovery and lifecycle integration. Its plugin-owned catalog
+is empty until the first governed production metric family is added, so it does not yet accept
+application declarations. The local provider uses the Spark application ID as non-secret provenance,
+sampling it when an observation is stamped because Spark assigns the ID after driver plugins are
+initialized. It leaves the optional application-attempt ID absent rather than depending on a
+scheduler-specific source. It does not expose snapshot save or restore through the plugin integration.
 
 ## Govern the metric before integrating it
 

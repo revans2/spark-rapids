@@ -16,13 +16,19 @@
 package com.nvidia.spark.history.local;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.ServiceLoader;
 
 import com.nvidia.spark.history.HistoryMetricsProvider;
+import com.nvidia.spark.history.MetricStore;
+import org.apache.spark.SparkConf;
+import org.apache.spark.SparkContext;
 import org.junit.jupiter.api.Test;
 
 class LocalHistoryMetricsProviderTest {
@@ -41,5 +47,29 @@ class LocalHistoryMetricsProviderTest {
         .findFirst()
         .orElseThrow(AssertionError::new);
     assertEquals("local", provider.name());
+  }
+
+  @Test
+  void opensWithRealSparkContext() {
+    SparkConf conf = new SparkConf(false)
+        .setMaster("local[1]")
+        .setAppName("history-metrics-provider-test")
+        .set("spark.ui.enabled", "false");
+    SparkContext sparkContext = new SparkContext(conf);
+    LocalHistoryMetricsProvider provider = new LocalHistoryMetricsProvider();
+    try {
+      LocalProvenanceSource provenance =
+          LocalHistoryMetricsProvider.sparkProvenance(sparkContext, "test-version");
+      LocalProvenanceIdentity identity = provenance.current();
+      assertEquals(sparkContext.applicationId(), identity.applicationId());
+      assertNull(identity.attemptId());
+
+      MetricStore store = provider.open(sparkContext);
+      assertNotNull(store);
+      assertNotNull(store.info());
+    } finally {
+      assertTrue(provider.shutdown(Duration.ofSeconds(10)));
+      sparkContext.stop();
+    }
   }
 }

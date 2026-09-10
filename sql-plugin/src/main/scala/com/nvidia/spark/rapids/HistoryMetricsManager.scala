@@ -16,6 +16,7 @@
 
 package com.nvidia.spark.rapids
 
+import java.time.Duration
 import java.util.{Locale, ServiceConfigurationError, ServiceLoader}
 
 import scala.collection.JavaConverters._
@@ -45,7 +46,7 @@ private[rapids] class HistoryMetricsManager(
       val requested =
         Option(configuredName).map(_.trim.toLowerCase(Locale.ROOT)).getOrElse("")
       if (requested == HistoryMetricsManager.NO_PROVIDER) {
-        logInfo("History metrics: requested=none, active=noop")
+        logInfo("History metrics: requested=none, active=noop, reason=disabled by configuration")
       } else {
         discoverProviders(requested).foreach { providers =>
           select(requested, providers, sparkContext)
@@ -71,7 +72,10 @@ private[rapids] class HistoryMetricsManager(
 
     if (currentProvider != null) {
       try {
-        currentProvider.shutdown()
+        if (!currentProvider.shutdown(HistoryMetricsManager.PROVIDER_SHUTDOWN_TIMEOUT)) {
+          logError(s"History metrics provider ${currentProvider.getClass.getName} " +
+            "did not finish shutdown within its budget")
+        }
       } catch {
         case failure if HistoryMetricsManager.isContained(failure) =>
           logError(s"History metrics provider ${currentProvider.getClass.getName} " +
@@ -83,12 +87,23 @@ private[rapids] class HistoryMetricsManager(
   private def discoverProviders(
       requested: String): Option[Seq[(String, HistoryMetricsProvider)]] = {
     try {
-      Some(loadProviders().flatMap { provider =>
+      val providers = loadProviders().flatMap { provider =>
         providerName(provider).map(_ -> provider)
-      })
+      }
+      val found = if (providers.isEmpty) {
+        "none"
+      } else {
+        providers.map { case (name, provider) =>
+          s"$name=${provider.getClass.getName}"
+        }.mkString(", ")
+      }
+      logInfo(s"History metrics provider discovery: requested=$requested, found=$found")
+      Some(providers)
     } catch {
       case failure if HistoryMetricsManager.isContained(failure) =>
-        fallback(requested, "provider discovery failed", failure)
+        fallback(requested, "provider discovery failed; ensure the provider and RAPIDS jars " +
+          "use compatible driver classloaders and the provider does not bundle the history " +
+          "metrics API", failure)
         None
     }
   }
@@ -150,7 +165,10 @@ private[rapids] class HistoryMetricsManager(
 
   private def cleanupFailedProvider(provider: HistoryMetricsProvider): Unit = {
     try {
-      provider.shutdown()
+      if (!provider.shutdown(HistoryMetricsManager.PROVIDER_SHUTDOWN_TIMEOUT)) {
+        logWarning(s"History metrics provider ${provider.getClass.getName} " +
+          "did not finish cleanup within its budget")
+      }
     } catch {
       case failure if HistoryMetricsManager.isContained(failure) =>
         logWarning(s"History metrics provider ${provider.getClass.getName} also failed cleanup",
@@ -171,6 +189,7 @@ private[rapids] class HistoryMetricsManager(
 
 private[rapids] object HistoryMetricsManager {
   val NO_PROVIDER: String = "none"
+  val PROVIDER_SHUTDOWN_TIMEOUT: Duration = Duration.ofSeconds(10)
 
   def discover(): Seq[HistoryMetricsProvider] = {
     val loader = getClass.getClassLoader

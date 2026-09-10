@@ -15,6 +15,8 @@
  */
 package com.nvidia.spark.history;
 
+import java.time.Duration;
+
 import org.apache.spark.SparkContext;
 
 /**
@@ -44,6 +46,14 @@ public interface HistoryMetricsProvider {
    */
   MetricStore open(SparkContext sparkContext) throws Exception;
 
-  /** Releases resources owned by this provider. Repeated calls must be harmless. */
-  void shutdown();
+  /**
+   * Releases resources owned by this provider within the supplied budget.
+   *
+   * <p>Repeated calls must be harmless. A {@code false} result means shutdown did not finish
+   * within the budget; callers should report it but must not block indefinitely.
+   *
+   * @param timeout nonnegative shutdown budget
+   * @return whether shutdown completed within the budget
+   */
+  boolean shutdown(Duration timeout);
 }
