@@ -24,10 +24,13 @@ application. The provider stamps application provenance, but does not decide the
 granularity or reduce task metrics. Summary requests combine matching stored observations; the
 heuristic chooses the dimensions, time window, limit, and whether the result is useful.
 
-The observed quantity, unit, occurrence, producer-side reduction, and timestamp meaning are semantic
-properties of an exact metric version. The metric owner defines and reviews them; the provider cannot
-infer or validate them from a scalar value. An incompatible change to any of those properties requires
-a new metric version.
+The exact `MetricVersionId` is the opaque stand-in for the metric's complete semantic contract.
+Observed quantity, unit, occurrence, producer-side reduction, timestamp meaning, and every other
+meaning-bearing property belong to that exact version. These properties are intentionally not modeled
+exhaustively in `MetricSchema`: the framework cannot enumerate or infer every way a metric's meaning
+can change. The metric owner defines, reviews, and enforces this association. A provider validates the
+structural declaration but cannot detect a developer assigning incompatible semantics to the same
+metric version. Any semantic change requires a new metric version.
 
 The provider validates the structural representation, isolates exact versions, stamps provenance,
 stores accepted observations, enforces its effective retention, applies request windows, dimensions,

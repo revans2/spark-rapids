@@ -23,7 +23,14 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Immutable declaration identity for one metric version.
+ * Immutable structural declaration for one metric version.
+ *
+ * <p>{@link MetricVersionId} is the opaque stand-in for the metric's complete semantic contract.
+ * The metric owner must increment its contract version when the observed quantity, unit, occurrence,
+ * producer-side reduction, timestamp meaning, or any other meaning-bearing property changes. Those
+ * properties are intentionally not modeled here: the framework cannot enumerate or infer every way
+ * a metric's meaning can change, and a provider cannot detect incompatible semantics that a developer
+ * assigns to the same metric version.
  *
  * <p>Dimension order is significant and declares the metric version's single compound access order.
  * Recommended retention is policy advice rather than declaration identity, so it is excluded from

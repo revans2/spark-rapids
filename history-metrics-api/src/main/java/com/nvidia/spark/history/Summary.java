@@ -49,6 +49,11 @@ public final class Summary {
   /**
    * Creates a nonempty unweighted evidence summary.
    *
+   * <p>A provider computing the mean with floating-point arithmetic should normalize a rounding-only
+   * excursion below {@code min} or above {@code max} to that nearest endpoint before calling this
+   * factory. This factory remains strict because it cannot distinguish rounding error from an invalid
+   * summary and therefore does not clamp arbitrary out-of-range input.
+   *
    * @param count positive number of observations
    * @param mean finite arithmetic mean
    * @param min finite minimum no greater than {@code mean}

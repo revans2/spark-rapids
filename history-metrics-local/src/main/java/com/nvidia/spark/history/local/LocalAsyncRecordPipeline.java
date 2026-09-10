@@ -751,12 +751,39 @@ final class LocalAsyncRecordPipeline {
   }
 
   private void runWriter() {
-    while (true) {
-      List<QueuedObservation> batch = takeBatch();
-      if (batch == null) {
-        return;
+    try {
+      while (true) {
+        List<QueuedObservation> batch = takeBatch();
+        if (batch == null) {
+          return;
+        }
+        completeBatch(batch, write(batch));
       }
-      completeBatch(batch, write(batch));
+    } catch (Error failure) {
+      failWriter();
+      throw failure;
+    }
+  }
+
+  private void failWriter() {
+    lock.lock();
+    try {
+      accepting = false;
+      if (inFlight) {
+        backendBatches++;
+        markInFlightAmbiguousUnderLock();
+      }
+      stoppedItems += queue.size();
+      queue.clear();
+      terminalSequence = Math.max(terminalSequence, highestEnqueued);
+      cleanupTerminalSequence = 0L;
+      inFlight = false;
+      inFlightItems = 0;
+      inFlightReportedAmbiguous = false;
+      terminalChanged.signalAll();
+      workAvailable.signalAll();
+    } finally {
+      lock.unlock();
     }
   }
 

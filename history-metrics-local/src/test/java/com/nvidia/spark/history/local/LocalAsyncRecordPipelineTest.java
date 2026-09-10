@@ -349,6 +349,38 @@ class LocalAsyncRecordPipelineTest {
   }
 
   @Test
+  void fatalWriterErrorStopsAdmissionAndMakesOutstandingRecordsTerminal() throws Exception {
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    RecordingBackend backend = new RecordingBackend();
+    backend.handler = batch -> {
+      entered.countDown();
+      release.await();
+      throw new AssertionError("fatal backend failure");
+    };
+    LocalMetricStorePlanningAdapter adapter =
+        adapterWithDeclarations(backend, policy(4, 1), METRIC_A);
+
+    adapter.record(Collections.singletonList(observation(METRIC_A, "in-flight", 1L)));
+    assertTrue(entered.await(5, TimeUnit.SECONDS));
+    adapter.record(Arrays.asList(
+        observation(METRIC_A, "queued-1", 1L),
+        observation(METRIC_A, "queued-2", 1L)));
+    release.countDown();
+
+    assertTrue(adapter.drain(TIMEOUT));
+    adapter.record(Collections.singletonList(observation(METRIC_A, "after-failure", 1L)));
+
+    LocalAsyncRecordPipeline.RecordCounterSnapshot counters = adapter.recordCounters();
+    assertEquals(1, backend.recordCalls.get());
+    assertEquals(1, counters.backendBatchCount());
+    assertEquals(1, counters.backendAmbiguousItemCount());
+    assertEquals(3, counters.stoppedItemCount());
+    assertEquals(0, counters.queueCurrent());
+    assertTrue(adapter.stopRecording(TIMEOUT));
+  }
+
+  @Test
   void drainWatermarkExcludesLaterEnqueuesAndPositiveTimeoutIsDeterministic()
       throws Exception {
     CountDownLatch firstEntered = new CountDownLatch(1);
