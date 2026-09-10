@@ -20,9 +20,9 @@ import java.time.Duration
 import java.util
 
 import com.nvidia.spark.history._
+import org.scalatest.funsuite.AnyFunSuite
 
 import org.apache.spark.SparkContext
-import org.scalatest.funsuite.AnyFunSuite
 
 class HistoryMetricsManagerSuite extends AnyFunSuite {
   test("none keeps the no-op store without discovering providers") {
