@@ -18,9 +18,11 @@
  * testing and early prototypes.
  *
  * <p>{@link com.nvidia.spark.history.local.LocalHistoryMetricsFactory} requires the catalog,
- * driver clock, caller-redacted provenance source, maximum planning age, and all queue, execution,
- * and circuit-breaker policies. It supplies no defaults, does not install the returned store in the
- * process locator, and plain open performs no file access. The owner must call
+ * driver clock, caller-redacted provenance source, and maximum planning age. It supplies bounded
+ * implementation defaults for queues, batching, planning execution, and failure isolation. The
+ * embedding plugin owns provider selection, configuration, installation, persistence, and lifecycle;
+ * heuristic developers do not tune those mechanisms. Plain open performs no file access and does not
+ * install the returned store in the process locator. The owner must call
  * {@link com.nvidia.spark.history.local.LocalHistoryMetrics#shutdown(java.time.Duration)}
  * with an explicit budget; it deliberately is not {@link java.lang.AutoCloseable}.
  *

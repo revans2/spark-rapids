@@ -62,18 +62,15 @@ class LocalCompanionContractsTest {
     assertPublicMethods(
         LocalHistoryMetricsFactory.class,
         "open(com.nvidia.spark.history.HistoryMetricCatalog,java.time.Clock," +
-            "com.nvidia.spark.history.local.LocalProvenanceSource,java.time.Duration," +
-            "com.nvidia.spark.history.local.LocalQueuePolicy," +
-            "com.nvidia.spark.history.local.LocalExecutionPolicy," +
-            "com.nvidia.spark.history.local.LocalCircuitBreakerPolicy):" +
+            "com.nvidia.spark.history.local.LocalProvenanceSource,java.time.Duration):" +
             "com.nvidia.spark.history.local.LocalHistoryMetrics",
         "openSnapshot(java.nio.file.Path," +
             "com.nvidia.spark.history.HistoryMetricCatalog,java.time.Clock," +
             "com.nvidia.spark.history.local.LocalProvenanceSource,java.time.Duration," +
-            "com.nvidia.spark.history.local.LocalQueuePolicy," +
-            "com.nvidia.spark.history.local.LocalExecutionPolicy," +
-            "com.nvidia.spark.history.local.LocalCircuitBreakerPolicy,java.time.Duration):" +
-            "com.nvidia.spark.history.local.LocalHistoryMetrics");
+            "java.time.Duration):com.nvidia.spark.history.local.LocalHistoryMetrics");
+    assertFalse(Modifier.isPublic(LocalQueuePolicy.class.getModifiers()));
+    assertFalse(Modifier.isPublic(LocalExecutionPolicy.class.getModifiers()));
+    assertFalse(Modifier.isPublic(LocalCircuitBreakerPolicy.class.getModifiers()));
     assertPublicMethods(
         LocalHistoryMetricsTestHandle.class,
         "observations():java.util.List",

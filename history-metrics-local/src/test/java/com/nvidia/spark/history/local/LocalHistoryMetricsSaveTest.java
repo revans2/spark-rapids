@@ -90,7 +90,7 @@ class LocalHistoryMetricsSaveTest {
       MetricSchema schema = schema();
       assertEquals(SchemaStatus.Code.ACCEPTED,
           owner.store().declare(Collections.singletonList(schema), TIMEOUT).get(0).code());
-      owner.store().record(Collections.singletonList(observation(900L, 7.0)));
+      owner.store().record(observation(900L, 7.0));
       Path target = temporaryDirectory.resolve("state.bin");
 
       owner.save(target, TIMEOUT);
@@ -298,7 +298,7 @@ class LocalHistoryMetricsSaveTest {
       MetricSchema schema = schema();
       assertEquals(SchemaStatus.Code.ACCEPTED,
           owner.store().declare(Collections.singletonList(schema), TIMEOUT).get(0).code());
-      owner.store().record(Collections.singletonList(observation(900L, 1.0)));
+      owner.store().record(observation(900L, 1.0));
       assertTrue(owner.drain(TIMEOUT));
 
       Path first = temporaryDirectory.resolve("first.bin");
@@ -402,7 +402,7 @@ class LocalHistoryMetricsSaveTest {
     try {
       assertEquals(SchemaStatus.Code.ACCEPTED,
           owner.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
-      owner.store().record(Collections.singletonList(observation(900L, 1.0)));
+      owner.store().record(observation(900L, 1.0));
       assertTrue(backend.recordEntered.await(5, TimeUnit.SECONDS));
 
       Path first = temporaryDirectory.resolve("ambiguous-first.bin");

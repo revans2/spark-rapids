@@ -534,13 +534,13 @@ class LocalAsyncRecordPipelineTest {
     LocalMetricStorePlanningAdapter adapter = declaredAdapter(
         backend, fixedClock(1L), new CountingProvenanceSource(), policy(2, 1));
 
-    adapter.record(null);
+    adapter.record((Observation) null);
     adapter.record(Collections.<Observation>emptyList());
     LocalAsyncRecordPipeline.RecordCounterSnapshot counters = adapter.recordCounters();
     assertEquals(2, counters.recordCallCount());
-    assertEquals(1, counters.invalidCallCount());
+    assertEquals(0, counters.invalidCallCount());
+    assertEquals(1, counters.invalidItemCount());
     assertEquals(0, counters.enqueuedItemCount());
-    assertEquals(1, counters.invalidCallCount());
     assertSame(before, MetricStores.current());
     assertThrows(NullPointerException.class, () -> adapter.drain(null));
     assertThrows(IllegalArgumentException.class,

@@ -15,8 +15,8 @@
  */
 package com.nvidia.spark.history.local;
 
-/** Explicit immutable planning executor bounds for a local provider. */
-public final class LocalExecutionPolicy {
+/** Immutable planning executor bounds for local implementation tests. */
+final class LocalExecutionPolicy {
   private final int planningThreads;
   private final int planningQueueCapacity;
 
@@ -38,7 +38,7 @@ public final class LocalExecutionPolicy {
    * @param planningQueueCapacity positive number of queued planning tasks
    * @return immutable execution policy
    */
-  public static LocalExecutionPolicy of(int planningThreads, int planningQueueCapacity) {
+  static LocalExecutionPolicy of(int planningThreads, int planningQueueCapacity) {
     return new LocalExecutionPolicy(planningThreads, planningQueueCapacity);
   }
 
@@ -47,7 +47,7 @@ public final class LocalExecutionPolicy {
    *
    * @return planning thread count
    */
-  public int planningThreads() {
+  int planningThreads() {
     return planningThreads;
   }
 
@@ -56,7 +56,7 @@ public final class LocalExecutionPolicy {
    *
    * @return queued task capacity
    */
-  public int planningQueueCapacity() {
+  int planningQueueCapacity() {
     return planningQueueCapacity;
   }
 

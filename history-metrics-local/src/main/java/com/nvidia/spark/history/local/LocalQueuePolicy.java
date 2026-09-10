@@ -15,8 +15,8 @@
  */
 package com.nvidia.spark.history.local;
 
-/** Explicit immutable observation queue and backend batch bounds for a local provider. */
-public final class LocalQueuePolicy {
+/** Immutable observation queue and backend batch bounds for local implementation tests. */
+final class LocalQueuePolicy {
   private final int capacityObservations;
   private final int maxBackendBatchSize;
 
@@ -38,7 +38,7 @@ public final class LocalQueuePolicy {
    * @param maxBackendBatchSize positive maximum observations in one backend write batch
    * @return immutable queue policy
    */
-  public static LocalQueuePolicy of(int capacityObservations, int maxBackendBatchSize) {
+  static LocalQueuePolicy of(int capacityObservations, int maxBackendBatchSize) {
     return new LocalQueuePolicy(capacityObservations, maxBackendBatchSize);
   }
 
@@ -47,7 +47,7 @@ public final class LocalQueuePolicy {
    *
    * @return observation capacity
    */
-  public int capacityObservations() {
+  int capacityObservations() {
     return capacityObservations;
   }
 
@@ -56,7 +56,7 @@ public final class LocalQueuePolicy {
    *
    * @return maximum observations per backend batch
    */
-  public int maxBackendBatchSize() {
+  int maxBackendBatchSize() {
     return maxBackendBatchSize;
   }
 

@@ -32,6 +32,19 @@ import com.nvidia.spark.history.HistoryMetricsBackend;
 
 /** Explicit construction boundary for standalone driver-local history metrics. */
 public final class LocalHistoryMetricsFactory {
+  // Implementation bounds for the driver-local provider. These are deliberately not part of the
+  // consumer API; callers describe metric semantics and operation deadlines, not executor tuning.
+  private static final int DEFAULT_RECORD_QUEUE_CAPACITY = 4096;
+  private static final int DEFAULT_BACKEND_BATCH_SIZE = 64;
+  private static final int DEFAULT_PLANNING_THREADS = 2;
+  private static final int DEFAULT_PLANNING_QUEUE_CAPACITY = 64;
+  private static final int DEFAULT_BREAKER_WINDOW_SIZE = 32;
+  private static final int DEFAULT_BREAKER_MIN_SAMPLES = 8;
+  private static final double DEFAULT_BREAKER_FAILURE_RATE = 0.5;
+  private static final Duration DEFAULT_BREAKER_SLOW_CALL = Duration.ofMillis(100);
+  private static final double DEFAULT_BREAKER_SLOW_RATE = 0.5;
+  private static final Duration DEFAULT_BREAKER_OPEN_DURATION = Duration.ofSeconds(30);
+
   private static final LocalMetricStorePlanningAdapter.Ticker SYSTEM_TICKER =
       new LocalMetricStorePlanningAdapter.Ticker() {
         @Override
@@ -50,25 +63,39 @@ public final class LocalHistoryMetricsFactory {
   }
 
   /**
-   * Opens a fresh explicitly owned driver-local store.
+   * Opens a fresh explicitly owned driver-local store with bounded implementation defaults.
    *
    * <p>This method does not install the store, read process configuration, access a network, or
-   * touch a file. The returned owner holds daemon executors and backend resources until explicit
-   * {@link LocalHistoryMetrics#shutdown(Duration) shutdown}.
+   * touch a file. The embedding plugin owns configuration, installation, persistence, and lifecycle.
+   * Metric producers should use the returned {@link LocalHistoryMetrics#store() store} and should
+   * not tune the provider's queues, executors, or circuit breaker.
    *
    * @param catalog governed production catalog or isolated companion test catalog
    * @param driverClock clock used for provenance write time, retention, and future-time validation
    * @param provenanceSource caller-redacted identity source sampled once per record call
    * @param maximumPlanningAge nonnegative provider clamp on planning-visible history
-   * @param queuePolicy explicit positive observation-capacity and backend-batch bounds
-   * @param executionPolicy explicit positive planning-executor bounds
-   * @param circuitBreakerPolicy explicit planning circuit-breaker bounds
    * @return a fresh standalone owner; never installed in {@code MetricStores}
    * @throws NullPointerException if an argument is null
    * @throws IllegalArgumentException if an argument violates its documented range or construction
    *     is binary-incompatible
    */
   public static LocalHistoryMetrics open(
+      HistoryMetricCatalog catalog,
+      Clock driverClock,
+      LocalProvenanceSource provenanceSource,
+      Duration maximumPlanningAge) {
+    return open(
+        catalog,
+        driverClock,
+        provenanceSource,
+        maximumPlanningAge,
+        defaultQueuePolicy(),
+        defaultExecutionPolicy(),
+        defaultCircuitBreakerPolicy());
+  }
+
+  /** Test seam for exercising implementation bounds. */
+  static LocalHistoryMetrics open(
       HistoryMetricCatalog catalog,
       Clock driverClock,
       LocalProvenanceSource provenanceSource,
@@ -107,25 +134,17 @@ public final class LocalHistoryMetricsFactory {
   }
 
   /**
-   * Restores one explicit driver-local owner from a previously published snapshot.
+   * Restores one explicitly owned driver-local store with bounded implementation defaults.
    *
    * <p>The relative nonnegative {@code timeout} is one monotonic budget from method entry through
-   * final owner publication. The source path is guarded through validation and unpublished owner
-   * construction. Runtime queues, counters, circuit-breaker state, and lifecycle state always start
-   * fresh. The returned store is not installed.
-   *
-   * <p>The source is an unencrypted, same-version, local-sensitive test-support image. Callers own
-   * path protection and any residual-file cleanup and must supply a catalog and maximum planning-age
-   * envelope compatible with the image.
+   * final owner publication. Runtime queues, counters, circuit-breaker state, and lifecycle state
+   * start fresh. The returned store is not installed.
    *
    * @param source explicit snapshot source path
    * @param catalog exact governed catalog expected in the image
    * @param clock newly supplied driver clock
    * @param provenanceSource newly supplied caller-redacted identity source
    * @param maximumPlanningAge nonnegative clamp for restored and future declarations
-   * @param queuePolicy fresh observation queue bounds
-   * @param executionPolicy fresh planning executor bounds
-   * @param breakerPolicy fresh planning circuit-breaker bounds
    * @param timeout relative nonnegative end-to-end budget
    * @return a fully validated and explicitly owned restored store
    * @throws NullPointerException if an argument is null
@@ -134,6 +153,26 @@ public final class LocalHistoryMetricsFactory {
    *     {@link LocalSnapshotException#reason()}
    */
   public static LocalHistoryMetrics openSnapshot(
+      Path source,
+      HistoryMetricCatalog catalog,
+      Clock clock,
+      LocalProvenanceSource provenanceSource,
+      Duration maximumPlanningAge,
+      Duration timeout) throws LocalSnapshotException {
+    return openSnapshot(
+        source,
+        catalog,
+        clock,
+        provenanceSource,
+        maximumPlanningAge,
+        defaultQueuePolicy(),
+        defaultExecutionPolicy(),
+        defaultCircuitBreakerPolicy(),
+        timeout);
+  }
+
+  /** Test seam for exercising implementation bounds during restore. */
+  static LocalHistoryMetrics openSnapshot(
       Path source,
       HistoryMetricCatalog catalog,
       Clock clock,
@@ -577,6 +616,24 @@ public final class LocalHistoryMetricsFactory {
         LocalSnapshotException.Reason.IO,
         "local snapshot owner construction failed",
         new IllegalStateException("local snapshot owner construction failed"));
+  }
+
+  private static LocalQueuePolicy defaultQueuePolicy() {
+    return LocalQueuePolicy.of(DEFAULT_RECORD_QUEUE_CAPACITY, DEFAULT_BACKEND_BATCH_SIZE);
+  }
+
+  private static LocalExecutionPolicy defaultExecutionPolicy() {
+    return LocalExecutionPolicy.of(DEFAULT_PLANNING_THREADS, DEFAULT_PLANNING_QUEUE_CAPACITY);
+  }
+
+  private static LocalCircuitBreakerPolicy defaultCircuitBreakerPolicy() {
+    return LocalCircuitBreakerPolicy.of(
+        DEFAULT_BREAKER_WINDOW_SIZE,
+        DEFAULT_BREAKER_MIN_SAMPLES,
+        DEFAULT_BREAKER_FAILURE_RATE,
+        DEFAULT_BREAKER_SLOW_CALL,
+        DEFAULT_BREAKER_SLOW_RATE,
+        DEFAULT_BREAKER_OPEN_DURATION);
   }
 
   private static void validate(

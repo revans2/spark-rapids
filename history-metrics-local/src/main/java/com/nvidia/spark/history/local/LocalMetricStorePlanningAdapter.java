@@ -601,7 +601,15 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
   }
 
   @Override
-  public void record(List<Observation> observations) {
+  public void record(Observation observation) {
+    record(Collections.singletonList(observation));
+  }
+
+  /**
+   * Package-private batch seam for exercising queue admission and backend batching. The
+   * provider-neutral producer API records one observation at a time.
+   */
+  void record(List<Observation> observations) {
     LocalAsyncRecordPipeline pipeline = recordPipeline;
     if (pipeline != null) {
       pipeline.record(observations);

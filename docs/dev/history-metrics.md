@@ -6,27 +6,36 @@ parent: Developer Overview
 ---
 # History Metrics Integration
 
-History metrics let a driver-side planning consumer learn from earlier jobs without making query
-success depend on history. The central integration rule is **abstain safely**: use history only after
-the entire response needed for one decision is structurally usable and the metric owner's reviewed
-evidence policy accepts it. Otherwise preserve the existing static decision.
+History metrics let a driver-side planning heuristic learn from earlier applications without making
+query success depend on history. The central integration rule is **abstain safely**: use history only
+after the response needed for one decision is structurally usable and the heuristic's evidence policy
+accepts it. Otherwise preserve the existing static decision.
 
 The store is the final stage of a metric-specific pipeline:
 
-1. Run a job.
-2. Collect the task-, stage-, application-, or other runtime metrics needed by the heuristic.
-3. Reduce those metrics into the application-level observation defined by the metric owner.
-4. Record that reduced observation in the history store.
+1. Run the application.
+2. Collect the task-, stage-, operator-, query-, or application-level inputs needed by the heuristic.
+3. Convert those inputs into one or more scalar observations defined by the heuristic.
+4. Record each observation in the history store.
 
-Steps 2 and 3 belong to the metric producer and heuristic owner. This API starts at step 4. It is not
-a task-metric ingestion or reduction service. A summary aggregates reduced observations from
-multiple jobs; it does not aggregate the task metrics within one job. The metric owner decides how
-to reduce a job, how many historical jobs are sufficient, and whether a returned summary is useful.
+Steps 2 and 3 belong to the heuristic developer. This API starts at step 4. An observation can
+represent a scan, join, query, application, or another heuristic-defined occurrence in the current
+application. The provider stamps application provenance, but does not decide the observation's
+granularity or reduce task metrics. Summary requests combine matching stored observations; the
+heuristic chooses the dimensions, time window, limit, and whether the result is useful.
 
-This is an MVP developer guide. It does not define a metric-specific estimator, evidence threshold,
-or optimizer policy. The
-[compiled integration example](../../history-metrics-local/src/test/java/com/nvidia/spark/history/local/HistoryMetricsIntegrationExampleTest.java)
-exercises the lifecycle described here.
+There are three distinct roles:
+
+- The embedding plugin owns provider selection, construction, installation, persistence, and
+  shutdown. The Spark RAPIDS driver plugin is the intended owner for this MVP.
+- A heuristic developer defines observations and summary requests. They do not configure provider
+  queues, executors, circuit breakers, or lifecycle machinery.
+- An operator enables the feature and supplies only operational settings that the embedding plugin
+  deliberately exposes.
+
+A generic provider-discovery or provider-configuration mechanism is follow-up work. This MVP keeps
+that responsibility in the embedding plugin instead of freezing a new integration contract in the
+API jar.
 
 ## Artifact roles
 
@@ -35,14 +44,15 @@ The source tree separates three Java 8 artifacts:
 | Artifact | Role | Dependency direction |
 | --- | --- | --- |
 | `cudf-spark-history-metrics-api` | Dependency-free planning contract, governed production catalog, no-op store, and process locator | Consumer-facing base |
-| `cudf-spark-history-metrics-local` | Explicitly owned, in-memory driver companion for tests and early prototypes, including snapshots and local observability | Depends on the API and Log4j API |
+| `cudf-spark-history-metrics-local` | Current explicitly owned, in-memory driver provider, including snapshots and test diagnostics | Depends on the API and Log4j API |
 | `cudf-spark-history-metrics-tck` | Reusable provider-conformance fixtures and suites | Test dependency for provider implementations |
 
-Use artifacts built from a compatible project revision. These names describe repository roles; this
-guide does not claim released Maven coordinates or make the local companion a production service.
-Depending on the API leaves `MetricStores.current()` on its non-null no-op implementation.
-Depending on the local companion does not construct or install a provider, enable persistence, read
-configuration, or access a network.
+Use artifacts built from a compatible project revision. These names describe the current source-tree
+roles and are not a commitment to their long-term repository placement. The API is expected to move
+with the planning integration that owns logical-plan changes. Depending on the API leaves
+`MetricStores.current()` on its non-null no-op implementation. Depending on the local provider does
+not construct or install it, enable persistence, read configuration, or access a network; the
+embedding plugin owns those decisions.
 
 ## Govern the metric before integrating it
 
@@ -70,11 +80,13 @@ single-call deadline and 128-request cap; otherwise it abstains.
 
 `LocalTestCatalog.builder()` accepts source-declared live and retired entries for an isolated local
 test. It neither allocates nor reserves a production ID. The numeric ID `61001` and version `1` in
-the compiled example are test inputs only.
+the example below are test inputs only.
 
-## Construct an explicit local owner
+## Construct the local provider from the embedding plugin
 
-The local factory requires every policy and identity input explicitly. For example:
+The embedding plugin supplies semantic and application identity inputs. Queue sizing, backend
+batching, planning executors, and circuit-breaker thresholds are bounded implementation details with
+local defaults; heuristic developers and operators do not choose them.
 
 ```java
 HistoryMetricCatalog catalog = LocalTestCatalog.builder()
@@ -86,21 +98,18 @@ LocalHistoryMetrics owner = LocalHistoryMetricsFactory.open(
     Clock.fixed(Instant.ofEpochMilli(10_000L), ZoneOffset.UTC),
     () -> LocalProvenanceIdentity.of(
         "redacted-example-app", "attempt-1", "example-build"),
-    Duration.ofHours(2),
-    LocalQueuePolicy.of(19, 7),
-    LocalExecutionPolicy.of(2, 11),
-    LocalCircuitBreakerPolicy.of(
-        9, 5, 0.75, Duration.ofMillis(850), 0.60, Duration.ofSeconds(3)));
+    Duration.ofHours(2));
 ```
 
-Every number and duration above is an intentionally distinctive example value, not a default or
-recommendation. Choose and validate bounds for the actual driver workload. Provenance text is
-diagnostic input supplied by the caller: redact it before construction. The local provider validates
-encoding and bounds but does not discover secrets or authenticate that identity.
+The example catalog is test-only. Production integrations use the governed catalog. The maximum
+planning age is a semantic envelope chosen by the embedding plugin, and provenance is redacted
+application identity supplied by that plugin. The provider validates encoding and bounds but does
+not discover secrets or authenticate the identity.
 
 `LocalHistoryMetrics` owns its executors and backend. It deliberately is not `AutoCloseable`
-because shutdown requires an explicit time budget. Always invoke `shutdown(Duration)` in a
-`finally` block and handle a `false` result according to the caller's bounded cleanup policy.
+because shutdown is deadline-bounded. Provider ownership belongs in plugin lifecycle code, which
+must invoke `shutdown(Duration)` and handle a `false` result. A heuristic should never create or
+shut down the provider itself.
 
 ## Declare, record, drain, then summarize
 
@@ -125,17 +134,18 @@ if (declared.code() != SchemaStatus.Code.ACCEPTED) {
 
 Those retention values are also example inputs, not policy guidance. `declare` and `summarize`
 are synchronous but bounded by their relative operation budgets. Do not record under a version whose
-declaration was not accepted. Each observation is one metric-owner-defined, application-level value
-that has already been reduced from the relevant runtime metrics. It supplies every declared
-dimension, a finite value, and an observation-time timestamp. A record call will normally contain
-one such observation; the list form permits a small group of application-level observations that
-become ready together. It is not intended for individual task samples. `record` is non-blocking and
-may drop input; `drain` waits, within its explicit budget, for observations admitted before its
-watermark to become terminal.
+declaration was not accepted. Each observation is one scalar occurrence defined by the heuristic. It
+can describe a scan, join, query, application, or another event within the application. It supplies
+every declared dimension, a finite value, and an observation-time timestamp. If task-level inputs
+need to be combined, the heuristic does so before this call. `record` accepts one observation, is
+non-blocking, and may drop it; the provider may batch queued observations internally. A future
+producer batch API may accept unrelated metrics, but it is outside this MVP until ordering, partial
+acceptance, and atomicity semantics are defined. `drain` waits, within its explicit budget, for
+observations admitted before its watermark to become terminal.
 
 ```java
-owner.store().record(Collections.singletonList(
-    new Observation(metric, dimensions, 2.0, 9_000L)));
+owner.store().record(
+    new Observation(metric, dimensions, 2.0, 9_000L));
 if (!owner.drain(operationBudget)) {
   // Do not assume the queued observation is available to the following read.
 }
@@ -165,6 +175,12 @@ SummaryRequest wildcard = SummaryRequest.builder(metric)
 
 Dimension order is a one-time contract and an access-order choice. Benchmark every declared request
 shape before putting it on a planning path.
+
+The request belongs to the heuristic. For example, `limit(1)` asks for the latest matching
+observation and is appropriate when the most recent comparable application is the best evidence.
+Another heuristic may request the latest five observations or the entire bounded window. The store
+provides the selection and summary operations; it does not impose one evidence policy on every
+heuristic.
 
 ## Treat responses as permission to consider evidence
 
@@ -212,7 +228,8 @@ The local factory never installs its store. Install only when code that reads
 `MetricStores.current()` must share the explicitly constructed owner:
 
 ```java
-LocalHistoryMetrics owner = LocalHistoryMetricsFactory.open(/* explicit inputs */);
+LocalHistoryMetrics owner = LocalHistoryMetricsFactory.open(
+    catalog, driverClock, provenanceSource, maximumPlanningAge);
 AutoCloseable registration = null;
 try {
   registration = MetricStores.install(owner.store());
@@ -251,9 +268,6 @@ LocalHistoryMetrics restored = LocalHistoryMetricsFactory.openSnapshot(
     driverClock,
     provenanceSource,
     maximumPlanningAge,
-    queuePolicy,
-    executionPolicy,
-    breakerPolicy,
     operationBudget);
 try {
   // Re-query restored declarations and observations.

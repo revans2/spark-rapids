@@ -18,8 +18,8 @@ package com.nvidia.spark.history.local;
 import java.time.Duration;
 import java.util.Objects;
 
-/** Explicit immutable rolling-window circuit-breaker policy for local planning calls. */
-public final class LocalCircuitBreakerPolicy {
+/** Immutable rolling-window circuit-breaker policy for local implementation tests. */
+final class LocalCircuitBreakerPolicy {
   private final int windowSize;
   private final int minSamples;
   private final double failureRateThreshold;
@@ -63,7 +63,7 @@ public final class LocalCircuitBreakerPolicy {
    * @param openDuration positive monotonic elapsed time before one half-open probe is eligible
    * @return immutable circuit-breaker policy
    */
-  public static LocalCircuitBreakerPolicy of(
+  static LocalCircuitBreakerPolicy of(
       int windowSize,
       int minSamples,
       double failureRateThreshold,
@@ -84,7 +84,7 @@ public final class LocalCircuitBreakerPolicy {
    *
    * @return window size in samples
    */
-  public int windowSize() {
+  int windowSize() {
     return windowSize;
   }
 
@@ -93,7 +93,7 @@ public final class LocalCircuitBreakerPolicy {
    *
    * @return minimum samples
    */
-  public int minSamples() {
+  int minSamples() {
     return minSamples;
   }
 
@@ -102,7 +102,7 @@ public final class LocalCircuitBreakerPolicy {
    *
    * @return failure-rate threshold
    */
-  public double failureRateThreshold() {
+  double failureRateThreshold() {
     return failureRateThreshold;
   }
 
@@ -111,7 +111,7 @@ public final class LocalCircuitBreakerPolicy {
    *
    * @return slow-call threshold
    */
-  public Duration slowCallThreshold() {
+  Duration slowCallThreshold() {
     return slowCallThreshold;
   }
 
@@ -120,7 +120,7 @@ public final class LocalCircuitBreakerPolicy {
    *
    * @return slow-rate threshold
    */
-  public double slowRateThreshold() {
+  double slowRateThreshold() {
     return slowRateThreshold;
   }
 
@@ -129,7 +129,7 @@ public final class LocalCircuitBreakerPolicy {
    *
    * @return open-state duration
    */
-  public Duration openDuration() {
+  Duration openDuration() {
     return openDuration;
   }
 

@@ -28,9 +28,9 @@ import java.util.List;
  * Empty batches do not invoke a provider. Batches larger than 128 use the documented empty-list
  * invalid-batch sentinel.
  *
- * <p>{@link #record(List)} is a total, non-blocking boundary: malformed input and write failures are
- * counted and dropped by an implementation. The planning contract deliberately has no flush, close,
- * update, or destructive operation.
+ * <p>{@link #record(Observation)} is a total, non-blocking boundary: malformed input and write
+ * failures are counted and dropped by an implementation. The planning contract deliberately has no
+ * flush, close, update, or destructive operation.
  */
 public interface MetricStore {
   /**
@@ -49,21 +49,20 @@ public interface MetricStore {
   List<SchemaStatus> declare(List<MetricSchema> schemas, Duration timeout);
 
   /**
-   * Offers raw observations for asynchronous persistence without blocking or throwing into query
+   * Offers one raw observation for asynchronous persistence without blocking or throwing into query
    * work.
    *
-   * <p>Each element is a metric-owner-defined, application-level observation that has already been
-   * reduced from any task or stage metrics. Calls normally contain one observation; the list form is
-   * for a small group of application-level observations that become ready together, not task-level
-   * bulk ingestion. A configured implementation stamps provenance, counts and drops invalid or
-   * unavailable evidence, and may drop a suffix when its bounded queue is full. Return does not mean
-   * the observations were persisted. The built-in no-op store discards the entire call without
-   * inspecting it.
+   * <p>The metric owner defines what the value represents. It may describe a scan, join, query,
+   * application, or another heuristic-specific event within the current application. If its source
+   * data is task- or stage-level, the producer performs any required reduction before
+   * recording. A configured implementation stamps application provenance and may drop invalid or
+   * unavailable evidence. Return does not mean the observation was persisted. The built-in no-op
+   * store discards the call without inspecting it.
    *
-   * @param observations raw observations; configured stores defensively handle null input and
-   *     elements
+   * @param observation one raw heuristic-defined observation; configured stores defensively handle
+   *     null
    */
-  void record(List<Observation> observations);
+  void record(Observation observation);
 
   /**
    * Synchronously returns one summary outcome for every request position within the relative

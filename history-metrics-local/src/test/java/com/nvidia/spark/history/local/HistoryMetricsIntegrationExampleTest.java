@@ -50,18 +50,13 @@ import org.junit.jupiter.api.io.TempDir;
 
 /** Compiled integration examples for the abstention-first local history metrics workflow. */
 public final class HistoryMetricsIntegrationExampleTest {
-  // These IDs, values, durations, and policy bounds are illustrative test inputs, not allocations,
-  // defaults, or recommendations.
+  // These IDs, values, and durations are illustrative test inputs, not allocations or
+  // recommendations.
   private static final MetricVersionId EXAMPLE_METRIC = new MetricVersionId(61001, 1);
   private static final Clock DRIVER_CLOCK =
       Clock.fixed(Instant.ofEpochMilli(10_000L), ZoneOffset.UTC);
   private static final Duration OPERATION_BUDGET = Duration.ofSeconds(7);
   private static final Duration MAXIMUM_PLANNING_AGE = Duration.ofHours(2);
-  private static final LocalQueuePolicy QUEUE_POLICY = LocalQueuePolicy.of(19, 7);
-  private static final LocalExecutionPolicy EXECUTION_POLICY = LocalExecutionPolicy.of(2, 11);
-  private static final LocalCircuitBreakerPolicy BREAKER_POLICY =
-      LocalCircuitBreakerPolicy.of(
-          9, 5, 0.75, Duration.ofMillis(850), 0.60, Duration.ofSeconds(3));
 
   @Test
   void localOwnerRunsDeclareRecordDrainAndExactAndWildcardSummaries() throws Exception {
@@ -77,9 +72,8 @@ public final class HistoryMetricsIntegrationExampleTest {
             owner.store().declare(
                 Collections.singletonList(exampleSchema()), OPERATION_BUDGET).get(0).code());
 
-        owner.store().record(Arrays.asList(
-            observation("orders", "parquet", 2.0, 9_000L),
-            observation("orders", "orc", 4.0, 9_500L)));
+        owner.store().record(observation("orders", "parquet", 2.0, 9_000L));
+        owner.store().record(observation("orders", "orc", 4.0, 9_500L));
         assertTrue(owner.drain(OPERATION_BUDGET));
 
         SummaryResponse exact = summarize(owner.store(), exactRequest());
@@ -182,8 +176,7 @@ public final class HistoryMetricsIntegrationExampleTest {
           SchemaStatus.Code.ACCEPTED,
           writer.store().declare(
               Collections.singletonList(exampleSchema()), OPERATION_BUDGET).get(0).code());
-      writer.store().record(Collections.singletonList(
-          observation("orders", "parquet", 6.0, 9_250L)));
+      writer.store().record(observation("orders", "parquet", 6.0, 9_250L));
       assertTrue(writer.drain(OPERATION_BUDGET));
       writer.save(snapshot, OPERATION_BUDGET);
     } finally {
@@ -196,9 +189,6 @@ public final class HistoryMetricsIntegrationExampleTest {
         DRIVER_CLOCK,
         HistoryMetricsIntegrationExampleTest::exampleProvenance,
         MAXIMUM_PLANNING_AGE,
-        QUEUE_POLICY,
-        EXECUTION_POLICY,
-        BREAKER_POLICY,
         OPERATION_BUDGET);
     try {
       SummaryResponse response = summarize(restored.store(), exactRequest());
@@ -244,10 +234,7 @@ public final class HistoryMetricsIntegrationExampleTest {
         catalog,
         DRIVER_CLOCK,
         HistoryMetricsIntegrationExampleTest::exampleProvenance,
-        MAXIMUM_PLANNING_AGE,
-        QUEUE_POLICY,
-        EXECUTION_POLICY,
-        BREAKER_POLICY);
+        MAXIMUM_PLANNING_AGE);
   }
 
   private static LocalProvenanceIdentity exampleProvenance() {

@@ -69,7 +69,7 @@ final class NoOpMetricStore implements MetricStore {
   }
 
   @Override
-  public void record(List<Observation> observations) {
+  public void record(Observation observation) {
     // Optional evidence is deliberately discarded without provider, file, or network side effects.
   }
 

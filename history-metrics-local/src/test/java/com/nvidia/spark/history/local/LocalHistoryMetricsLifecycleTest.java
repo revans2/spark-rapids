@@ -75,7 +75,7 @@ class LocalHistoryMetricsLifecycleTest {
     MetricSchema schema = schema();
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema), TIMEOUT).get(0).code());
-    local.store().record(Collections.singletonList(observation(900L, 7.0)));
+    local.store().record(observation(900L, 7.0));
     assertTrue(local.drain(TIMEOUT));
 
     SummaryRequest request = SummaryRequest.builder(METRIC)
@@ -124,7 +124,7 @@ class LocalHistoryMetricsLifecycleTest {
 
     assertEquals(SchemaStatus.Code.UNAVAILABLE,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
-    local.store().record(Collections.singletonList(observation(900L, 1.0)));
+    local.store().record(observation(900L, 1.0));
     assertEquals(1L,
         local.testHandle().counters().value(LocalMetricCounter.RECORD_POST_STOP));
     assertTrue(local.shutdown(TIMEOUT));
@@ -142,10 +142,10 @@ class LocalHistoryMetricsLifecycleTest {
     LocalHistoryMetrics local = openForTest(backend, planning, sink);
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
-    local.store().record(Collections.singletonList(observation(900L, 1.0)));
+    local.store().record(observation(900L, 1.0));
     assertTrue(backend.recordEntered.await(5, TimeUnit.SECONDS));
-    local.store().record(java.util.Arrays.asList(
-        observation(901L, 2.0), observation(902L, 3.0)));
+    local.store().record(observation(901L, 2.0));
+    local.store().record(observation(902L, 3.0));
 
     ExecutorService callers = Executors.newFixedThreadPool(3);
     try {
@@ -153,7 +153,7 @@ class LocalHistoryMetricsLifecycleTest {
       assertTrue(planning.shutdownEntered.await(5, TimeUnit.SECONDS));
       assertFalse(first.get(5, TimeUnit.SECONDS));
 
-      local.store().record(Collections.singletonList(observation(903L, 4.0)));
+      local.store().record(observation(903L, 4.0));
       Future<SummaryResponse> stoppedPlanning = callers.submit(() ->
           local.store().summarize(
               Collections.singletonList(summaryRequest()), TIMEOUT).get(0));
@@ -195,9 +195,9 @@ class LocalHistoryMetricsLifecycleTest {
         openForTest(backend, planning, new IncrementingTicker());
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
-    local.store().record(Collections.singletonList(observation(900L, 1.0)));
+    local.store().record(observation(900L, 1.0));
     assertTrue(backend.recordEntered.await(5, TimeUnit.SECONDS));
-    local.store().record(Collections.singletonList(observation(901L, 2.0)));
+    local.store().record(observation(901L, 2.0));
 
     ExecutorService caller = Executors.newSingleThreadExecutor();
     try {
@@ -224,7 +224,7 @@ class LocalHistoryMetricsLifecycleTest {
     LocalHistoryMetrics local = openForTest(backend, planningExecutor(), sink);
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
-    local.store().record(Collections.singletonList(observation(900L, 1.0)));
+    local.store().record(observation(900L, 1.0));
     assertTrue(backend.recordEntered.await(5, TimeUnit.SECONDS));
 
     ExecutorService callers = Executors.newFixedThreadPool(2);
@@ -266,7 +266,7 @@ class LocalHistoryMetricsLifecycleTest {
     LocalHistoryMetrics local = openForTest(backend, planningExecutor(), ticker);
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
-    local.store().record(Collections.singletonList(observation(900L, 1.0)));
+    local.store().record(observation(900L, 1.0));
     assertTrue(backend.recordEntered.await(5, TimeUnit.SECONDS));
 
     ticker.armForCurrentThread();
@@ -293,7 +293,7 @@ class LocalHistoryMetricsLifecycleTest {
     LocalHistoryMetrics local = openForTest(backend, planningExecutor(), ticker);
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
-    local.store().record(Collections.singletonList(observation(900L, 1.0)));
+    local.store().record(observation(900L, 1.0));
     assertTrue(backend.recordEntered.await(5, TimeUnit.SECONDS));
 
     ticker.armForCurrentThread();
@@ -521,7 +521,7 @@ class LocalHistoryMetricsLifecycleTest {
           local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
       assertThrows(AssertionError.class, () -> local.shutdown(Duration.ZERO));
       assertEquals(0, backend.closeCalls.get());
-      local.store().record(Collections.singletonList(observation(900L, 1.0)));
+      local.store().record(observation(900L, 1.0));
       assertEquals(1L,
           local.testHandle().counters().value(LocalMetricCounter.RECORD_POST_STOP));
       assertEquals(0, backend.recordCalls.get());
@@ -653,7 +653,7 @@ class LocalHistoryMetricsLifecycleTest {
           local.testHandle().counters().value(LocalMetricCounter.SHUTDOWN_TIMEOUT));
       assertEquals(0, backend.closeCalls.get());
 
-      local.store().record(Collections.singletonList(observation(900L, 1.0)));
+      local.store().record(observation(900L, 1.0));
       assertEquals(1L,
           local.testHandle().counters().value(LocalMetricCounter.RECORD_POST_STOP));
       assertEquals(0, backend.recordCalls.get());
@@ -815,10 +815,10 @@ class LocalHistoryMetricsLifecycleTest {
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
 
-    local.store().record(Collections.singletonList(observation(900L, 1.0)));
+    local.store().record(observation(900L, 1.0));
     assertTrue(backend.recordEntered.await(5, TimeUnit.SECONDS));
-    local.store().record(java.util.Arrays.asList(
-        observation(901L, 2.0), observation(902L, 3.0)));
+    local.store().record(observation(901L, 2.0));
+    local.store().record(observation(902L, 3.0));
 
     assertFalse(local.shutdown(Duration.ZERO));
     LocalHistoryMetricsCounters stopped = local.testHandle().counters();
@@ -848,8 +848,8 @@ class LocalHistoryMetricsLifecycleTest {
     LocalHistoryMetrics local = openForTest(backend, planning);
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
-    local.store().record(java.util.Arrays.asList(
-        observation(900L, 1.0), observation(901L, 2.0)));
+    local.store().record(observation(900L, 1.0));
+    local.store().record(observation(901L, 2.0));
     assertTrue(backend.recordEntered.await(5, TimeUnit.SECONDS));
 
     ExecutorService callers = Executors.newSingleThreadExecutor();
@@ -858,16 +858,16 @@ class LocalHistoryMetricsLifecycleTest {
       assertTrue(planning.shutdownCalled.await(5, TimeUnit.SECONDS));
 
       assertFalse(local.shutdown(Duration.ZERO));
-      assertEquals(2L, local.testHandle().counters().value(
+      assertEquals(1L, local.testHandle().counters().value(
           LocalMetricCounter.BACKEND_AMBIGUOUS));
       assertFalse(local.shutdown(Duration.ZERO));
-      assertEquals(2L, local.testHandle().counters().value(
+      assertEquals(1L, local.testHandle().counters().value(
           LocalMetricCounter.BACKEND_AMBIGUOUS));
 
       backend.releaseRecord.countDown();
       assertTrue(first.get(5, TimeUnit.SECONDS));
       LocalHistoryMetricsCounters complete = local.testHandle().counters();
-      assertEquals(2L, complete.value(LocalMetricCounter.BACKEND_AMBIGUOUS));
+      assertEquals(1L, complete.value(LocalMetricCounter.BACKEND_AMBIGUOUS));
       assertEquals(2L, complete.value(LocalMetricCounter.BACKEND_ACCEPTED));
       assertEquals(0L, complete.value(LocalMetricCounter.SHUTDOWN_DROPPED));
       assertEquals(1L, complete.value(LocalMetricCounter.SHUTDOWN_COMPLETE));

@@ -24,7 +24,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Duration;
-import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -48,11 +47,8 @@ class MetricStoreContractTest {
     assertEquals(HistoryMetricsApi.CURRENT_API_VERSION, store.info().apiVersion());
     assertFalse(store.info().description().isEmpty());
 
-    // The built-in no-op has a zero-inspection exemption. These inputs fail if the
-    // implementation asks even for list size, iteration, or an observation.
+    // The built-in no-op has a zero-inspection exemption.
     assertDoesNotThrow(() -> store.record(null));
-    assertDoesNotThrow(() -> store.record(hostileUninspectableList()));
-    assertDoesNotThrow(() -> store.record(hostileOversizedList()));
 
     List<SummaryResponse> responses =
         store.summarize(Collections.singletonList(request()), TIMEOUT);
@@ -234,41 +230,13 @@ class MetricStoreContractTest {
     PublicApiSurface.assertMethods(
         MetricStore.class,
         "declare(java.util.List,java.time.Duration):java.util.List",
-        "record(java.util.List):void",
+        "record(com.nvidia.spark.history.Observation):void",
         "summarize(java.util.List,java.time.Duration):java.util.List",
         "info():com.nvidia.spark.history.BackendInfo");
     PublicApiSurface.assertMethods(
         MetricStores.class,
         "current():com.nvidia.spark.history.MetricStore",
         "install(com.nvidia.spark.history.MetricStore):java.lang.AutoCloseable");
-  }
-
-  private static List<Observation> hostileUninspectableList() {
-    return new AbstractList<Observation>() {
-      @Override
-      public Observation get(int index) {
-        throw new AssertionError("no-op inspected an observation");
-      }
-
-      @Override
-      public int size() {
-        throw new AssertionError("no-op inspected the list");
-      }
-    };
-  }
-
-  private static List<Observation> hostileOversizedList() {
-    return new AbstractList<Observation>() {
-      @Override
-      public Observation get(int index) {
-        throw new AssertionError("no-op inspected an oversized observation");
-      }
-
-      @Override
-      public int size() {
-        return 129;
-      }
-    };
   }
 
   private static SummaryRequest request() {
@@ -311,7 +279,7 @@ class MetricStoreContractTest {
     }
 
     @Override
-    public void record(List<Observation> observations) {
+    public void record(Observation observation) {
     }
 
     @Override

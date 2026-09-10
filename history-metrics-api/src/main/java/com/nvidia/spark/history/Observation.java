@@ -19,12 +19,13 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Immutable application-level observation supplied by a metric producer without framework
+ * Immutable heuristic-defined observation supplied by a metric producer without framework
  * provenance.
  *
- * <p>The metric owner reduces any task-, stage-, or application-level runtime metrics before
- * constructing this value. One observation represents one completed metric-specific application
- * event, normally a job or query execution; the history store does not perform that reduction.
+ * <p>An observation may describe a scan, join, query, application, or another event within the
+ * current application. The metric owner defines that occurrence and performs any required reduction
+ * of task- or stage-level inputs before constructing this value. The history store persists the
+ * resulting scalar; it does not interpret or reduce runtime metrics.
  */
 public final class Observation {
   private final MetricVersionId metric;

@@ -80,9 +80,6 @@ class LocalHistoryMetricsOpenSnapshotTest {
             Clock.class,
             LocalProvenanceSource.class,
             Duration.class,
-            LocalQueuePolicy.class,
-            LocalExecutionPolicy.class,
-            LocalCircuitBreakerPolicy.class,
             Duration.class).getExceptionTypes());
   }
 
@@ -99,10 +96,9 @@ class LocalHistoryMetricsOpenSnapshotTest {
             original.store().declare(Collections.singletonList(schema), TIMEOUT)
                 .get(0).code());
       }
-      original.store().record(Arrays.asList(
-          observation(LIVE_V1, 9_000L, 1.0),
-          observation(LIVE_V2, 9_001L, 2.0),
-          observation(RETIRED_V1, 9_002L, 3.0)));
+      original.store().record(observation(LIVE_V1, 9_000L, 1.0));
+      original.store().record(observation(LIVE_V2, 9_001L, 2.0));
+      original.store().record(observation(RETIRED_V1, 9_002L, 3.0));
       assertTrue(original.drain(TIMEOUT));
       original.save(source, TIMEOUT);
     } finally {
@@ -142,8 +138,7 @@ class LocalHistoryMetricsOpenSnapshotTest {
 
       long previousOrdinal = restored.testHandle().observations().get(2)
           .acceptanceOrdinal();
-      restored.store().record(Collections.singletonList(
-          observation(LIVE_V1, 9_003L, 4.0)));
+      restored.store().record(observation(LIVE_V1, 9_003L, 4.0));
       assertTrue(restored.drain(TIMEOUT));
       LocalObservationSnapshot newlyAccepted =
           restored.testHandle().observations().get(3);
@@ -352,8 +347,7 @@ class LocalHistoryMetricsOpenSnapshotTest {
       assertEquals(SchemaStatus.Code.ACCEPTED,
           owner.store().declare(Collections.singletonList(schema(LIVE_V1)), TIMEOUT)
               .get(0).code());
-      owner.store().record(
-          Collections.singletonList(observation(LIVE_V1, 9_000L, 1.0)));
+      owner.store().record(observation(LIVE_V1, 9_000L, 1.0));
       assertTrue(owner.drain(TIMEOUT));
       owner.save(target, TIMEOUT);
     } finally {

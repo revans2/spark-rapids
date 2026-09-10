@@ -280,7 +280,9 @@ public abstract class MetricStoreProviderContract {
   }
 
   private void record(Observation... observations) {
-    fixture.store().record(Arrays.asList(observations));
+    for (Observation observation : observations) {
+      fixture.store().record(observation);
+    }
     assertTrue(fixture.awaitWrites(TIMEOUT), "provider did not make accepted writes visible");
   }
 
