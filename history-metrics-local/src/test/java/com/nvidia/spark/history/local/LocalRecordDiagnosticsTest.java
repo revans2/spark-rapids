@@ -58,7 +58,7 @@ import com.nvidia.spark.history.WriteResult;
 
 import org.junit.jupiter.api.Test;
 
-/** FR-05 tests for bounded, fixed, redacted local record diagnostics. */
+/** Tests for bounded, fixed, redacted local record diagnostics. */
 class LocalRecordDiagnosticsTest {
   private static final Duration TIMEOUT = Duration.ofSeconds(5);
   private static final MetricVersionId METRIC = new MetricVersionId(17, 1);

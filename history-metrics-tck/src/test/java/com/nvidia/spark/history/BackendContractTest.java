@@ -31,7 +31,7 @@ import com.nvidia.spark.history.tck.HistoryMetricsProviderFixture;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral and compiled-contract coverage for FR-08, FR-14, and FR-17 backend SPI shapes. */
+/** Behavioral and compiled-contract coverage for backend SPI shapes. */
 class BackendContractTest {
   @Test
   void fr08WriteResultEnforcesBatchStatusRelationships() {

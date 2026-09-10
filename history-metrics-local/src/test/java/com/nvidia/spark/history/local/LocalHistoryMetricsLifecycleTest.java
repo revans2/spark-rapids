@@ -37,9 +37,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.logging.Handler;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 
 import com.nvidia.spark.history.BackendInfo;
 import com.nvidia.spark.history.Coverage;
@@ -141,7 +138,8 @@ class LocalHistoryMetricsLifecycleTest {
     ControlledBackend backend = new ControlledBackend();
     backend.blockRecord = true;
     BlockingPlanningExecutor planning = new BlockingPlanningExecutor();
-    LocalHistoryMetrics local = openForTest(backend, planning);
+    CountingAmbiguitySink sink = new CountingAmbiguitySink();
+    LocalHistoryMetrics local = openForTest(backend, planning, sink);
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
     local.store().record(Collections.singletonList(observation(900L, 1.0)));
@@ -149,10 +147,7 @@ class LocalHistoryMetricsLifecycleTest {
     local.store().record(java.util.Arrays.asList(
         observation(901L, 2.0), observation(902L, 3.0)));
 
-    CountingAmbiguityHandler handler = new CountingAmbiguityHandler();
-    Logger logger = Logger.getLogger(LocalRecordDiagnostics.class.getName());
     ExecutorService callers = Executors.newFixedThreadPool(3);
-    logger.addHandler(handler);
     try {
       Future<Boolean> first = callers.submit(() -> local.shutdown(Duration.ZERO));
       assertTrue(planning.shutdownEntered.await(5, TimeUnit.SECONDS));
@@ -172,21 +167,20 @@ class LocalHistoryMetricsLifecycleTest {
       assertEquals(2L, stopped.value(LocalMetricCounter.SHUTDOWN_DROPPED));
       assertEquals(1L, stopped.value(LocalMetricCounter.BACKEND_AMBIGUOUS));
       assertTrue(local.drain(TIMEOUT));
-      assertEquals(0, handler.count.get());
+      assertEquals(0, sink.count.get());
 
       planning.releaseShutdown.countDown();
-      assertTrue(handler.published.await(5, TimeUnit.SECONDS));
-      assertEquals(1, handler.count.get());
+      assertTrue(sink.published.await(5, TimeUnit.SECONDS));
+      assertEquals(1, sink.count.get());
 
       backend.releaseRecord.countDown();
       assertTrue(local.shutdown(TIMEOUT));
-      assertEquals(1, handler.count.get());
+      assertEquals(1, sink.count.get());
       assertEquals(1, backend.closeCalls.get());
       assertFalse(backend.closeOverlapped);
     } finally {
       planning.releaseShutdown.countDown();
       backend.releaseRecord.countDown();
-      logger.removeHandler(handler);
       callers.shutdownNow();
       local.shutdown(TIMEOUT);
     }
@@ -226,30 +220,27 @@ class LocalHistoryMetricsLifecycleTest {
   void zeroShutdownDiagnosticDoesNotHoldLifecycleLock() throws Exception {
     ControlledBackend backend = new ControlledBackend();
     backend.blockRecord = true;
-    LocalHistoryMetrics local = openForTest(backend, planningExecutor());
+    BlockingDiagnosticSink sink = new BlockingDiagnosticSink();
+    LocalHistoryMetrics local = openForTest(backend, planningExecutor(), sink);
     assertEquals(SchemaStatus.Code.ACCEPTED,
         local.store().declare(Collections.singletonList(schema()), TIMEOUT).get(0).code());
     local.store().record(Collections.singletonList(observation(900L, 1.0)));
     assertTrue(backend.recordEntered.await(5, TimeUnit.SECONDS));
 
-    BlockingLogHandler handler = new BlockingLogHandler();
-    Logger logger = Logger.getLogger(LocalRecordDiagnostics.class.getName());
     ExecutorService callers = Executors.newFixedThreadPool(2);
-    logger.addHandler(handler);
     try {
       Future<Boolean> first = callers.submit(() -> local.shutdown(Duration.ZERO));
-      assertTrue(handler.publishEntered.await(5, TimeUnit.SECONDS));
+      assertTrue(sink.publishEntered.await(5, TimeUnit.SECONDS));
       assertFalse(first.get(5, TimeUnit.SECONDS));
 
       Future<Boolean> joined = callers.submit(() -> local.shutdown(Duration.ZERO));
       assertFalse(joined.get(5, TimeUnit.SECONDS));
 
-      handler.releasePublish.countDown();
+      sink.releasePublish.countDown();
       assertEquals(1L,
           local.testHandle().counters().value(LocalMetricCounter.BACKEND_AMBIGUOUS));
     } finally {
-      handler.releasePublish.countDown();
-      logger.removeHandler(handler);
+      sink.releasePublish.countDown();
       backend.releaseRecord.countDown();
       callers.shutdownNow();
       local.shutdown(TIMEOUT);
@@ -969,6 +960,32 @@ class LocalHistoryMetricsLifecycleTest {
   private static LocalHistoryMetrics openForTest(
       ControlledBackend backend,
       ThreadPoolExecutor planning,
+      LocalRecordDiagnosticSink recordDiagnosticSink) {
+    return LocalHistoryMetricsFactory.openForTest(
+        LocalTestCatalog.builder().addLive(41, "test.metric").build(),
+        Clock.fixed(Instant.ofEpochMilli(1_000L), ZoneOffset.UTC),
+        () -> LocalProvenanceIdentity.of("app", null, "1.0"),
+        Duration.ofDays(30),
+        LocalQueuePolicy.of(16, 8),
+        LocalExecutionPolicy.of(1, 8),
+        LocalCircuitBreakerPolicy.of(
+            8, 4, 1.0, Duration.ofSeconds(1), 1.0, Duration.ofSeconds(1)),
+        backend,
+        null,
+        planning,
+        new LocalMetricStorePlanningAdapter.Ticker() {
+          @Override
+          public long readNanos() {
+            return System.nanoTime();
+          }
+        },
+        new LocalHistoryMetricsImpl.LifecycleExecutor(),
+        recordDiagnosticSink);
+  }
+
+  private static LocalHistoryMetrics openForTest(
+      ControlledBackend backend,
+      ThreadPoolExecutor planning,
       LocalHistoryMetricsImpl.LifecycleExecutor shutdownExecutor) {
     return LocalHistoryMetricsFactory.openForTest(
         LocalTestCatalog.builder().addLive(41, "test.metric").build(),
@@ -1084,25 +1101,17 @@ class LocalHistoryMetricsLifecycleTest {
     }
   }
 
-  private static final class CountingAmbiguityHandler extends Handler {
+  private static final class CountingAmbiguitySink
+      implements LocalRecordDiagnosticSink {
     private final AtomicInteger count = new AtomicInteger();
     private final CountDownLatch published = new CountDownLatch(1);
 
     @Override
-    public void publish(LogRecord record) {
-      if (LocalRecordDiagnostics.Category.BACKEND_AMBIGUOUS.message()
-          .equals(record.getMessage())) {
+    public void recordFailure(LocalRecordDiagnostics.Category category, String message) {
+      if (category == LocalRecordDiagnostics.Category.BACKEND_AMBIGUOUS) {
         count.incrementAndGet();
         published.countDown();
       }
-    }
-
-    @Override
-    public void flush() {
-    }
-
-    @Override
-    public void close() {
     }
   }
 
@@ -1370,22 +1379,15 @@ class LocalHistoryMetricsLifecycleTest {
     }
   }
 
-  private static final class BlockingLogHandler extends Handler {
+  private static final class BlockingDiagnosticSink
+      implements LocalRecordDiagnosticSink {
     private final CountDownLatch publishEntered = new CountDownLatch(1);
     private final CountDownLatch releasePublish = new CountDownLatch(1);
 
     @Override
-    public void publish(LogRecord record) {
+    public void recordFailure(LocalRecordDiagnostics.Category category, String message) {
       publishEntered.countDown();
       awaitUninterruptibly(releasePublish);
-    }
-
-    @Override
-    public void flush() {
-    }
-
-    @Override
-    public void close() {
     }
   }
 

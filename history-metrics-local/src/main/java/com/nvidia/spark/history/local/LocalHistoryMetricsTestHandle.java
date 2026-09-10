@@ -20,8 +20,9 @@ import java.util.List;
 /**
  * Companion-only defensive point-in-time diagnostics for one explicit local owner.
  *
- * <p>Every returned object is an immutable snapshot. This interface is test/prototype support, not
- * provider-neutral raw read-back or an administrative API.
+ * <p>Every returned object is an immutable snapshot. This interface is public only for tests and
+ * prototypes outside this package. It is not part of the provider-neutral API, a supported
+ * production monitoring contract, raw read-back, or an administrative API.
  */
 public interface LocalHistoryMetricsTestHandle {
   /**

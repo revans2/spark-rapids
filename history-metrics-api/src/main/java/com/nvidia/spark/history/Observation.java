@@ -18,7 +18,14 @@ package com.nvidia.spark.history;
 import java.util.Map;
 import java.util.Objects;
 
-/** Immutable raw observation supplied by a metric producer without framework provenance. */
+/**
+ * Immutable application-level observation supplied by a metric producer without framework
+ * provenance.
+ *
+ * <p>The metric owner reduces any task-, stage-, or application-level runtime metrics before
+ * constructing this value. One observation represents one completed metric-specific application
+ * event, normally a job or query execution; the history store does not perform that reduction.
+ */
 public final class Observation {
   private final MetricVersionId metric;
   private final Map<String, DimValue> dimensions;

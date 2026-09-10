@@ -24,7 +24,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral coverage for FR-04 and FR-09 through FR-14 immutable summary contracts. */
+/** Behavioral coverage for immutable summary contracts. */
 class SummaryContractTest {
   @Test
   void fr04RequestBuilderPreservesExplicitEqualityBindingsAndWindow() {

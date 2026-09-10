@@ -16,7 +16,11 @@
 package com.nvidia.spark.history.local;
 
 /**
- * Immutable point-in-time view over the closed local metric-counter vocabulary.
+ * Immutable point-in-time view over the local implementation's test-support counters.
+ *
+ * <p>This interface is public only so tests and prototypes outside this package can inspect local
+ * behavior. It is not part of the provider-neutral API or a supported production monitoring
+ * contract.
  *
  * <p>Batch counters count public calls and declaration/summary status counters count returned
  * positions. {@link LocalMetricCounter#SUMMARY_ROWS} accumulates summarized observation counts.

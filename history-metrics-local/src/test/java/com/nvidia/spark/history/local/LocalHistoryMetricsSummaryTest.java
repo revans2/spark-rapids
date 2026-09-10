@@ -61,8 +61,8 @@ import com.nvidia.spark.history.WriteResult;
 import org.junit.jupiter.api.Test;
 
 /**
- * Local-provider summary behaviors for FR-04, FR-09 through FR-13, FR-20/21 and
- * NFR-03/04/09/10.
+ * Behavioral coverage for local-provider summary selection, validation, deadlines, and
+ * aggregation.
  */
 class LocalHistoryMetricsSummaryTest {
   private static final Duration TIMEOUT = Duration.ofSeconds(1);

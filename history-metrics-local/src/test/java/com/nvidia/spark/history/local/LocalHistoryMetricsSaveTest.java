@@ -63,7 +63,7 @@ import com.nvidia.spark.history.WriteResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** Behavioral coverage for FR-22 owner-side snapshot save. */
+/** Behavioral coverage for owner-side snapshot save. */
 class LocalHistoryMetricsSaveTest {
   private static final MetricVersionId METRIC = new MetricVersionId(51, 1);
   private static final Duration TIMEOUT = Duration.ofSeconds(5);

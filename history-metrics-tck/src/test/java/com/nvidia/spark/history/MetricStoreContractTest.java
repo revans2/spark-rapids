@@ -36,7 +36,7 @@ import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral coverage for FR-09, FR-12 through FR-14, FR-17, and NFR-15/NFR-21. */
+/** Behavioral coverage for the planning-facing metric-store contract. */
 class MetricStoreContractTest {
   private static final Duration TIMEOUT = Duration.ofSeconds(1);
 
@@ -48,7 +48,7 @@ class MetricStoreContractTest {
     assertEquals(HistoryMetricsApi.CURRENT_API_VERSION, store.info().apiVersion());
     assertFalse(store.info().description().isEmpty());
 
-    // FR-05 grants the built-in no-op a zero-inspection exemption. These inputs fail if the
+    // The built-in no-op has a zero-inspection exemption. These inputs fail if the
     // implementation asks even for list size, iteration, or an observation.
     assertDoesNotThrow(() -> store.record(null));
     assertDoesNotThrow(() -> store.record(hostileUninspectableList()));

@@ -18,6 +18,7 @@ package com.nvidia.spark.history.local;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -100,6 +101,7 @@ public final class LocalHistoryMetricsFactory {
         LocalSnapshotFiles.systemFileOperations(),
         LocalSnapshotFiles.systemGuardWaiter(),
         LocalAsyncRecordPipeline.SYSTEM_DRAIN_WAITER,
+        LocalRecordDiagnostics.system(SYSTEM_TICKER),
         LocalHistoryMetricsImpl.systemSnapshotDiagnosticSink(),
         new LocalHistoryMetricsImpl.LifecycleExecutor());
   }
@@ -315,6 +317,49 @@ public final class LocalHistoryMetricsFactory {
         LocalSnapshotFiles.systemFileOperations(),
         LocalSnapshotFiles.systemGuardWaiter(),
         LocalAsyncRecordPipeline.SYSTEM_DRAIN_WAITER,
+        LocalRecordDiagnostics.system(ticker),
+        LocalHistoryMetricsImpl.systemSnapshotDiagnosticSink(),
+        Objects.requireNonNull(shutdownExecutor, "shutdownExecutor"));
+  }
+
+  static LocalHistoryMetrics openForTest(
+      HistoryMetricCatalog catalog,
+      Clock driverClock,
+      LocalProvenanceSource provenanceSource,
+      Duration maximumPlanningAge,
+      LocalQueuePolicy queuePolicy,
+      LocalExecutionPolicy executionPolicy,
+      LocalCircuitBreakerPolicy circuitBreakerPolicy,
+      HistoryMetricsBackend backend,
+      LocalHistoryMetricsBackend inspectionBackend,
+      ExecutorService planningExecutor,
+      LocalMetricStorePlanningAdapter.Ticker ticker,
+      LocalHistoryMetricsImpl.LifecycleExecutor shutdownExecutor,
+      LocalRecordDiagnosticSink recordDiagnosticSink) {
+    validate(
+        catalog,
+        driverClock,
+        provenanceSource,
+        maximumPlanningAge,
+        queuePolicy,
+        executionPolicy,
+        circuitBreakerPolicy);
+    return openOwned(
+        catalog,
+        maximumPlanningAge,
+        driverClock,
+        provenanceSource,
+        queuePolicy,
+        circuitBreakerPolicy,
+        Objects.requireNonNull(backend, "backend"),
+        inspectionBackend,
+        Objects.requireNonNull(planningExecutor, "planningExecutor"),
+        Objects.requireNonNull(ticker, "ticker"),
+        LocalSnapshotFiles.systemFileOperations(),
+        LocalSnapshotFiles.systemGuardWaiter(),
+        LocalAsyncRecordPipeline.SYSTEM_DRAIN_WAITER,
+        new LocalRecordDiagnostics(ticker,
+            Objects.requireNonNull(recordDiagnosticSink, "recordDiagnosticSink")),
         LocalHistoryMetricsImpl.systemSnapshotDiagnosticSink(),
         Objects.requireNonNull(shutdownExecutor, "shutdownExecutor"));
   }
@@ -397,6 +442,7 @@ public final class LocalHistoryMetricsFactory {
         snapshotFileOperations,
         snapshotGuardWaiter,
         recordDrainWaiter,
+        LocalRecordDiagnostics.system(ticker),
         snapshotDiagnosticSink,
         new LocalHistoryMetricsImpl.LifecycleExecutor());
   }
@@ -415,6 +461,7 @@ public final class LocalHistoryMetricsFactory {
       LocalSnapshotFiles.FileOperations snapshotFileOperations,
       LocalSnapshotFiles.GuardWaiter snapshotGuardWaiter,
       LocalAsyncRecordPipeline.DrainWaiter recordDrainWaiter,
+      LocalRecordDiagnostics recordDiagnostics,
       LocalSnapshotDiagnosticSink snapshotDiagnosticSink,
       LocalHistoryMetricsImpl.LifecycleExecutor shutdownExecutor) {
     LocalMetricStorePlanningAdapter adapter = null;
@@ -430,7 +477,9 @@ public final class LocalHistoryMetricsFactory {
           provenanceSource,
           new LocalAsyncRecordPipeline.QueuePolicy(
               queuePolicy.capacityObservations(), queuePolicy.maxBackendBatchSize()),
-          recordDrainWaiter);
+          recordDrainWaiter,
+          Collections.<LocalDeclarationSnapshot>emptyList(),
+          Objects.requireNonNull(recordDiagnostics, "recordDiagnostics"));
       return new LocalHistoryMetricsImpl(
           catalog,
           maximumPlanningAge,

@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral coverage for FR-01 catalog validation and test-catalog isolation. */
+/** Behavioral coverage for catalog validation and test-catalog isolation. */
 class HistoryMetricCatalogTest {
   @Test
   void fr01AllowsAnEmptyProductionCatalog() {

@@ -191,6 +191,34 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
       LocalAsyncRecordPipeline.QueuePolicy queuePolicy,
       LocalAsyncRecordPipeline.DrainWaiter drainWaiter,
       List<LocalDeclarationSnapshot> restoredDeclarations) {
+    return createWithRecording(
+        backend,
+        catalog,
+        executor,
+        ownsExecutor,
+        ticker,
+        breakerPolicy,
+        driverClock,
+        provenanceSource,
+        queuePolicy,
+        drainWaiter,
+        restoredDeclarations,
+        LocalRecordDiagnostics.system(ticker));
+  }
+
+  static LocalMetricStorePlanningAdapter createWithRecording(
+      HistoryMetricsBackend backend,
+      HistoryMetricCatalog catalog,
+      ExecutorService executor,
+      boolean ownsExecutor,
+      Ticker ticker,
+      LocalCircuitBreakerPolicy breakerPolicy,
+      Clock driverClock,
+      LocalProvenanceSource provenanceSource,
+      LocalAsyncRecordPipeline.QueuePolicy queuePolicy,
+      LocalAsyncRecordPipeline.DrainWaiter drainWaiter,
+      List<LocalDeclarationSnapshot> restoredDeclarations,
+      LocalRecordDiagnostics diagnostics) {
     final LocalMetricStorePlanningAdapter adapter =
         create(backend, catalog, executor, ownsExecutor, ticker, breakerPolicy);
     try {
@@ -207,7 +235,8 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
           provenanceSource,
           queuePolicy,
           ticker,
-          drainWaiter);
+          drainWaiter,
+          diagnostics);
       return adapter;
     } catch (RuntimeException failure) {
       adapter.stopPlanning();

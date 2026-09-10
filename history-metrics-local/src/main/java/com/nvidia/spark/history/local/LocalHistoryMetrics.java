@@ -35,7 +35,9 @@ public interface LocalHistoryMetrics {
   MetricStore store();
 
   /**
-   * Returns companion-only immutable diagnostic snapshots for this owner.
+   * Returns companion-only immutable diagnostic snapshots for tests and prototypes.
+   *
+   * <p>The returned handle is not a supported production monitoring contract.
    *
    * @return diagnostic test handle
    */

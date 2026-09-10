@@ -26,7 +26,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral coverage for FR-02 ordered, immutable metric declaration identity. */
+/** Behavioral coverage for ordered, immutable metric declaration identity. */
 class MetricSchemaTest {
   @Test
   void fr02TreatsDimensionOrderAsDeclarationIdentity() {

@@ -183,7 +183,7 @@ final class LocalAsyncRecordPipeline {
         new LocalRecordDiagnostics(ticker, diagnosticSink));
   }
 
-  private LocalAsyncRecordPipeline(
+  LocalAsyncRecordPipeline(
       HistoryMetricsBackend backend,
       SchemaLookup schemas,
       Clock driverClock,

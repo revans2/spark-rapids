@@ -52,7 +52,7 @@ import com.nvidia.spark.history.SummaryResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** Behavioral coverage for FR-22 explicit snapshot owner restoration. */
+/** Behavioral coverage for explicit snapshot owner restoration. */
 class LocalHistoryMetricsOpenSnapshotTest {
   private static final Duration TIMEOUT = Duration.ofSeconds(5);
   private static final Duration MAXIMUM_PLANNING_AGE = Duration.ofDays(30);

@@ -24,7 +24,7 @@ import java.util.Collections;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral coverage for FR-03 and FR-20 recommended retention policy values. */
+/** Behavioral coverage for recommended retention policy values. */
 class RetentionTest {
   @Test
   void fr20RequiresNonnegativeOrderedRetentionDurations() {

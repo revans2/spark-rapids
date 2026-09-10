@@ -15,7 +15,13 @@
  */
 package com.nvidia.spark.history;
 
-/** Fixed-size unweighted evidence summary for one request. */
+/**
+ * Fixed-size unweighted summary of application-level observations from multiple jobs.
+ *
+ * <p>The count is the number of already-reduced observations selected by the request, not the
+ * number of tasks or other runtime samples used to produce those observations. The metric owner
+ * decides whether the selected evidence is sufficient for its heuristic.
+ */
 public final class Summary {
   private final long count;
   private final double mean;

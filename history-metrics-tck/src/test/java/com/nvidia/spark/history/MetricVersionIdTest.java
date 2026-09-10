@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral coverage for FR-01 numeric metric identity and reserved key bits. */
+/** Behavioral coverage for numeric metric identity and reserved key bits. */
 class MetricVersionIdTest {
   @Test
   void fr01PacksMetricAndVersionIntoTheLowThirtyTwoBits() {

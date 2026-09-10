@@ -62,7 +62,7 @@ import com.nvidia.spark.history.WriteResult;
 
 import org.junit.jupiter.api.Test;
 
-/** Local-provider behaviors for FR-05, FR-07/08/20/21 and NFR-13/16/20. */
+/** Behavioral coverage for the local provider backend. */
 class LocalHistoryMetricsBackendTest {
   private static final Duration TIMEOUT = Duration.ofSeconds(1);
   private static final Duration MAX_PLANNING_AGE = Duration.ofDays(7);

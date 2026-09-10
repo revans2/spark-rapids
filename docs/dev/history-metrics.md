@@ -6,10 +6,22 @@ parent: Developer Overview
 ---
 # History Metrics Integration
 
-History metrics let a driver-side planning consumer learn from earlier observations without making
-query success depend on history. The central integration rule is **abstain safely**: use history only
-after the entire response needed for one decision is structurally usable and the metric owner's
-reviewed evidence policy accepts it. Otherwise preserve the existing static decision.
+History metrics let a driver-side planning consumer learn from earlier jobs without making query
+success depend on history. The central integration rule is **abstain safely**: use history only after
+the entire response needed for one decision is structurally usable and the metric owner's reviewed
+evidence policy accepts it. Otherwise preserve the existing static decision.
+
+The store is the final stage of a metric-specific pipeline:
+
+1. Run a job.
+2. Collect the task-, stage-, application-, or other runtime metrics needed by the heuristic.
+3. Reduce those metrics into the application-level observation defined by the metric owner.
+4. Record that reduced observation in the history store.
+
+Steps 2 and 3 belong to the metric producer and heuristic owner. This API starts at step 4. It is not
+a task-metric ingestion or reduction service. A summary aggregates reduced observations from
+multiple jobs; it does not aggregate the task metrics within one job. The metric owner decides how
+to reduce a job, how many historical jobs are sufficient, and whether a returned summary is useful.
 
 This is an MVP developer guide. It does not define a metric-specific estimator, evidence threshold,
 or optimizer policy. The
@@ -22,9 +34,9 @@ The source tree separates three Java 8 artifacts:
 
 | Artifact | Role | Dependency direction |
 | --- | --- | --- |
-| `history-metrics-api` | Dependency-free planning contract, governed production catalog, no-op store, and process locator | Consumer-facing base |
-| `history-metrics-local` | Explicitly owned, in-memory driver companion for tests and early prototypes, including snapshots and local observability | Depends on the API; its runtime remains API/JDK-only |
-| `history-metrics-tck` | Reusable provider-conformance fixtures and suites | Test dependency for provider implementations |
+| `cudf-spark-history-metrics-api` | Dependency-free planning contract, governed production catalog, no-op store, and process locator | Consumer-facing base |
+| `cudf-spark-history-metrics-local` | Explicitly owned, in-memory driver companion for tests and early prototypes, including snapshots and local observability | Depends on the API and Log4j API |
+| `cudf-spark-history-metrics-tck` | Reusable provider-conformance fixtures and suites | Test dependency for provider implementations |
 
 Use artifacts built from a compatible project revision. These names describe repository roles; this
 guide does not claim released Maven coordinates or make the local companion a production service.
@@ -46,8 +58,8 @@ review, together:
 - the observation timestamp meaning and recommended retention;
 - the planning request shapes and their cost;
 - the consumer's evidence, staleness, and static-fallback policy;
-- the selected Spark owner and production metric-emission and request-building planning hooks that
-  will satisfy the NFR-16B first-heuristic failure-boundary gate.
+- the selected Spark owner and production metric-emission and request-building planning hooks,
+  including failure-injection tests for both boundaries.
 
 A family ID/name association is permanent. Retire it in source rather than reusing it. Increment the
 positive family-scoped contract version when the contract changes in an incompatible way, including
@@ -113,10 +125,13 @@ if (declared.code() != SchemaStatus.Code.ACCEPTED) {
 
 Those retention values are also example inputs, not policy guidance. `declare` and `summarize`
 are synchronous but bounded by their relative operation budgets. Do not record under a version whose
-declaration was not accepted. Each observation supplies every declared dimension, a finite
-value, and an observation-time timestamp. `record` is non-blocking and may drop input; `drain`
-waits, within its explicit budget, for observations admitted before its watermark to become
-terminal.
+declaration was not accepted. Each observation is one metric-owner-defined, application-level value
+that has already been reduced from the relevant runtime metrics. It supplies every declared
+dimension, a finite value, and an observation-time timestamp. A record call will normally contain
+one such observation; the list form permits a small group of application-level observations that
+become ready together. It is not intended for individual task samples. `record` is non-blocking and
+may drop input; `drain` waits, within its explicit budget, for observations admitted before its
+watermark to become terminal.
 
 ```java
 owner.store().record(Collections.singletonList(
@@ -183,9 +198,9 @@ This query-safety boundary contains ordinary `RuntimeException` and compatibilit
 failures, including failures in strict construction before the store and provider/store calls inside
 the boundary. It intentionally does not convert `VirtualMachineError`, `ThreadDeath`, or any
 non-`LinkageError` `Error`, including `AssertionError`, into `UNAVAILABLE`, a dropped
-observation, or static fallback; those errors escape under NFR-06. The selected Spark consumer owns
-the production emission and request-building adapters at its co-developed hooks, and its first
-heuristic must pass NFR-16B failure-injection tests for both boundaries.
+observation, or static fallback; those errors escape. The selected Spark consumer owns the
+production emission and request-building adapters at its co-developed hooks. Its first heuristic
+must pass failure-injection tests for both boundaries.
 
 The compiled example contains a small whole-decision structural gate. It intentionally returns only
 “history eligible” or “static fallback”; it does not pretend that a structurally valid summary is
@@ -257,9 +272,10 @@ new queues, counters, breaker state, executors, and lifecycle state.
 ## Observe without leaking data
 
 The local test handle exposes immutable point-in-time counter snapshots over the closed
-`LocalMetricCounter` vocabulary. Inspect outcome and lifecycle categories such as declaration,
-summary, record admission/drop, backend completion, queue, drain, breaker, snapshot cleanup, and
-shutdown. Counters are the public diagnostic accounting surface; they are not resettable.
+`LocalMetricCounter` vocabulary. These counters are public only so tests and prototypes outside this
+package can verify declaration, summary, record, backend, queue, drain, breaker, snapshot, and
+shutdown behavior. They are local test support, not part of the provider-neutral API or a supported
+production monitoring contract, and they are not resettable.
 
 The local implementation also emits bounded, fixed-category, redacted record-failure diagnostics.
 These record diagnostics are privately rate-limited. Separately, each successful snapshot save whose

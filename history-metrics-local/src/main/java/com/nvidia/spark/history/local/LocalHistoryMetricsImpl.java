@@ -25,7 +25,8 @@ import java.util.Objects;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import com.nvidia.spark.history.HistoryMetricCatalog;
 import com.nvidia.spark.history.HistoryMetricsBackend;
@@ -38,13 +39,12 @@ final class LocalHistoryMetricsImpl implements LocalHistoryMetrics {
   static final String SNAPSHOT_CLEANUP_DIAGNOSTIC =
       "local history metrics snapshot cleanup failed after commit";
 
-  private static final Logger LOGGER =
-      Logger.getLogger(LocalHistoryMetricsImpl.class.getName());
+  private static final Logger LOGGER = LogManager.getLogger(LocalHistoryMetricsImpl.class);
   private static final LocalSnapshotDiagnosticSink SYSTEM_SNAPSHOT_DIAGNOSTIC_SINK =
       new LocalSnapshotDiagnosticSink() {
         @Override
         public void snapshotCleanupFailed(String message) {
-          LOGGER.warning(message);
+          LOGGER.warn(message);
         }
       };
 

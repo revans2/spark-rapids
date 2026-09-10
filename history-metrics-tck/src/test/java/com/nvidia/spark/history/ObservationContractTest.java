@@ -24,7 +24,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral coverage for FR-05 and FR-07 observation and provenance boundaries. */
+/** Behavioral coverage for observation and provenance boundaries. */
 class ObservationContractTest {
   @Test
   void fr05ObservationIsStrictAndDefensivelyCopiesDimensions() {

@@ -25,7 +25,7 @@ import java.util.Arrays;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral coverage for FR-02 typed equality values and canonical component framing. */
+/** Behavioral coverage for typed equality values and canonical component framing. */
 class DimValueTest {
   @Test
   void fr02FramesStringLongAndBytesDeterministically() {

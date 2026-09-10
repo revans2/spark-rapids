@@ -17,7 +17,12 @@ package com.nvidia.spark.history;
 
 /** Planning-visible coverage of a requested observation-time window. */
 public enum Coverage {
-  /** The effective planning-visible interval covers the complete requested interval. */
+  /**
+   * The effective planning-visible interval covers the complete requested interval.
+   *
+   * <p>This describes time-window coverage only. It does not assert that every possible runtime
+   * metric or application event was recorded; the metric owner defines evidentiary sufficiency.
+   */
   COMPLETE,
   /**
    * Retention shortened the requested interval.

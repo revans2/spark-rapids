@@ -17,7 +17,8 @@ package com.nvidia.spark.history.local;
 
 import java.util.EnumMap;
 import java.util.Objects;
-import java.util.logging.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /** Per-store, per-category limiter for fixed and redacted record diagnostics. */
 final class LocalRecordDiagnostics {
@@ -46,13 +47,12 @@ final class LocalRecordDiagnostics {
     }
   }
 
-  private static final Logger LOGGER =
-      Logger.getLogger(LocalRecordDiagnostics.class.getName());
+  private static final Logger LOGGER = LogManager.getLogger(LocalRecordDiagnostics.class);
   private static final LocalRecordDiagnosticSink SYSTEM_SINK =
       new LocalRecordDiagnosticSink() {
         @Override
         public void recordFailure(Category category, String message) {
-          LOGGER.warning(message);
+          LOGGER.warn(message);
         }
       };
 

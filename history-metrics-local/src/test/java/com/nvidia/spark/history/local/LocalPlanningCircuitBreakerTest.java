@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
 
-/** Behavioral tests for the local planning breaker's NFR-07 state machine. */
+/** Behavioral tests for the local planning circuit-breaker state machine. */
 class LocalPlanningCircuitBreakerTest {
   @Test
   void completionOrderedWindowUsesCurrentDenominatorAndThresholdEquality() {

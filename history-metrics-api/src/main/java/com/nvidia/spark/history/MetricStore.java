@@ -52,9 +52,12 @@ public interface MetricStore {
    * Offers raw observations for asynchronous persistence without blocking or throwing into query
    * work.
    *
-   * <p>A configured implementation stamps provenance, counts and drops invalid or unavailable
-   * evidence, and may drop a suffix when its bounded queue is full. Return does not mean the
-   * observations were persisted. The built-in no-op store discards the entire call without
+   * <p>Each element is a metric-owner-defined, application-level observation that has already been
+   * reduced from any task or stage metrics. Calls normally contain one observation; the list form is
+   * for a small group of application-level observations that become ready together, not task-level
+   * bulk ingestion. A configured implementation stamps provenance, counts and drops invalid or
+   * unavailable evidence, and may drop a suffix when its bounded queue is full. Return does not mean
+   * the observations were persisted. The built-in no-op store discards the entire call without
    * inspecting it.
    *
    * @param observations raw observations; configured stores defensively handle null input and
