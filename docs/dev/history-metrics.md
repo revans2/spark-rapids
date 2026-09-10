@@ -33,9 +33,10 @@ There are three distinct roles:
 - An operator enables the feature and supplies only operational settings that the embedding plugin
   deliberately exposes.
 
-A generic provider-discovery or provider-configuration mechanism is follow-up work. This MVP keeps
-that responsibility in the embedding plugin instead of freezing a new integration contract in the
-API jar.
+The RAPIDS driver plugin selects one provider by its stable name. Provider jars advertise a
+`HistoryMetricsProvider` through Java service metadata, but discovery does not enable them. RAPIDS
+constructs only the explicitly configured provider, installs its store, owns its shutdown, and keeps
+the built-in no-op store when selection or initialization fails.
 
 ## Artifact roles
 
@@ -43,16 +44,30 @@ The source tree separates three Java 8 artifacts:
 
 | Artifact | Role | Dependency direction |
 | --- | --- | --- |
-| `cudf-spark-history-metrics-api` | Dependency-free planning contract, governed production catalog, no-op store, and process locator | Consumer-facing base |
-| `cudf-spark-history-metrics-local` | Current explicitly owned, in-memory driver provider, including snapshots and test diagnostics | Depends on the API and Log4j API |
+| `cudf-spark-history-metrics-api` | Planning contract, governed production catalog, no-op store, process locator, and Spark-facing provider SPI | Consumer-facing base; Spark Core is provided at runtime |
+| `cudf-spark-history-metrics-local` | Optional in-memory provider for testing and validation, including snapshots and test diagnostics | Depends on the metrics API; Spark Core is provided at runtime |
 | `cudf-spark-history-metrics-tck` | Reusable provider-conformance fixtures and suites | Test dependency for provider implementations |
 
 Use artifacts built from a compatible project revision. These names describe the current source-tree
 roles and are not a commitment to their long-term repository placement. The API is expected to move
 with the planning integration that owns logical-plan changes. Depending on the API leaves
-`MetricStores.current()` on its non-null no-op implementation. Depending on the local provider does
-not construct or install it, enable persistence, read configuration, or access a network; the
-embedding plugin owns those decisions.
+`MetricStores.current()` on its non-null no-op implementation. The local provider is not a normal
+SQL plugin dependency and is not included merely because the RAPIDS plugin is present.
+
+## Select a provider
+
+`spark.rapids.sql.history.metrics.provider` selects a provider by its case-insensitive service name.
+The default value `none` keeps the built-in no-op store. For example, a validation run can add the
+separate local-provider jar to the driver classpath and set:
+
+```
+spark.rapids.sql.history.metrics.provider=local
+```
+
+A provider reads its own settings from the driver `SparkContext`, including Spark and Hadoop
+configuration. Provider-specific settings should use a provider-specific prefix. A jar on the
+classpath is only discoverable; it is never selected implicitly. Missing, duplicate, incompatible,
+or failing providers are logged and leave history-backed heuristics disabled on the no-op store.
 
 ## Govern the metric before integrating it
 
