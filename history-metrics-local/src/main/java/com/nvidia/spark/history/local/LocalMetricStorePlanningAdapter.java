@@ -92,7 +92,6 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
 
   private long declareCalls;
   private long summaryCalls;
-  private long summaryWindowClipped;
   private long summaryRows;
   private long timeoutCalls;
   private long malformedProviderResults;
@@ -1078,7 +1077,7 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
         }
         Status status = response.status();
         if (status.code() == Status.Code.OK) {
-          if (status.reason() != null || response.coverage() == null) {
+          if (status.reason() != null) {
             return null;
           }
           Summary summary = response.summary();
@@ -1094,7 +1093,7 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
           }
         } else {
           Status.of(status.code(), status.reason());
-          if (response.coverage() != null || response.summary() != null) {
+          if (response.summary() != null) {
             return null;
           }
         }
@@ -1275,9 +1274,6 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
       for (SummaryResponse response : results) {
         Status.Code code = response.status().code();
         summaryOutcomes.put(code, summaryOutcomes.get(code) + 1L);
-        if (response.coverage() == com.nvidia.spark.history.Coverage.WINDOW_CLIPPED) {
-          summaryWindowClipped++;
-        }
         if (response.summary() != null) {
           long count = response.summary().count();
           summaryRows = Long.MAX_VALUE - summaryRows < count
@@ -1318,7 +1314,6 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
       return new PlanningCounterSnapshot(
           declareCalls,
           summaryCalls,
-          summaryWindowClipped,
           summaryRows,
           timeoutCalls,
           malformedProviderResults,
@@ -1498,7 +1493,6 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
   static final class PlanningCounterSnapshot {
     private final long declareCalls;
     private final long summaryCalls;
-    private final long summaryWindowClipped;
     private final long summaryRows;
     private final long timeoutCalls;
     private final long malformedProviderResults;
@@ -1513,7 +1507,6 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
     private PlanningCounterSnapshot(
         long declareCalls,
         long summaryCalls,
-        long summaryWindowClipped,
         long summaryRows,
         long timeoutCalls,
         long malformedProviderResults,
@@ -1526,7 +1519,6 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
         EnumMap<Status.Code, Long> summaryOutcomes) {
       this.declareCalls = declareCalls;
       this.summaryCalls = summaryCalls;
-      this.summaryWindowClipped = summaryWindowClipped;
       this.summaryRows = summaryRows;
       this.timeoutCalls = timeoutCalls;
       this.malformedProviderResults = malformedProviderResults;
@@ -1546,10 +1538,6 @@ final class LocalMetricStorePlanningAdapter implements MetricStore {
 
     long summaryCallCount() {
       return summaryCalls;
-    }
-
-    long summaryWindowClippedCount() {
-      return summaryWindowClipped;
     }
 
     long summaryRowCount() {

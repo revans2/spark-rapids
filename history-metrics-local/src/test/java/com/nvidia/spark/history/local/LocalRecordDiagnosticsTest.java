@@ -40,7 +40,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.nvidia.spark.history.BackendInfo;
-import com.nvidia.spark.history.Coverage;
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
 import com.nvidia.spark.history.HistoryMetricsApi;
@@ -502,7 +501,7 @@ class LocalRecordDiagnosticsTest {
     @Override
     public List<SummaryResponse> summarize(
         List<SummaryRequest> requests, Duration timeout) {
-      return Collections.singletonList(SummaryResponse.ok(null, Coverage.COMPLETE));
+      return Collections.singletonList(SummaryResponse.ok(null));
     }
 
     @Override

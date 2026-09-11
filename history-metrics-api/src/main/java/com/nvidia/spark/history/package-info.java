@@ -26,9 +26,8 @@
  *
  * <p>An {@link com.nvidia.spark.history.Status.Code#OK OK} summary response may contain no
  * summary; this is normal absence of evidence and calls for the consumer's unchanged static
- * behavior. {@link com.nvidia.spark.history.Coverage#WINDOW_CLIPPED WINDOW_CLIPPED} is
- * informational rather than an error. Dimensions omitted from a summary request are equality
- * wildcards aggregated into one result, and a request containing a wildcard must use a zero limit.
+ * behavior. Dimensions omitted from a summary request are equality wildcards aggregated into one
+ * result, and a request containing a wildcard must use a zero limit.
  *
  * <p>Declaration and summary timeouts are relative, nonnegative, end-to-end budgets measured with
  * monotonic elapsed time from method entry. Record submission is non-blocking and total: configured

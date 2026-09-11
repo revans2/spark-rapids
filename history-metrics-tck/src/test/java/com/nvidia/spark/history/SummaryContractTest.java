@@ -112,35 +112,29 @@ class SummaryContractTest {
   }
 
   @Test
-  void fr12ResponseDistinguishesEvidenceAbsenceCoverageAndErrors() {
+  void fr12ResponseDistinguishesEvidenceAbsenceAndErrors() {
     Summary summary = Summary.of(1L, 2.0, 2.0, 2.0, 100L, 100L);
-    SummaryResponse evidence = SummaryResponse.ok(summary, Coverage.COMPLETE);
-    SummaryResponse absence = SummaryResponse.ok(null, Coverage.WINDOW_CLIPPED);
+    SummaryResponse evidence = SummaryResponse.ok(summary);
+    SummaryResponse absence = SummaryResponse.ok(null);
     SummaryResponse unavailable =
         SummaryResponse.error(Status.of(Status.Code.UNAVAILABLE, "backend unavailable"));
 
     assertEquals(summary, evidence.summary());
-    assertEquals(Coverage.COMPLETE, evidence.coverage());
     assertEquals(Status.Code.OK, evidence.status().code());
     assertNull(absence.summary());
-    assertEquals(Coverage.WINDOW_CLIPPED, absence.coverage());
     assertNull(unavailable.summary());
-    assertNull(unavailable.coverage());
     assertEquals(Status.Code.UNAVAILABLE, unavailable.status().code());
 
-    assertThrows(NullPointerException.class, () -> SummaryResponse.ok(summary, null));
     assertThrows(IllegalArgumentException.class, () ->
         SummaryResponse.error(Status.ok()));
     PublicApiSurface.assertConstructors(SummaryResponse.class);
     PublicApiSurface.assertMethods(
         SummaryResponse.class,
-        "coverage():com.nvidia.spark.history.Coverage",
         "equals(java.lang.Object):boolean",
         "error(com.nvidia.spark.history.Status):" +
             "com.nvidia.spark.history.SummaryResponse",
         "hashCode():int",
-        "ok(com.nvidia.spark.history.Summary," +
-            "com.nvidia.spark.history.Coverage):" +
+        "ok(com.nvidia.spark.history.Summary):" +
             "com.nvidia.spark.history.SummaryResponse",
         "status():com.nvidia.spark.history.Status",
         "summary():com.nvidia.spark.history.Summary",

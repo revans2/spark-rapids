@@ -32,7 +32,6 @@ import java.util.PriorityQueue;
 import java.util.Set;
 
 import com.nvidia.spark.history.BackendInfo;
-import com.nvidia.spark.history.Coverage;
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
 import com.nvidia.spark.history.HistoryMetricCatalog;
@@ -106,7 +105,6 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
   private long recordAccepted;
   private long recordRejected;
   private long summaryBatchCount;
-  private long summaryWindowClipped;
   private long summaryRowsExamined;
   private boolean closed;
 
@@ -572,7 +570,6 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
           recordAccepted,
           recordRejected,
           summaryBatchCount,
-          summaryWindowClipped,
           summaryRowsExamined);
     }
   }
@@ -740,16 +737,11 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
       SummaryWork work) {
     Duration planningMaxAge = item.declaration.effectiveRetention.planningMaxAge();
     if (planningMaxAge.isZero()) {
-      return budget.expired()
-          ? null
-          : SummaryResponse.ok(null, Coverage.WINDOW_CLIPPED);
+      return budget.expired() ? null : SummaryResponse.ok(null);
     }
 
     long cutoffMs = subtractAgeSaturated(providerNowMs, planningMaxAge);
     long effectiveFromMs = Math.max(item.request.fromMs(), cutoffMs);
-    Coverage coverage = effectiveFromMs == item.request.fromMs()
-        ? Coverage.COMPLETE
-        : Coverage.WINDOW_CLIPPED;
     SummaryAccumulator accumulator = new SummaryAccumulator();
 
     if (item.request.limit() == 0) {
@@ -795,7 +787,7 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
     if (budget.expired()) {
       return null;
     }
-    return SummaryResponse.ok(accumulator.summary(), coverage);
+    return SummaryResponse.ok(accumulator.summary());
   }
 
   private static boolean eligible(
@@ -842,9 +834,6 @@ final class LocalHistoryMetricsBackend implements HistoryMetricsBackend {
       summaryRowsExamined += work.rowsExamined;
       for (SummaryResponse result : results) {
         increment(summaryOutcomes, result.status().code(), 1);
-        if (result.coverage() == Coverage.WINDOW_CLIPPED) {
-          summaryWindowClipped++;
-        }
       }
       return results;
     }

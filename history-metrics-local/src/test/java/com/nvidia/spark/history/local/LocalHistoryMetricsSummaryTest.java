@@ -40,7 +40,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.nvidia.spark.history.Coverage;
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
 import com.nvidia.spark.history.HistoryMetricCatalog;
@@ -78,7 +77,7 @@ class LocalHistoryMetricsSummaryTest {
       declare(backend, schema(METRIC_V1, Duration.ofDays(3)));
       assertOk(backend.summarize(Collections.singletonList(
           request(METRIC_V1, 0, 500, 0, dims("table", "missing"))), TIMEOUT).get(0),
-          null, Coverage.COMPLETE);
+          null);
 
       record(backend,
           stamped(METRIC_V1, dims("table", "a", "bucket", 1L), 2.0, 100),
@@ -121,7 +120,6 @@ class LocalHistoryMetricsSummaryTest {
           TIMEOUT).get(0);
       assertEquals(Status.Code.NOT_DECLARED, undeclared.status().code());
       assertNull(undeclared.summary());
-      assertNull(undeclared.coverage());
     } finally {
       backend.close();
     }
@@ -187,7 +185,7 @@ class LocalHistoryMetricsSummaryTest {
   }
 
   @Test
-  void effectivePlanningAgeControlsCoverageAndZeroDisablesVisibilityWithoutDeletion() {
+  void effectivePlanningAgeLimitsVisibilityAndZeroDisablesVisibilityWithoutDeletion() {
     LocalHistoryMetricsBackend backend = backend(Duration.ofMillis(100));
     try {
       declare(backend, schema(METRIC_V1, Duration.ofMillis(500)));
@@ -198,19 +196,17 @@ class LocalHistoryMetricsSummaryTest {
           stamped(METRIC_V1, dims("table", "a", "bucket", 1L), 3.0, 999),
           stamped(METRIC_V2, dims("table", "a", "bucket", 1L), 4.0, 999));
 
-      SummaryResponse clipped = response(backend, request(
+      SummaryResponse wideWindow = response(backend, request(
           METRIC_V1, 0, 2_000, 0, dims("table", "a", "bucket", 1L)));
-      assertEquals(Coverage.WINDOW_CLIPPED, clipped.coverage());
-      assertSummary(clipped.summary(), 2, 2.5, 2.0, 3.0, 900, 999);
+      assertSummary(wideWindow.summary(), 2, 2.5, 2.0, 3.0, 900, 999);
 
       SummaryResponse complete = response(backend, request(
           METRIC_V1, 900, 2_000, 0, dims("table", "a", "bucket", 1L)));
-      assertEquals(Coverage.COMPLETE, complete.coverage());
       assertEquals(2, complete.summary().count());
 
       SummaryResponse disabled = response(backend, request(
           METRIC_V2, 0, 2_000, 0, dims("table", "a", "bucket", 1L)));
-      assertOk(disabled, null, Coverage.WINDOW_CLIPPED);
+      assertOk(disabled, null);
       assertEquals(1, backend.testHandle().observations(METRIC_V2).size());
     } finally {
       backend.close();
@@ -229,7 +225,6 @@ class LocalHistoryMetricsSummaryTest {
       SummaryResponse response = response(backend, request(
           METRIC_V1, Long.MIN_VALUE, now + 9, 0,
           dims("table", "a", "bucket", 1L)));
-      assertEquals(Coverage.COMPLETE, response.coverage());
       assertEquals(1, response.summary().count());
     } finally {
       backend.close();
@@ -246,7 +241,6 @@ class LocalHistoryMetricsSummaryTest {
           stamped(METRIC_V1, dims("table", "a", "bucket", 1L), 2.0, NOW_MS));
       SummaryResponse response = response(subMillisecond, request(
           METRIC_V1, 0, 2_000, 0, dims("table", "a", "bucket", 1L)));
-      assertEquals(Coverage.WINDOW_CLIPPED, response.coverage());
       assertSummary(response.summary(), 1, 2.0, 2.0, 2.0, NOW_MS, NOW_MS);
     } finally {
       subMillisecond.close();
@@ -267,7 +261,6 @@ class LocalHistoryMetricsSummaryTest {
       SummaryResponse response = response(overflow, request(
           METRIC_V1, Long.MIN_VALUE, 1, 0,
           dims("table", "a", "bucket", 1L)));
-      assertEquals(Coverage.COMPLETE, response.coverage());
       assertEquals(1, response.summary().count());
     } finally {
       overflow.close();
@@ -345,7 +338,6 @@ class LocalHistoryMetricsSummaryTest {
           TIMEOUT).get(0);
       assertEquals(Status.Code.UNAVAILABLE, response.status().code());
       assertNull(response.summary());
-      assertNull(response.coverage());
       assertEquals(1, unavailable.testHandle().counters()
           .summaryOutcomeCount(Status.Code.UNAVAILABLE));
     } finally {
@@ -497,7 +489,6 @@ class LocalHistoryMetricsSummaryTest {
       assertEquals(1, counters.summaryBatchCount());
       assertEquals(1, counters.summaryOutcomeCount(Status.Code.DEADLINE_EXCEEDED));
       assertEquals(1, counters.summaryRowsExamined());
-      assertEquals(0, counters.summaryWindowClipped());
     } finally {
       backend.close();
     }
@@ -528,7 +519,6 @@ class LocalHistoryMetricsSummaryTest {
               METRIC_V1, 0, 200, 0, dims("table", "a", "bucket", 1L))),
           Duration.ofNanos(10)).get(0);
       assertEquals(Status.Code.DEADLINE_EXCEEDED, response.status().code());
-      assertEquals(0, zeroRetention.testHandle().counters().summaryWindowClipped());
     } finally {
       zeroRetention.close();
     }
@@ -561,7 +551,6 @@ class LocalHistoryMetricsSummaryTest {
       assertEquals(3, counters.summaryOutcomeCount(Status.Code.INVALID_REQUEST));
       assertEquals(1, counters.summaryOutcomeCount(Status.Code.NOT_DECLARED));
       assertEquals(1, counters.summaryOutcomeCount(Status.Code.DEADLINE_EXCEEDED));
-      assertEquals(1, counters.summaryWindowClipped());
       assertEquals(2, counters.summaryRowsExamined());
 
       backend.summarize(Collections.emptyList(), TIMEOUT);
@@ -669,15 +658,12 @@ class LocalHistoryMetricsSummaryTest {
       LocalHistoryMetricsBackend backend, SummaryRequest request) {
     SummaryResponse response = response(backend, request);
     assertEquals(Status.Code.OK, response.status().code());
-    assertEquals(Coverage.COMPLETE, response.coverage());
     return response.summary();
   }
 
-  private static void assertOk(
-      SummaryResponse response, Summary summary, Coverage coverage) {
+  private static void assertOk(SummaryResponse response, Summary summary) {
     assertEquals(Status.Code.OK, response.status().code());
     assertEquals(summary, response.summary());
-    assertEquals(coverage, response.coverage());
   }
 
   private static void assertClose(double expected, double actual) {

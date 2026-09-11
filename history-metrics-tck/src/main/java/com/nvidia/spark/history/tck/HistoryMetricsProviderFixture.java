@@ -36,7 +36,7 @@ public interface HistoryMetricsProviderFixture extends AutoCloseable {
   MetricStore store();
 
   /**
-   * Sets the provider clock used by subsequent retention and coverage decisions.
+   * Sets the provider clock used by subsequent retention and planning-visibility decisions.
    *
    * @param timestampMs provider time in epoch milliseconds
    */

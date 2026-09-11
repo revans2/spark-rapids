@@ -46,7 +46,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.nvidia.spark.history.BackendInfo;
-import com.nvidia.spark.history.Coverage;
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
 import com.nvidia.spark.history.HistoryMetricCatalog;
@@ -506,7 +505,7 @@ class LocalMetricStorePlanningAdapterTest {
     SummaryRequest wildcardLimit = request(METRIC_V1, 1, Collections.emptyMap());
     SummaryRequest unknown = request(METRIC_V2, 0, Collections.emptyMap());
     backend.summaryResult = Arrays.asList(
-        SummaryResponse.ok(null, Coverage.COMPLETE),
+        SummaryResponse.ok(null),
         SummaryResponse.error(Status.of(
             Status.Code.NOT_DECLARED, "provider has no declaration")));
 
@@ -602,7 +601,7 @@ class LocalMetricStorePlanningAdapterTest {
     SummaryRequest unknown = request(METRIC_V2, 0, Collections.emptyMap());
 
     backend.summaryResult = Arrays.asList(
-        SummaryResponse.ok(null, Coverage.COMPLETE),
+        SummaryResponse.ok(null),
         SummaryResponse.error(Status.of(
             Status.Code.NOT_DECLARED, "provider has no declaration")));
     List<SummaryResponse> responses =
@@ -616,7 +615,7 @@ class LocalMetricStorePlanningAdapterTest {
     assertEquals(1, counters.declarationOutcomeCount(SchemaStatus.Code.ACCEPTED));
     assertEquals(0, counters.providerFailureCount());
     assertThrows(UnsupportedOperationException.class,
-        () -> responses.add(SummaryResponse.ok(null, Coverage.COMPLETE)));
+        () -> responses.add(SummaryResponse.ok(null)));
 
     adapter.summarize(Collections.emptyList(), TIMEOUT);
     assertEquals(1, counters.summaryCallCount());
@@ -668,7 +667,7 @@ class LocalMetricStorePlanningAdapterTest {
     SummaryRequest valid = request(METRIC_V1, 0, Collections.singletonMap(
         "table", DimValue.of("a")));
     backend.summaryResult =
-        Collections.singletonList(SummaryResponse.ok(null, Coverage.COMPLETE));
+        Collections.singletonList(SummaryResponse.ok(null));
 
     List<SummaryResponse> results =
         adapter.summarize(Arrays.asList(invalid, valid), Duration.ofNanos(10));
@@ -707,7 +706,7 @@ class LocalMetricStorePlanningAdapterTest {
     SummaryRequest valid = request(METRIC_V1, 0, Collections.singletonMap(
         "table", DimValue.of("a")));
     lateBackend.summaryResult =
-        Collections.singletonList(SummaryResponse.ok(null, Coverage.COMPLETE));
+        Collections.singletonList(SummaryResponse.ok(null));
 
     SummaryResponse lateResult =
         late.summarize(Collections.singletonList(valid), Duration.ofNanos(10)).get(0);
@@ -1461,7 +1460,7 @@ class LocalMetricStorePlanningAdapterTest {
       }
       List<SummaryResponse> responses = new ArrayList<SummaryResponse>();
       for (SummaryRequest ignored : requests) {
-        responses.add(SummaryResponse.ok(null, Coverage.COMPLETE));
+        responses.add(SummaryResponse.ok(null));
       }
       return responses;
     }

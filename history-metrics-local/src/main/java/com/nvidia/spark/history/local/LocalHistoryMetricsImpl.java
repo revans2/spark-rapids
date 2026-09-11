@@ -636,8 +636,6 @@ final class LocalHistoryMetricsImpl implements LocalHistoryMetrics {
     LocalMetricStorePlanningAdapter.PlanningCounterSnapshot planning = adapter.counters();
     put(values, LocalMetricCounter.DECLARATION_BATCH, planning.declareCallCount());
     put(values, LocalMetricCounter.SUMMARY_BATCH, planning.summaryCallCount());
-    put(values, LocalMetricCounter.SUMMARY_WINDOW_CLIPPED,
-        planning.summaryWindowClippedCount());
     put(values, LocalMetricCounter.SUMMARY_ROWS, planning.summaryRowCount());
     put(values, LocalMetricCounter.DECLARATION_STATUS_ACCEPTED,
         planning.declarationOutcomeCount(SchemaStatus.Code.ACCEPTED));

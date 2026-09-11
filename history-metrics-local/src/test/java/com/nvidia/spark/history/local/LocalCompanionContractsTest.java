@@ -216,7 +216,6 @@ class LocalCompanionContractsTest {
         LocalMetricCounter.SUMMARY_STATUS_DEADLINE_EXCEEDED,
         LocalMetricCounter.SUMMARY_STATUS_UNAVAILABLE,
         LocalMetricCounter.SUMMARY_STATUS_DENIED,
-        LocalMetricCounter.SUMMARY_WINDOW_CLIPPED,
         LocalMetricCounter.SUMMARY_ROWS,
         LocalMetricCounter.RECORD_INVALID,
         LocalMetricCounter.RECORD_NOT_DECLARED,

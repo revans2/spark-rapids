@@ -28,7 +28,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import com.nvidia.spark.history.Coverage;
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
 import com.nvidia.spark.history.HistoryMetricCatalog;
@@ -78,13 +77,11 @@ public final class HistoryMetricsIntegrationExampleTest {
 
         SummaryResponse exact = summarize(owner.store(), exactRequest());
         assertEquals(Status.Code.OK, exact.status().code());
-        assertEquals(Coverage.COMPLETE, exact.coverage());
         assertEquals(1L, exact.summary().count());
         assertEquals(2.0, exact.summary().mean());
 
         SummaryResponse wildcard = summarize(owner.store(), wildcardRequest());
         assertEquals(Status.Code.OK, wildcard.status().code());
-        assertEquals(Coverage.COMPLETE, wildcard.coverage());
         assertEquals(2L, wildcard.summary().count());
         assertEquals(3.0, wildcard.summary().mean());
 
@@ -130,7 +127,7 @@ public final class HistoryMetricsIntegrationExampleTest {
     assertEquals(
         DecisionPath.STATIC_FALLBACK,
         chooseWholeDecision(
-            Collections.singletonList(SummaryResponse.ok(null, Coverage.COMPLETE)), 1));
+            Collections.singletonList(SummaryResponse.ok(null)), 1));
 
     for (Status.Code code : Arrays.asList(
         Status.Code.NOT_DECLARED,
@@ -155,13 +152,7 @@ public final class HistoryMetricsIntegrationExampleTest {
     assertEquals(
         DecisionPath.STATIC_FALLBACK,
         chooseWholeDecision(
-            Arrays.asList(evidence(Coverage.COMPLETE), evidence(Coverage.COMPLETE)), 1));
-
-    // WINDOW_CLIPPED reports coverage. This structural gate does not invent an evidence threshold.
-    assertEquals(
-        DecisionPath.HISTORY_ELIGIBLE,
-        chooseWholeDecision(
-            Collections.singletonList(evidence(Coverage.WINDOW_CLIPPED)), 1));
+            Arrays.asList(evidence(), evidence()), 1));
   }
 
   @Test
@@ -209,16 +200,15 @@ public final class HistoryMetricsIntegrationExampleTest {
       if (response == null ||
           response.status() == null ||
           response.status().code() != Status.Code.OK ||
-          response.summary() == null ||
-          response.coverage() == null) {
+          response.summary() == null) {
         return DecisionPath.STATIC_FALLBACK;
       }
     }
     return DecisionPath.HISTORY_ELIGIBLE;
   }
 
-  private static SummaryResponse evidence(Coverage coverage) {
-    return SummaryResponse.ok(Summary.of(1L, 3.0, 3.0, 3.0, 9_000L, 9_000L), coverage);
+  private static SummaryResponse evidence() {
+    return SummaryResponse.ok(Summary.of(1L, 3.0, 3.0, 3.0, 9_000L, 9_000L));
   }
 
   private static SummaryResponse summarize(MetricStore store, SummaryRequest request) {

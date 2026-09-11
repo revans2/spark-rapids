@@ -48,8 +48,6 @@ public enum LocalMetricCounter {
   SUMMARY_STATUS_UNAVAILABLE,
   /** Summary positions denied by the provider. */
   SUMMARY_STATUS_DENIED,
-  /** Successful summary positions whose requested time window was clipped. */
-  SUMMARY_WINDOW_CLIPPED,
   /** Application-level observations included in successful summaries. */
   SUMMARY_ROWS,
   /** Invalid record calls or observation elements dropped before enqueue. */

@@ -27,7 +27,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.nvidia.spark.history.Coverage;
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
 import com.nvidia.spark.history.HistoryMetricCatalog;
@@ -148,7 +147,7 @@ public abstract class MetricStoreProviderContract {
   }
 
   @Test
-  public final void retentionUsesTheControllableProviderClockAndReportsClipping() {
+  public final void retentionUsesTheControllableProviderClockToLimitPlanningVisibility() {
     MetricSchema shortWindow =
         schema(METRIC_V1, standardDimensions(), Duration.ofSeconds(1));
     assertDeclaration(SchemaStatus.Code.ACCEPTED, shortWindow);
@@ -157,16 +156,14 @@ public abstract class MetricStoreProviderContract {
         observation(METRIC_V1, dimensions("a", 1L), 2.0, 10_000L));
 
     fixture.setProviderTime(11_000L);
-    SummaryResponse clipped = onlyResponse(request(
+    SummaryResponse wideWindow = onlyResponse(request(
         METRIC_V1, dimensions("a", 1L), 0L, 12_000L, 0));
-    assertEquals(Status.Code.OK, clipped.status().code());
-    assertEquals(Coverage.WINDOW_CLIPPED, clipped.coverage());
-    assertSummary(clipped.summary(), 1L, 2.0, 2.0, 2.0, 10_000L, 10_000L);
+    assertEquals(Status.Code.OK, wideWindow.status().code());
+    assertSummary(wideWindow.summary(), 1L, 2.0, 2.0, 2.0, 10_000L, 10_000L);
 
-    SummaryResponse complete = onlyResponse(request(
+    SummaryResponse bounded = onlyResponse(request(
         METRIC_V1, dimensions("a", 1L), 10_000L, 12_000L, 0));
-    assertEquals(Coverage.COMPLETE, complete.coverage());
-    assertEquals(1L, complete.summary().count());
+    assertEquals(1L, bounded.summary().count());
   }
 
   @Test
@@ -189,7 +186,6 @@ public abstract class MetricStoreProviderContract {
     SummaryResponse empty = onlyResponse(request(
         METRIC_V1, dimensions("missing", 1L), 0L, INITIAL_NOW_MS + 1L, 0));
     assertEquals(Status.Code.OK, empty.status().code());
-    assertEquals(Coverage.COMPLETE, empty.coverage());
     assertNull(empty.summary());
 
     SummaryResponse unknown = onlyResponse(request(
@@ -197,7 +193,6 @@ public abstract class MetricStoreProviderContract {
         0L, INITIAL_NOW_MS + 1L, 0));
     assertEquals(Status.Code.NOT_DECLARED, unknown.status().code());
     assertNull(unknown.summary());
-    assertNull(unknown.coverage());
 
     SummaryRequest valid = request(
         METRIC_V1, dimensions("missing", 1L), 0L, INITIAL_NOW_MS + 1L, 0);

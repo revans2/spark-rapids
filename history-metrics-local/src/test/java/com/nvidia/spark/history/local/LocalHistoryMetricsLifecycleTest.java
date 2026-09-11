@@ -39,7 +39,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.nvidia.spark.history.BackendInfo;
-import com.nvidia.spark.history.Coverage;
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
 import com.nvidia.spark.history.HistoryMetricCatalog;
@@ -784,7 +783,7 @@ class LocalHistoryMetricsLifecycleTest {
       Future<SummaryResponse> queued = callers.submit(() ->
           local.store().summarize(
               Collections.singletonList(summaryRequest()), TIMEOUT).get(0));
-      assertTrue(planning.queued.await(5, TimeUnit.SECONDS));
+      assertTrue(planning.thirdSubmission.await(5, TimeUnit.SECONDS));
 
       assertFalse(local.shutdown(Duration.ZERO));
       assertEquals(Status.Code.UNAVAILABLE, queued.get(5, TimeUnit.SECONDS).status().code());
@@ -1392,7 +1391,8 @@ class LocalHistoryMetricsLifecycleTest {
   }
 
   private static final class SignallingPlanningExecutor extends ThreadPoolExecutor {
-    private final CountDownLatch queued = new CountDownLatch(2);
+    // Declaration, active summary, then the summary queued behind the blocked active call.
+    private final CountDownLatch thirdSubmission = new CountDownLatch(3);
     private final CountDownLatch shutdownCalled = new CountDownLatch(1);
 
     private SignallingPlanningExecutor() {
@@ -1409,9 +1409,7 @@ class LocalHistoryMetricsLifecycleTest {
     @Override
     public void execute(Runnable command) {
       super.execute(command);
-      if (getQueue().contains(command)) {
-        queued.countDown();
-      }
+      thirdSubmission.countDown();
     }
 
     @Override
@@ -1491,7 +1489,7 @@ class LocalHistoryMetricsLifecycleTest {
         List<SummaryResponse> responses =
             new ArrayList<SummaryResponse>(requests.size());
         for (SummaryRequest ignored : requests) {
-          responses.add(SummaryResponse.ok(null, Coverage.COMPLETE));
+          responses.add(SummaryResponse.ok(null));
         }
         return responses;
       } finally {

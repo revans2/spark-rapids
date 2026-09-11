@@ -248,11 +248,6 @@ decision logic:
 | `DENIED` | Abstain; do not bypass the provider's decision |
 | Null, malformed, or wrong-cardinality batch | Reject the whole batch and abstain |
 
-`WINDOW_CLIPPED` is informational coverage on an `OK` response. It says the provider clipped the
-requested start to the effective planning window. It is not, by itself, an error or an automatic
-abstention. The metric owner must define whether the returned summary is adequate; the generic
-integration must not invent a count, age, or formula.
-
 Make the fallback atomic at the natural optimizer-decision scope. If one required response is absent,
 an error, malformed, or missing because cardinality is wrong, do not combine partial history with
 static inputs. Use the entire pre-existing static decision. Also retain static behavior when strict

@@ -42,7 +42,6 @@ import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
 import com.nvidia.spark.history.BackendInfo;
-import com.nvidia.spark.history.Coverage;
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
 import com.nvidia.spark.history.HistoryMetricCatalog;
@@ -788,7 +787,7 @@ class LocalAsyncRecordPipelineTest {
         List<SummaryRequest> requests, Duration timeout) {
       List<SummaryResponse> results = new ArrayList<SummaryResponse>();
       for (SummaryRequest ignored : requests) {
-        results.add(SummaryResponse.ok(null, Coverage.COMPLETE));
+        results.add(SummaryResponse.ok(null));
       }
       return results;
     }

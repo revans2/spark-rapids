@@ -111,7 +111,6 @@ final class LocalBackendTestHandle {
     private final long recordAccepted;
     private final long recordRejected;
     private final long summaryBatchCount;
-    private final long summaryWindowClipped;
     private final long summaryRowsExamined;
 
     CounterSnapshot(
@@ -122,7 +121,6 @@ final class LocalBackendTestHandle {
         long recordAccepted,
         long recordRejected,
         long summaryBatchCount,
-        long summaryWindowClipped,
         long summaryRowsExamined) {
       this.declarationOutcomes = Collections.unmodifiableMap(
           new java.util.EnumMap<SchemaStatus.Code, Long>(declarationOutcomes));
@@ -135,7 +133,6 @@ final class LocalBackendTestHandle {
       this.recordAccepted = recordAccepted;
       this.recordRejected = recordRejected;
       this.summaryBatchCount = summaryBatchCount;
-      this.summaryWindowClipped = summaryWindowClipped;
       this.summaryRowsExamined = summaryRowsExamined;
     }
 
@@ -165,10 +162,6 @@ final class LocalBackendTestHandle {
 
     public long summaryOutcomeCount(Status.Code code) {
       return count(summaryOutcomes, Objects.requireNonNull(code, "code"));
-    }
-
-    public long summaryWindowClipped() {
-      return summaryWindowClipped;
     }
 
     public long summaryRowsExamined() {

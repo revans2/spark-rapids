@@ -33,7 +33,6 @@ import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.nvidia.spark.history.Coverage;
 import com.nvidia.spark.history.DimValue;
 import com.nvidia.spark.history.DimensionSpec;
 import com.nvidia.spark.history.HistoryMetricCatalog;
@@ -133,7 +132,6 @@ class LocalHistoryMetricsOpenSnapshotTest {
               .build()),
           TIMEOUT).get(0);
       assertEquals(Status.Code.OK, summary.status().code());
-      assertEquals(Coverage.COMPLETE, summary.coverage());
       assertEquals(3.0, summary.summary().mean());
 
       long previousOrdinal = restored.testHandle().observations().get(2)
