@@ -22,15 +22,23 @@ import java.util
 import com.nvidia.spark.history._
 import org.scalatest.funsuite.AnyFunSuite
 
-import org.apache.spark.SparkContext
-
 class HistoryMetricsManagerSuite extends AnyFunSuite {
+  private val configuration = util.Collections.singletonMap("spark.test.key", "value")
+  private val applicationId = "application-1"
+  private val applicationAttemptId = "attempt-2"
+  private val producerVersion = "26.10.0-test"
+
+  private def initialize(manager: HistoryMetricsManager, providerName: String): Unit = {
+    manager.initialize(
+      configuration, applicationId, applicationAttemptId, producerVersion, providerName)
+  }
+
   test("none keeps the no-op store without discovering providers") {
     val initial = MetricStores.current()
     val manager = new HistoryMetricsManager(() =>
       throw new AssertionError("provider discovery should not run"))
 
-    manager.initialize(null, "none")
+    initialize(manager, "none")
 
     assert(MetricStores.current() eq initial)
     manager.shutdown()
@@ -41,9 +49,17 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     val provider = new TestProvider("local", new DelegatingStore(initial))
     val manager = new HistoryMetricsManager(() => Seq(provider))
 
-    manager.initialize(null, "LOCAL")
+    initialize(manager, "LOCAL")
 
     assert(provider.openCalls == 1)
+    assert(provider.configuration ne configuration)
+    assert(provider.configuration.get("spark.test.key") == "value")
+    intercept[UnsupportedOperationException] {
+      provider.configuration.put("spark.test.key", "changed")
+    }
+    assert(provider.applicationId == applicationId)
+    assert(provider.applicationAttemptId == applicationAttemptId)
+    assert(provider.producerVersion == producerVersion)
     assert(MetricStores.current() eq provider.store)
     manager.shutdown()
     assert(provider.shutdownCalls == 1)
@@ -56,7 +72,7 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     val provider = new TestProvider("database", new DelegatingStore(initial))
     val manager = new HistoryMetricsManager(() => Seq(provider))
 
-    manager.initialize(null, "local")
+    initialize(manager, "local")
 
     assert(provider.openCalls == 0)
     assert(MetricStores.current() eq initial)
@@ -69,7 +85,7 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     val provider = new TestProvider("local", new DelegatingStore(initial), failOpen = true)
     val manager = new HistoryMetricsManager(() => Seq(provider))
 
-    manager.initialize(null, "local")
+    initialize(manager, "local")
 
     assert(provider.openCalls == 1)
     assert(provider.shutdownCalls == 1)
@@ -85,7 +101,7 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     val second = new TestProvider("LOCAL", new DelegatingStore(initial))
     val manager = new HistoryMetricsManager(() => Seq(first, second))
 
-    manager.initialize(null, "local")
+    initialize(manager, "local")
 
     assert(first.openCalls == 0)
     assert(second.openCalls == 0)
@@ -101,11 +117,23 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     var openCalls = 0
     var shutdownCalls = 0
     var shutdownTimeout: Duration = _
+    var configuration: util.Map[String, String] = _
+    var applicationId: String = _
+    var applicationAttemptId: String = _
+    var producerVersion: String = _
 
     override def name(): String = providerName
 
-    override def open(sparkContext: SparkContext): MetricStore = {
+    override def open(
+        configuration: util.Map[String, String],
+        applicationId: String,
+        applicationAttemptId: String,
+        producerVersion: String): MetricStore = {
       openCalls += 1
+      this.configuration = configuration
+      this.applicationId = applicationId
+      this.applicationAttemptId = applicationAttemptId
+      this.producerVersion = producerVersion
       if (failOpen) {
         throw new IllegalStateException("injected open failure")
       }

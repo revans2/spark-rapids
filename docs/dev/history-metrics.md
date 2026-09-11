@@ -56,17 +56,18 @@ when selection or initialization fails.
 
 ## Artifact roles
 
-The source tree separates three Java 8 artifacts:
+The private repository contains a standalone Maven subproject with three Java 8 artifacts. They do
+not inherit the private repository's Spark shim, Scala, or classified-output build settings:
 
 | Artifact | Role | Dependency direction |
 | --- | --- | --- |
-| `cudf-spark-history-metrics-api` | Planning contract, governed production catalog, no-op store, process locator, and Spark-facing provider SPI | Consumer-facing base; Spark Core is provided at runtime |
-| `cudf-spark-history-metrics-local` | Optional in-memory provider for testing and validation, including snapshots and test diagnostics | Depends on the metrics API; Spark Core is provided at runtime |
+| `cudf-spark-history-metrics-api` | Planning contract, governed production catalog, no-op store, installation/registration holder, and provider SPI | Consumer-facing base with no Spark or Scala dependency |
+| `cudf-spark-history-metrics-local` | Optional in-memory provider for testing and validation, including snapshots and test diagnostics | Depends on the metrics API; has no Spark or Scala dependency |
 | `cudf-spark-history-metrics-tck` | Reusable provider-conformance fixtures and suites | Test dependency for provider implementations |
 
-Use artifacts built from a compatible project revision. These names describe the current source-tree
-roles and are not a commitment to their long-term repository placement. The API is expected to move
-with the planning integration that owns logical-plan changes. Depending on the API leaves
+Use artifacts built from a compatible private-project revision. The three unsuffixed, unclassified
+artifacts are built once from their standalone subproject and shared by both Scala builds. Depending
+on the API leaves
 `MetricStores.current()` on its non-null no-op implementation. The local provider is not a normal
 SQL plugin dependency and is not included merely because the RAPIDS plugin is present.
 
@@ -80,10 +81,12 @@ separate local-provider jar to the driver classpath and set:
 spark.rapids.sql.history.metrics.provider=local
 ```
 
-A provider reads its own settings from the driver `SparkContext`, including Spark and Hadoop
-configuration. The SPI is Java so its `open(SparkContext)` descriptor is independent of the Scala
-binary version; a provider must still use only Spark methods supported by the Spark versions it
-claims to support. Provider jars must not bundle Spark or the history metrics API.
+The Java SPI receives a defensive, unmodifiable copy of the Spark configuration plus the application
+ID, optional application-attempt ID, and RAPIDS producer version. The map may contain sensitive
+configuration, so a provider is trusted in-process code and must not log or persist the map wholesale.
+The API does not filter it or define provider-specific keys. It has no direct Spark or Scala dependency,
+so the same artifact is binary-compatible with the Scala 2.12 and 2.13 distributions. Provider jars
+must not bundle Spark or the history metrics API.
 
 Providers may be placed in the application jar or supplied before driver startup through `--jars`,
 `spark.jars`, `--packages`, `--driver-class-path`, `spark.driver.extraClassPath`, or an equivalent
@@ -92,17 +95,17 @@ driver class loaders. In particular, do not put the provider only on the parent 
 while supplying the RAPIDS distribution only through `--jars`: the parent cannot resolve the history
 metrics API from its child loader. Supplying both jars through the same mechanism avoids that
 asymmetry. Adding a provider later with `SparkContext.addJar()` cannot enable it, because provider
-selection occurs while the `SparkContext` is being initialized. A jar on the classpath is only
-discoverable; it is never selected implicitly. Discovery logs the configured name and every valid
+selection occurs during driver startup in `DriverPlugin.registerMetrics`. A jar on the classpath is
+only discoverable; it is never selected implicitly. Discovery logs the configured name and every valid
 provider name and implementation it finds. Missing, duplicate, incompatible, or failing providers are
 logged with the no-op fallback reason and leave history-backed heuristics disabled.
 
 The current `local` service validates discovery and lifecycle integration. Its plugin-owned catalog
 is empty until the first governed production metric family is added, so it does not yet accept
-application declarations. The local provider uses the Spark application ID as non-secret provenance,
-sampling it when an observation is stamped because Spark assigns the ID after driver plugins are
-initialized. It leaves the optional application-attempt ID absent rather than depending on a
-scheduler-specific source. It does not expose snapshot save or restore through the plugin integration.
+application declarations. Spark calls `DriverPlugin.registerMetrics` after assigning the application
+ID and attempt ID; that callback opens the provider with those fixed values. The local provider adds
+the per-write timestamp when it stamps each observation. It does not expose snapshot save or restore
+through the plugin integration.
 
 ## Govern the metric before integrating it
 
@@ -146,7 +149,7 @@ HistoryMetricCatalog catalog = LocalTestCatalog.builder()
 LocalHistoryMetrics owner = LocalHistoryMetricsFactory.open(
     catalog,
     Clock.fixed(Instant.ofEpochMilli(10_000L), ZoneOffset.UTC),
-    () -> LocalProvenanceIdentity.of(
+    LocalProvenanceIdentity.of(
         "redacted-example-app", "attempt-1", "example-build"),
     Duration.ofHours(2));
 ```
@@ -274,7 +277,7 @@ The local factory never installs its store. Install only when code that reads
 
 ```java
 LocalHistoryMetrics owner = LocalHistoryMetricsFactory.open(
-    catalog, driverClock, provenanceSource, maximumPlanningAge);
+    catalog, driverClock, provenanceIdentity, maximumPlanningAge);
 AutoCloseable registration = null;
 try {
   registration = MetricStores.install(owner.store());
@@ -311,7 +314,7 @@ LocalHistoryMetrics restored = LocalHistoryMetricsFactory.openSnapshot(
     snapshotPath,
     catalog,
     driverClock,
-    provenanceSource,
+    provenanceIdentity,
     maximumPlanningAge,
     operationBudget);
 try {

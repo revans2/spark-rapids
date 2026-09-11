@@ -17,14 +17,14 @@
 package com.nvidia.spark.rapids
 
 import java.time.Duration
-import java.util.{Locale, ServiceConfigurationError, ServiceLoader}
+import java.util.{Collections, HashMap, Locale, Map => JavaMap}
+import java.util.{ServiceConfigurationError, ServiceLoader}
 
 import scala.collection.JavaConverters._
 import scala.util.control.NonFatal
 
 import com.nvidia.spark.history.{HistoryMetricsProvider, MetricStores}
 
-import org.apache.spark.SparkContext
 import org.apache.spark.internal.Logging
 
 /**
@@ -38,18 +38,27 @@ private[rapids] class HistoryMetricsManager(
   private var activeProvider: HistoryMetricsProvider = _
   private var registration: AutoCloseable = _
 
-  def initialize(sparkContext: SparkContext, configuredName: String): Unit = synchronized {
+  def initialize(
+      configuration: JavaMap[String, String],
+      applicationId: String,
+      applicationAttemptId: String,
+      producerVersion: String,
+      configuredName: String): Unit = synchronized {
     if (activeProvider != null || registration != null) {
       logWarning("History metrics provider initialization was requested more than once; " +
         "keeping the current provider")
     } else {
+      val providerConfiguration: JavaMap[String, String] =
+        Collections.unmodifiableMap[String, String](
+          new HashMap[String, String](configuration))
       val requested =
         Option(configuredName).map(_.trim.toLowerCase(Locale.ROOT)).getOrElse("")
       if (requested == HistoryMetricsManager.NO_PROVIDER) {
         logInfo("History metrics: requested=none, active=noop, reason=disabled by configuration")
       } else {
         discoverProviders(requested).foreach { providers =>
-          select(requested, providers, sparkContext)
+          select(requested, providers, providerConfiguration, applicationId,
+            applicationAttemptId, producerVersion)
         }
       }
     }
@@ -130,7 +139,10 @@ private[rapids] class HistoryMetricsManager(
   private def select(
       requested: String,
       providers: Seq[(String, HistoryMetricsProvider)],
-      sparkContext: SparkContext): Unit = {
+      configuration: JavaMap[String, String],
+      applicationId: String,
+      applicationAttemptId: String,
+      producerVersion: String): Unit = {
     providers.filter(_._1 == requested).map(_._2) match {
       case Seq() =>
         val available = providers.map(_._1).distinct.sorted
@@ -138,7 +150,8 @@ private[rapids] class HistoryMetricsManager(
         fallback(requested,
           s"provider was not found on the driver classpath; available providers: $availableText")
       case Seq(provider) =>
-        open(requested, provider, sparkContext)
+        open(requested, provider, configuration, applicationId,
+          applicationAttemptId, producerVersion)
       case matches =>
         val implementations = matches.map(_.getClass.getName).mkString(", ")
         fallback(requested, s"multiple providers advertise this name: $implementations")
@@ -148,9 +161,13 @@ private[rapids] class HistoryMetricsManager(
   private def open(
       requested: String,
       provider: HistoryMetricsProvider,
-      sparkContext: SparkContext): Unit = {
+      configuration: JavaMap[String, String],
+      applicationId: String,
+      applicationAttemptId: String,
+      producerVersion: String): Unit = {
     try {
-      val store = provider.open(sparkContext)
+      val store = provider.open(
+        configuration, applicationId, applicationAttemptId, producerVersion)
       val newRegistration = MetricStores.install(store)
       activeProvider = provider
       registration = newRegistration

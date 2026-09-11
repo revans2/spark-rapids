@@ -41,7 +41,7 @@
         <dependency>
             <groupId>com.nvidia</groupId>
             <artifactId>cudf-spark-history-metrics-api</artifactId>
-            <version>${project.version}</version>
+            <version>${history-metrics.version}</version>
         </dependency>
         <dependency>
             <groupId>me.bechberger</groupId>
