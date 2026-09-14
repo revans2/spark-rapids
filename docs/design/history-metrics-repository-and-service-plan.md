@@ -2,6 +2,10 @@
 
 Status: proposed implementation plan.
 
+The follow-on local-persistence and MVP-simplification plan is documented in
+`history-metrics-persistent-local-plan.md`. That plan supersedes this document's assumption that
+the custom in-memory/snapshot provider remains the long-term local implementation.
+
 This document records the intended repository split and the later client/server
 architecture for history metrics. The first implementation phase is deliberately
 limited to refactoring and packaging the code that already exists. It does not
@@ -95,8 +99,8 @@ history-metrics/
 
 The `history-metrics` parent must not inherit from the existing
 `cudf-spark-private-parent`. Its children inherit only from the independent
-Java parent. Listing `history-metrics` in the private repository reactor is an
-aggregation convenience; it must not make these modules Spark-shim modules.
+Java parent. The standalone `history-metrics` reactor is an aggregation
+convenience; it must not make these modules Spark-shim modules.
 They must:
 
 - be Java-only;
@@ -111,12 +115,12 @@ They must:
 - be published separately, even when the API is also assembled into the Spark
   RAPIDS distribution.
 
-The private `buildall` script currently selects `core` explicitly for each
-Spark shim. Phase 1 must add a separate one-time history-metrics build step; it
-must not add history metrics to every build-version profile. The default build
-owns compilation, testing, installation, and publication of the unsuffixed Java
-artifacts. Scala 2.12 and Scala 2.13 plugin builds consume those same artifacts
-and never rebuild or redeploy them.
+The private `buildall` script selects `core` explicitly for each Spark shim and
+invokes a separate one-time history-metrics install before the shim loop. It
+does not add history metrics to any build-version profile. The standalone
+history build owns compilation, testing, installation, and publication of the
+unsuffixed Java artifacts. Scala 2.12 and Scala 2.13 plugin builds consume those
+same artifacts and never rebuild or redeploy them.
 
 Later phases add only two runtime deliverables:
 
@@ -193,32 +197,39 @@ renaming or restructuring.
 
 Copy the API, TCK, and local implementation into the independent
 `history-metrics` subproject in `spark-rapids-private`, preserving package names
-and behavior. Add that aggregator once to the canonical root reactor, excluding
-it from the generated Scala 2.13 reactor and every build-version profile.
+and behavior. Do not add that aggregator to either the Scala 2.12 or Scala 2.13
+root reactor or to any build-version profile. Its canonical POM is
+`history-metrics/pom.xml`.
 
 The TCK must test both the backend contract and the provider-visible
 `MetricStore` behavior. The local implementation remains the reference
 provider used to prove that discovery, lifecycle, batching, deadlines,
 retention, summaries, and failure containment still work.
 
-Because the private root POM changes, regenerate and verify the Scala 2.13 build
-files using the repository's existing synchronization script. The generated
-Scala 2.13 reactor must not contain copies of the history modules. The one
-canonical Java build supplies identical artifacts to both Scala variants.
+The private `build/buildall` script may install the independent artifacts once
+as a developer convenience before either Scala build. That sequencing is not a
+dependency contract and must not be used for publication. Direct root Maven
+builds do not build the history project. Regenerate and verify the Scala 2.13
+build files after removing reactor membership; neither generated reactor may
+contain a history module. The one canonical Java build supplies identical
+artifacts to both Scala variants.
 
 ### 1.3 Publish private artifacts before changing the public build
 
 Build and install a snapshot of the new private artifacts with the standalone
 history-metrics reactor before changing the public build. Publishing cannot be
-left as an assumed consequence of the existing shim build: the checked-in
-private build scripts currently build `core`, and no checked-in job explicitly
+left as an assumed consequence of the existing shim build: `buildall` installs
+the artifacts only as a developer convenience, and no checked-in job explicitly
 deploys these new coordinates.
 
 Phase 1 must identify the owner of the private artifact publication job and add
 an explicit build/deploy step for the unsuffixed API, local, and TCK artifacts.
-The step must publish them once, without a Spark classifier, to the Maven
-repository used by the public build. Local development may use `mvn install`,
-but shared CI must resolve an actually published snapshot.
+The step must invoke the standalone reactor once, outside every Spark shim and
+Scala build, and publish without a Spark classifier to the Maven repository used
+by the public build. Local development may use `mvn install`, but shared CI
+must resolve an actually published version. A mutable release-wide snapshot is
+not sufficient to identify the private source used by a stacked consumer build;
+use a unique snapshot coordinate for that workflow.
 
 Use a dedicated public `history-metrics.version` property, initially aligned
 with the private release version. Independent version numbers are not required
@@ -284,8 +295,8 @@ boundary.
   classifier and are produced by exactly one canonical Java build.
 - The independent history parent does not inherit the Spark-specific output
   directory, `target.classifier`, shimplify, or Scala build machinery.
-- The private one-time build and TCK pass, and the per-shim loop does not rebuild
-  the history modules.
+- The private standalone build and TCK pass; neither Scala root reactor contains
+  the history modules, and the per-shim loop does not rebuild them.
 - The local provider still passes service-loader and provider-contract tests.
 - The public plugin builds for Scala 2.12 and 2.13 and for the supported Spark
   shim matrix.
