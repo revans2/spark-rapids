@@ -237,14 +237,16 @@ the finite/overflow-safe mean contract.
 
 Planning visibility applies retention cutoffs immediately. Physical deletion may run
 opportunistically in small bounded batches, never as unbounded work on `record` or a planning
-request. WAL/rollback-journal choices must be tested for crash recovery and locking. Configuration
-is minimal and provider-owned.
+request. Fresh databases deliberately use SQLite's default rollback journal for the single-owner
+MVP; behavioral crash-recovery and external-lock tests validate that choice. The provider does not
+override an existing database's journal mode. Configuration is minimal and provider-owned.
 
 ### Provider lifecycle
 
 `LocalHistoryMetricsProvider` remains ServiceLoader-discovered. The single MVP key is
 `spark.rapids.sql.history.metrics.local.path`: absence selects isolated memory mode and a valid
-local filesystem path selects file mode. Reject blank values, URI-like paths, syntactic UNC paths,
+local filesystem path selects file mode. This key is intentionally provider-owned and is not
+registered in `RapidsConf`. Reject blank values, URI-like paths, syntactic UNC paths,
 and otherwise invalid paths; only local/block storage is supported. Arbitrary network mounts cannot
 be identified reliably from a Java path, so avoiding them is the deployer's responsibility. The
 provider creates the backend/adapter and returns a store with cached `BackendInfo`. Open cleans up

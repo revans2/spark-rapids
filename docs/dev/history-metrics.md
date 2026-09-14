@@ -113,7 +113,8 @@ provider selection occurs during driver startup in `DriverPlugin.registerMetrics
 classpath is only discoverable; it is never selected implicitly. Missing, duplicate, incompatible,
 or failing providers leave the no-op store installed.
 
-The local provider has one provider-specific key:
+The local provider has one provider-specific key. It is intentionally owned and parsed by the
+provider rather than registered in `RapidsConf`:
 
 ```
 spark.rapids.sql.history.metrics.local.path=/protected/local/history.db
@@ -125,8 +126,11 @@ survive driver restarts through that file. The local mode supports local or bloc
 provider process. URI-like values such as `file:` or `hdfs:`, and syntactic UNC paths, are rejected.
 A path on an arbitrary network-mounted filesystem can still look like an ordinary local path to Java
 and cannot be detected reliably. Such mounts are unsupported; the deployer is responsible for
-selecting local or block storage. New database files use owner-only permissions where the filesystem
-supports them, but the database is not encrypted.
+selecting local or block storage. Fresh databases deliberately retain SQLite's default rollback
+journal for this single-owner MVP; behavioral abrupt-process and external-lock tests validate crash
+recovery and locking. The provider does not override an existing database's journal mode. New
+database files use owner-only permissions where the filesystem supports them, but the database is
+not encrypted.
 
 The current production catalog is empty until the first governed metric family is added, so the local
 provider does not yet accept application declarations. This is intentional: tests use test-only
