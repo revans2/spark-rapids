@@ -145,10 +145,9 @@ API. There is no earlier durable SQLite format to migrate. Normal open validates
 and declaration blobs and enables foreign-key enforcement for future writes. It does not decode
 every observation payload or run a full foreign-key scan; that scan belongs to an explicit integrity
 check. Corrupt observation payloads fail an affected read or that check. Future format changes
-require explicit versioned migrations, but none is implemented for the initial MVP. The benchmark
-workloads, quantified tradeoffs, single-host limitations, format requirements, and reevaluation
-triggers are recorded in
-[the schema-selection report](../design/history-metrics-schema-selection.md).
+require explicit versioned migrations, but none is implemented for the initial MVP. The inline layout
+was selected from measured local and PostgreSQL workloads spanning recurrent and high-cardinality
+dimensions. Integrations must still benchmark their own request shapes against their planning budget.
 
 ## Govern the metric before integrating it
 
