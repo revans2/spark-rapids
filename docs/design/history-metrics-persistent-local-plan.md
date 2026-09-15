@@ -56,6 +56,10 @@ the first real optimizer caller.
   producerVersion)` construction boundary for this MVP.
 - Use SQLite through JDBC for ephemeral and persistent local modes. SQLite `:memory:` provides
   no-persistence behavior; a configured file provides persistence across restarts.
+- Use the reviewed fixed inline observation layout: declaration ordinals map at most eight typed
+  dimensions to `d0` through `d7`. Store the ordered declaration structure in one canonical,
+  versioned blob while keeping retention as scalar persistent state. The benchmark evidence and
+  rejected alternatives are recorded in [the schema-selection report](history-metrics-schema-selection.md).
 - Retain source compatibility only for the ServiceLoader-facing `LocalHistoryMetricsProvider`.
   Other current local construction, snapshot, and inspection types are not compatibility surfaces.
 - Delete the custom snapshot format instead of supporting two persistence mechanisms.
@@ -211,9 +215,22 @@ mapping. It knows nothing about Spark, Aether, transports, auth, or optimizer de
 must represent:
 
 - a migration version;
-- immutable metric/version declarations and ordered typed dimensions;
-- observations, values, timestamps, acceptance order, and provenance;
-- typed dimension values that support exact predicates and useful indexes.
+- immutable metric/version declarations whose ordered names and kinds use a canonical versioned
+  blob;
+- observations, values, timestamps, acceptance order, provenance, and zero through eight inline
+  typed dimension slots;
+- prepared exact predicates and fixed per-ordinal indexes for arbitrary declared-dimension subsets.
+
+Schema version 1 is the existing normalized-declaration, name/kind-EAV format. Opening it performs
+one atomic v1-to-v2 migration to the canonical declaration blob and inline observations. The
+transaction preserves retention, acceptance order, observations, timestamps, values, dimensions,
+and provenance; it advances the migration marker only on success. A failed migration leaves the
+version-1 file reopenable, while newer, partial, corrupt, or incompatible states fail closed.
+Normal version-2 open strictly validates version/catalog structure, tables, columns, primary- and
+foreign-key definitions, indexes, and declaration blobs, and enables foreign-key enforcement for
+subsequent writes. It does not decode every observation payload or run a full foreign-key scan.
+Full foreign-key validation occurs during v1-to-v2 migration or an explicit integrity check;
+malformed observation data fails the affected read or that explicit check.
 
 Declaration is an insert-or-verify transaction. Persist both the structural declaration and the
 first effective retention policy: redeclaring the same structure with another recommendation does
@@ -221,12 +238,12 @@ not change it, and reopening the file does not recompute it. If a later provider
 than the persisted planning policy, opening applies that stricter limit as a runtime visibility
 clamp without rewriting the permanent declaration.
 
-Transactions protect declaration integrity and each observation together with its dimension rows.
-SQLite may group multiple observations in one bounded transaction for efficiency, but the portable
-backend contract does not require whole-batch atomicity. An ambiguous commit is a terminal backend
-failure: do not retry automatically, poison and close the connection, and allow that the data may
-later be present. Summary queries use time and dimension predicates with indexes justified by real
-initial request shapes.
+Transactions protect declaration integrity and bounded observation writes. SQLite may group
+multiple observations in one bounded transaction for efficiency, but the portable backend contract
+does not require whole-batch atomicity. An ambiguous commit is a terminal backend failure: do not
+retry automatically, poison and close the connection, and allow that the data may later be present.
+Summary queries map declared names to inline ordinals and use prepared time and dimension predicates
+with the fixed indexes justified by the reviewed request shapes.
 
 For consistent numerical behavior across SQLite and future PostgreSQL, SQL may select eligible
 values and a small Java accumulator may summarize them. Preserve `limit = 0` as the existing
@@ -472,10 +489,12 @@ Do not mechanically expose every `MetricStore` call. Specify the wire and failur
 then decide whether transport implements `HistoryMetricsBackend` or a smaller mapping. REST and
 gRPC are alternatives, not two required implementations.
 
-## Open questions
+## Resolved schema evidence
 
-- What initial request shapes and observed row counts justify the first indexes and validate the
-  planning-deadline operating envelope?
+The initial physical layout, request shapes, row counts, concurrency gate, limitations, and
+reevaluation triggers are recorded in
+[the schema-selection report](history-metrics-schema-selection.md). The first governed heuristic
+must still benchmark its own request shapes against its planning budget before production use.
 
 ## References
 
