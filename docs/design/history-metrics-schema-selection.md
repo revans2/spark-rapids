@@ -252,14 +252,15 @@ fixed equality/time/acceptance index per dimension ordinal. Query construction m
 declaration names to ordinals and uses prepared values; no identifier comes from user input.
 
 The declaration blob encoding and observation dimension encoding must be injective across STRING,
-LONG, and BYTES and versioned independently of Java serialization. Normal version-2 open strictly
-validates the schema version and catalog, table and column shapes, primary- and foreign-key
-definitions, indexes, and declaration blobs, and enables foreign-key enforcement for subsequent
-writes. It does not decode every stored observation payload or run a full foreign-key scan. That
-scan occurs during v1-to-v2 migration or an explicit integrity check. Malformed declaration blobs,
-including unknown versions, duplicate names, invalid UTF-8, invalid
-kinds, or counts above eight, fail open. A malformed observation payload is corrupt data, not a value
-to coerce; it fails the affected read or an explicit integrity check.
+LONG, and BYTES and versioned independently of Java serialization. The selected initial on-disk
+schema is version 1; it uses the canonical declaration blob and inline observation slots described
+above. Normal open strictly validates the schema version and catalog, table and column shapes,
+primary- and foreign-key definitions, indexes, and declaration blobs, and enables foreign-key
+enforcement for subsequent writes. It does not decode every stored observation payload or run a
+full foreign-key scan. That scan occurs during an explicit integrity check. Malformed declaration
+blobs, including unknown versions, duplicate names, invalid UTF-8, invalid kinds, or counts above
+eight, fail open. A malformed observation payload is corrupt data, not a value to coerce; it fails
+the affected read or an explicit integrity check.
 
 The backend must preserve the existing public semantics: exact declaration versions, exact typed
 equality, arbitrary omitted-dimension wildcards, `[from,to)`, runtime planning-retention clamp,
@@ -271,24 +272,14 @@ Retention becomes one bounded observation delete without tuple/dimension-child c
 bounded transactions, but no provider-neutral whole-batch atomicity is introduced. An ambiguous
 commit is terminal, is not retried automatically, and poisons the connection.
 
-SQLite version 1 is the normalized-declaration, name/kind-EAV baseline already written by the
-durable provider. Version 2 introduces the canonical declaration blob and inline observation slots.
-Opening a valid version-1 file must run one explicit atomic v1-to-v2 migration. It reconstructs each
-ordered schema from the version-1 declaration/spec rows, encodes every dimension into its declared
-ordinal, and preserves retention, acceptance order, observations, timestamps, values, and
-provenance. The version marker advances only in the same successful transaction. Failure rolls back
-the new tables and marker so the original version-1 database remains reopenable; automatic retry is
-allowed only from that unambiguously rolled-back state. Newer, malformed, partially migrated, or
-incompatible databases fail closed. Future migrations must never silently reinterpret declaration
-ordinals.
-
-Migration acceptance requires a real version-1 fixture containing zero- through eight-dimension
-metrics and all value kinds. After upgrade, declarations, summaries, arbitrary equality subsets,
-positive limits, acceptance ordering, retention, and provenance must match the pre-migration oracle.
-Fault injection at table creation, declaration copy, observation copy, index creation, old-table
-replacement, and marker update must demonstrate transaction rollback and successful version-1
-reopen. A completed migration must be idempotent on later opens and pass the same strict table,
-index, blob, and version validation as a fresh version-2 database.
+This schema version 1 is the initial format of an unreleased provider. There is no earlier durable
+SQLite format to upgrade and no format transition in the MVP. If a future release changes the
+on-disk format, it must introduce an explicit version transition that preserves declaration
+ordinals, retention, acceptance order, observations, timestamps, values, dimensions, and
+provenance. The version marker must advance atomically with the data transformation; failed,
+partial, newer, malformed, or incompatible states must fail closed or roll back unambiguously.
+Future migration acceptance must use real source-version fixtures, semantic round-trip oracles, and
+fault injection appropriate to that specific transition.
 
 ## Limitations and residual risks
 
@@ -306,7 +297,7 @@ index, blob, and version validation as a fresh version-2 database.
 - The scan workload is grounded but prospective. A governed production metric and archived
   production distributions do not yet exist together.
 - This schema decision does not change the persistent-local plan's component budgets. SQLite
-  backend, schema, migrations, and row mapping remain subject to the approximate 1,500 production
+  backend, schema versioning, and row mapping remain subject to the approximate 1,500 production
   Java and 1,600 local-test line ceilings and the existing stop-and-review rule when exceeded.
 
 Reevaluate the layout when a governed producer supplies representative traces that materially exceed

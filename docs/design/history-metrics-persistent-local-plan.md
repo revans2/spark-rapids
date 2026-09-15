@@ -210,27 +210,30 @@ policy so shutdown cannot wait indefinitely in JDBC.
 
 ### SQLite backend
 
-The backend owns connections, migrations, prepared statements, transactions, and API-to-row
-mapping. It knows nothing about Spark, Aether, transports, auth, or optimizer decisions. Its schema
-must represent:
+The backend owns connections, schema versioning, prepared statements, transactions, API-to-row
+mapping, and any future migrations. It knows nothing about Spark, Aether, transports, auth, or
+optimizer decisions. Its schema must represent:
 
-- a migration version;
+- an on-disk schema version;
 - immutable metric/version declarations whose ordered names and kinds use a canonical versioned
   blob;
 - observations, values, timestamps, acceptance order, provenance, and zero through eight inline
   typed dimension slots;
 - prepared exact predicates and fixed per-ordinal indexes for arbitrary declared-dimension subsets.
 
-Schema version 1 is the existing normalized-declaration, name/kind-EAV format. Opening it performs
-one atomic v1-to-v2 migration to the canonical declaration blob and inline observations. The
-transaction preserves retention, acceptance order, observations, timestamps, values, dimensions,
-and provenance; it advances the migration marker only on success. A failed migration leaves the
-version-1 file reopenable, while newer, partial, corrupt, or incompatible states fail closed.
-Normal version-2 open strictly validates version/catalog structure, tables, columns, primary- and
-foreign-key definitions, indexes, and declaration blobs, and enables foreign-key enforcement for
-subsequent writes. It does not decode every observation payload or run a full foreign-key scan.
-Full foreign-key validation occurs during v1-to-v2 migration or an explicit integrity check;
-malformed observation data fails the affected read or that explicit check.
+Schema version 1 is the initial format of this unreleased provider. It uses the canonical
+declaration blob and inline observations; there is no earlier durable SQLite format to migrate.
+Normal open strictly validates version/catalog structure, tables, columns, primary- and foreign-key
+definitions, indexes, and declaration blobs, and enables foreign-key enforcement for subsequent
+writes. It does not decode every observation payload or run a full foreign-key scan. Full
+foreign-key validation occurs during an explicit integrity check; malformed observation data fails
+the affected read or that explicit check.
+
+If a future release changes the on-disk format, the backend must use an explicit atomic migration
+whose marker advances only with the complete data transformation. It must preserve API-visible
+semantics, including declaration ordinals, retention, acceptance order, observations, timestamps,
+values, dimensions, and provenance. Failed, partial, newer, corrupt, or incompatible states must
+fail closed or roll back unambiguously.
 
 Declaration is an insert-or-verify transaction. Persist both the structural declaration and the
 first effective retention policy: redeclaring the same structure with another recommendation does
@@ -358,7 +361,7 @@ with the same line-count method and review the replacement against these approxi
 | Provider, configuration, ownership, and lifecycle | 400 | 500 |
 | Planning validation/deadline adapter | 600 | 700 |
 | Bounded record queue and single writer | 500 | 700 |
-| SQLite backend, schema, migrations, and row mapping | 1,500 | 1,600 |
+| SQLite backend, schema versioning, and row mapping | 1,500 | 1,600 |
 | Small local support types | 300 | 300 |
 | **Total local artifact** | **3,300** | **3,800** |
 

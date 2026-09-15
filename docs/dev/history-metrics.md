@@ -137,17 +137,16 @@ provider does not yet accept application declarations. This is intentional: test
 catalog fixtures, and the storage MVP does not invent a production metric merely to demonstrate
 persistence.
 
-The local backend stores the ordered declaration structure in a canonical versioned blob. Each
-observation stores zero through eight typed dimensions inline by declaration ordinal. This is an
-internal file-format choice, not a new heuristic contract: integrations continue to bind reviewed
-dimension names and values through the API. Existing version-1 local databases are upgraded
-atomically to this version-2 representation; migration failure leaves the version-1 file intact and
-reopenable rather than exposing a partial format. Normal version-2 open validates structural
-schema and declaration blobs and enables foreign-key enforcement for future writes. It does not
-decode every observation payload or run a full foreign-key scan; that scan belongs to migration or
-an explicit integrity check. Corrupt observation payloads fail an affected read or that check. The
-benchmark
-workloads, quantified tradeoffs, single-host limitations, migration requirements, and reevaluation
+The local backend's initial unreleased on-disk schema is version 1. It stores the ordered
+declaration structure in a canonical versioned blob, and each observation stores zero through eight
+typed dimensions inline by declaration ordinal. This is an internal file-format choice, not a new
+heuristic contract: integrations continue to bind reviewed dimension names and values through the
+API. There is no earlier durable SQLite format to migrate. Normal open validates structural schema
+and declaration blobs and enables foreign-key enforcement for future writes. It does not decode
+every observation payload or run a full foreign-key scan; that scan belongs to an explicit integrity
+check. Corrupt observation payloads fail an affected read or that check. Future format changes
+require explicit versioned migrations, but none is implemented for the initial MVP. The benchmark
+workloads, quantified tradeoffs, single-host limitations, format requirements, and reevaluation
 triggers are recorded in
 [the schema-selection report](../design/history-metrics-schema-selection.md).
 
