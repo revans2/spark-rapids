@@ -778,6 +778,14 @@ val GPU_COREDUMP_PIPE_PATTERN = conf("spark.rapids.gpu.coreDump.pipePattern")
     .booleanConf
     .createWithDefault(false)
 
+  val RANGE_SHUFFLE_INPUT_BATCHING_ENABLED =
+    conf("spark.rapids.sql.rangeShuffle.inputBatching.enabled")
+      .doc("Enables experimental one-input-batch-at-a-time consumption for GPU range shuffles " +
+        "to bound the amount of decoded input retained before partitioning.")
+      .internal()
+      .booleanConf
+      .createWithDefault(false)
+
   val EXPORT_COLUMNAR_RDD = conf("spark.rapids.sql.exportColumnarRdd")
     .doc("Spark has no simply way to export columnar RDD data.  This turns on special " +
       "processing/tagging that allows the RDD to be picked back apart into a Columnar RDD.")
@@ -805,7 +813,7 @@ val GPU_COREDUMP_PIPE_PATTERN = conf("spark.rapids.gpu.coreDump.pipePattern")
       "which is distinct from the data movement build side (which side is materialized/" +
       "buffered/broadcast, determined by the query plan). Options are: " +
       "AUTO (default) - automatically determine the best physical build side using heuristics, " +
-      "currently behaves the same as SMALLEST but may evolve to use additional factors; " +
+      "based on build and stream-side row counts and whether a cached build-side is available; " +
       "FIXED - use the build side as suggested by the query plan without dynamic selection; " +
       "SMALLEST - always select the side with the smallest row count as the physical build side, " +
       "determined on a batch-by-batch basis at join time. When AUTO or SMALLEST is used, " +
@@ -815,6 +823,15 @@ val GPU_COREDUMP_PIPE_PATTERN = conf("spark.rapids.gpu.coreDump.pipePattern")
     .transform(_.toUpperCase(java.util.Locale.ROOT))
     .checkValues(JoinBuildSideSelection.values.map(_.toString))
     .createWithDefault(JoinBuildSideSelection.AUTO.toString)
+
+  val HASH_TABLE_REUSE =
+    conf("spark.rapids.sql.join.hashTable.reuse")
+      .doc("Enable reuse of hash tables across GPU hash-join probes. Currently this supports " +
+        "caching broadcast hash tables. With AUTO build-side selection a heuristic is used to " +
+        "determine whether to use the cached broadcast-side or rebuild with the stream-side. " +
+        "FIXED and SMALLEST retain their configured behavior.")
+      .booleanConf
+      .createWithDefault(false)
 
   val LOG_JOIN_CARDINALITY = conf("spark.rapids.sql.join.logCardinality")
     .doc("Enable logging of join cardinality statistics to help diagnose performance issues. " +
@@ -3393,6 +3410,8 @@ class RapidsConf(conf: Map[String, String]) extends Logging {
   lazy val logJoinCardinality: Boolean = get(LOG_JOIN_CARDINALITY)
 
   lazy val joinGathererSizeEstimateThreshold: Double = get(JOIN_GATHERER_SIZE_ESTIMATE_THRESHOLD)
+
+  lazy val hashTableReuse: Boolean = get(HASH_TABLE_REUSE)
 
   /**
    * Get join options based on the current configuration.
