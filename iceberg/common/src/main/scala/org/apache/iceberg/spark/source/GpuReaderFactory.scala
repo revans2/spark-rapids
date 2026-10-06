@@ -18,7 +18,7 @@ package org.apache.iceberg.spark.source
 
 import scala.collection.JavaConverters._
 
-import com.nvidia.spark.rapids.{CombineConf, GpuMetric, MultiFileReaderUtils, RapidsConf, ThreadPoolConfBuilder}
+import com.nvidia.spark.rapids.{CombineConf, GpuMetric, MultiFileReaderUtils, NoopMetric, RapidsConf, ThreadPoolConfBuilder}
 import com.nvidia.spark.rapids.iceberg.ShimUtils
 import com.nvidia.spark.rapids.iceberg.ShimUtils.locationOf
 import com.nvidia.spark.rapids.iceberg.parquet.{
@@ -27,16 +27,21 @@ import com.nvidia.spark.rapids.iceberg.parquet.{
   SingleFile,
   ThreadConf
 }
+import com.nvidia.spark.rapids.perf.ScanSplitHeuristic
 import org.apache.iceberg.{FileFormat, MetadataColumns}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 import org.apache.spark.sql.vectorized.ColumnarBatch
+import org.apache.spark.util.CollectionAccumulator
 
 
+/** @param splitBytes per-split reads for the history observation; None when history is off */
 class GpuReaderFactory(private val metrics: Map[String, GpuMetric],
     @transient rapidsConf: RapidsConf,
-    queryUsesInputFile: Boolean) extends PartitionReaderFactory {
+    queryUsesInputFile: Boolean,
+    splitBytes: Option[CollectionAccumulator[(Int, Long, Long)]])
+  extends PartitionReaderFactory {
 
   private val allCloudSchemes = rapidsConf.getCloudSchemes.toSet
   private val isParquetPerFileReadEnabled = rapidsConf.isParquetPerFileReadEnabled
@@ -57,7 +62,12 @@ class GpuReaderFactory(private val metrics: Map[String, GpuMetric],
     partition match {
       case gpuPartition: GpuSparkInputPartition =>
         val threadConf = calcThreadConf(gpuPartition)
-        new GpuIcebergPartitionReader(gpuPartition, threadConf, metrics)
+        val reader = new GpuIcebergPartitionReader(gpuPartition, threadConf, metrics)
+        splitBytes.fold[PartitionReader[ColumnarBatch]](reader) { acc =>
+          ScanSplitHeuristic.observeReader(reader, gpuPartition.splitIndex,
+            gpuPartition.splitBytes,
+            metrics.getOrElse(GpuMetric.GPU_OUTPUT_BATCH_BYTES, NoopMetric), acc)
+        }
       case _ =>
         throw new IllegalArgumentException(s"Unsupported partition type: ${partition.getClass}")
     }

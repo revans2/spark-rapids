@@ -46,6 +46,12 @@ trait IcebergProbe {
   def getDetectedVersion: String
   def shimPackage: String
   def getProvider: IcebergProvider
+
+  /**
+   * Installs (None: removes) the split advisor in the root-level Iceberg table wrapper. It
+   * returns split bytes, or <= 0 for no decision.
+   */
+  def installScanSplitAdvisor(advisor: Option[(String, Long) => Long]): Unit = ()
 }
 
 object IcebergProvider {
@@ -70,6 +76,9 @@ object IcebergProvider {
   lazy val shimPackage: String = probe.shimPackage
 
   def isSupportedSparkVersion(): Boolean = probe.isSupportedSparkVersion()
+
+  def installScanSplitAdvisor(advisor: Option[(String, Long) => Long]): Unit =
+    probe.installScanSplitAdvisor(advisor)
 }
 
 object NoIcebergProvider extends IcebergProvider {

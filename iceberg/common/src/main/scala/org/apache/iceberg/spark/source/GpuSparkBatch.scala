@@ -32,7 +32,8 @@ class GpuSparkBatch(
     new GpuReaderFactory(
       parentScan.metrics,
       parentScan.rapidsConf,
-      parentScan.queryUsesInputFile)
+      parentScan.queryUsesInputFile,
+      parentScan.splitBytes)
   }
 
   override def planInputPartitions(): Array[InputPartition] = {
@@ -45,11 +46,13 @@ class GpuSparkBatch(
     val hadoopConf = sparkContext.broadcast(
       new SerializableConfiguration(sparkContext.hadoopConfiguration))
 
-    cpuBatch.planInputPartitions().map { partition =>
+    cpuBatch.planInputPartitions().zipWithIndex.map { case (partition, splitIndex) =>
       new GpuSparkInputPartition(partition,
         parentScan.rapidsConf,
         hadoopConf,
-        expectedSchemaString)
+        expectedSchemaString,
+        splitIndex,
+        GpuSparkScanAccess.taskGroup(partition).sizeBytes())
     }
   }
 

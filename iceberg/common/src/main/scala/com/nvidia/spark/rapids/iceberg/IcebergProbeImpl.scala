@@ -17,6 +17,7 @@
 package com.nvidia.spark.rapids.iceberg
 
 import com.nvidia.spark.rapids.{ShimLoader, ShimReflectionUtils, SparkShimVersion, VersionUtils}
+import com.nvidia.spark.rapids.iceberg.spark.source.IcebergSplitAdvisor
 import org.apache.iceberg.IcebergBuild
 
 import org.apache.spark.internal.Logging
@@ -98,5 +99,18 @@ class IcebergProbeImpl extends IcebergProbe with Logging {
   override def getProvider: IcebergProvider = {
     ShimReflectionUtils.newInstanceOf[IcebergProvider](
       s"${shimPackage}.IcebergProviderImpl")
+  }
+
+  override def installScanSplitAdvisor(advisor: Option[(String, Long) => Long]): Unit = {
+    advisor match {
+      case Some(learned) =>
+        IcebergSplitAdvisor.install(new IcebergSplitAdvisor.Advisor {
+          override def learnedSplitBytes(table: String, listedBytes: Long): Long = {
+            val split = learned(table, listedBytes)
+            if (split > 0L) split else IcebergSplitAdvisor.NO_DECISION
+          }
+        })
+      case None => IcebergSplitAdvisor.uninstall()
+    }
   }
 }

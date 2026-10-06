@@ -24,10 +24,16 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{HasPartitionKey, InputPartition}
 import org.apache.spark.util.SerializableConfiguration
 
+/**
+ * @param splitIndex position in the planned partitions
+ * @param splitBytes on-disk bytes
+ */
 class GpuSparkInputPartition(val cpuPartition: InputPartition,
     rapidsConf: RapidsConf,
     val hadoopConf: Broadcast[SerializableConfiguration],
-    val expectedSchemaStr: String) extends
+    val expectedSchemaStr: String,
+    val splitIndex: Int,
+    val splitBytes: Long) extends
   InputPartition with HasPartitionKey with Serializable {
 
   private val cpuPartitionWithKey: HasPartitionKey = cpuPartition match {
