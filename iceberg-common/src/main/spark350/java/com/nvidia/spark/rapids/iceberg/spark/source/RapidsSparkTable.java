@@ -43,7 +43,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.LongSupplier;
 
+import org.apache.iceberg.Snapshot;
+import org.apache.iceberg.SnapshotSummary;
 import org.apache.iceberg.spark.SparkReadOptions;
 import org.apache.iceberg.spark.source.SparkTable;
 
@@ -198,7 +201,61 @@ public class RapidsSparkTable implements Table,
   public ScanBuilder newScanBuilder(CaseInsensitiveStringMap options) {
     CaseInsensitiveStringMap merged =
         mergeSessionOptions(options, catalogName, namespace, tableName);
-    return delegate.newScanBuilder(merged);
+    // Caller options passed too: after merging, explicit and session options look the same.
+    return delegate.newScanBuilder(withLearnedSplitSize(
+        merged, options, delegate.table().name(), this::currentTotalFileSizeBytes));
+  }
+
+  /**
+   * Sets the learned split size, if any, before Iceberg plans tasks. Precedence, highest first:
+   * DataFrame {@link SparkReadOptions#SPLIT_SIZE}, learned,
+   * {@code spark.rapids.iceberg.*-setting.*}, table properties, Iceberg default.
+   *
+   * @param merged caller options merged with session overrides
+   * @param table Iceberg's table name, the history key
+   * @param listedBytes whole-table file bytes; read only when an advisor is installed
+   */
+  static CaseInsensitiveStringMap withLearnedSplitSize(
+      CaseInsensitiveStringMap merged,
+      CaseInsensitiveStringMap callerOptions,
+      String table,
+      LongSupplier listedBytes) {
+    if (!IcebergSplitAdvisor.isInstalled() ||
+        callerOptions.containsKey(SparkReadOptions.SPLIT_SIZE)) {
+      return merged;
+    }
+    long learned = IcebergSplitAdvisor.learnedSplitBytes(table, listedBytes.getAsLong());
+    if (learned == IcebergSplitAdvisor.NO_DECISION) {
+      return merged;
+    }
+    Map<String, String> out = new HashMap<>(merged.asCaseSensitiveMap());
+    out.put(SparkReadOptions.SPLIT_SIZE, Long.toString(learned));
+    return new CaseInsensitiveStringMap(out);
+  }
+
+  /** 0 when there is no snapshot. */
+  private long currentTotalFileSizeBytes() {
+    try {
+      Snapshot snapshot = delegate.table().currentSnapshot();
+      return snapshot == null ? 0L : totalFileSizeBytes(snapshot.summary());
+    } catch (RuntimeException e) {
+      return 0L;
+    }
+  }
+
+  /**
+   * Whole-table file bytes from a snapshot summary, or 0 when absent or malformed.
+   */
+  static long totalFileSizeBytes(Map<String, String> summary) {
+    String total = summary == null ? null : summary.get(SnapshotSummary.TOTAL_FILE_SIZE_PROP);
+    if (total == null) {
+      return 0L;
+    }
+    try {
+      return Long.parseLong(total.trim());
+    } catch (NumberFormatException e) {
+      return 0L;
+    }
   }
 
   @Override

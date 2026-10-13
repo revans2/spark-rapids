@@ -21,20 +21,25 @@ import scala.util.{Failure, Success, Try}
 
 import com.nvidia.spark.rapids._
 import com.nvidia.spark.rapids.iceberg.{IcebergFormatVersionSupport, ShimUtils}
+import com.nvidia.spark.rapids.perf.{HistoryObservations, MetricHistory, ScanContext,
+  ScanSplitHeuristic}
 import org.apache.iceberg.ScanTaskGroup
 import org.apache.iceberg.spark.GpuSparkReadConf
 import org.apache.iceberg.types.Types
 
+import org.apache.spark.SparkContext
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.util.CollectionAccumulator
 
 
 abstract class GpuSparkScan(val cpuScan: Scan,
     val rapidsConf: RapidsConf,
     val queryUsesInputFile: Boolean,
-) extends GpuScan with SupportsReportStatistics {
+) extends GpuScan with SupportsReportStatistics with Logging {
   private val readConf: GpuSparkReadConf = new GpuSparkReadConf(
     GpuSparkScanAccess.readConf(cpuScan))
 
@@ -45,7 +50,58 @@ abstract class GpuSparkScan(val cpuScan: Scan,
   override def estimateStatistics(): Statistics = GpuSparkScanAccess.estimateStatistics(cpuScan)
 
   override def toBatch: Batch = {
+    val planning = synchronized {
+      latestPlanning += 1
+      latestPlanning
+    }
+    registerHistoryObservation(planning)
     new GpuSparkBatch(GpuSparkScanAccess.toBatch(cpuScan), this)
+  }
+
+  /** (split, decoded, listed) per split read; None when history is off. */
+  @transient lazy val splitBytes: Option[CollectionAccumulator[(Int, Long, Long)]] = {
+    if (ScanSplitHeuristic.isEnabled) {
+      Some(SparkContext.getOrCreate().collectionAccumulator[(Int, Long, Long)])
+    } else {
+      None
+    }
+  }
+
+  /**
+   * Only the newest planning is recorded: runtime filtering re-plans via `toBatch`. Exec copies'
+   * `toBatch` calls (equals/hashCode) see the same cached task groups.
+   */
+  @transient @volatile private var latestPlanning = 0
+
+  /**
+   * Registers the scan for recording at query end, keyed by `Table.name()`.
+   */
+  private def registerHistoryObservation(planning: Int): Unit = {
+    val acc = splitBytes
+    if (acc.isDefined) {
+      try {
+        if (!GpuSparkScanAccess.isMetadataScan(cpuScan)) {
+          val table = GpuSparkScanAccess.table(cpuScan).name()
+          val groups = GpuSparkScanAccess.taskGroups(cpuScan)
+          if (table != null && table.nonEmpty && !groups.isEmpty) {
+            val ctx = ScanContext(
+              table = table,
+              listedBytes = 0L,
+              batchSizeBytes = 0L,
+              minPartitionNum = 0L,
+              maxSplitBytes = 0L,
+              plannedSplits = groups.size(),
+              drainSplits = () => acc.map(ScanSplitHeuristic.drainSplits).getOrElse(Seq.empty),
+              isCurrent = () => planning == latestPlanning)
+            ScanSplitHeuristic.register(
+              HistoryObservations.currentExecutionId(SparkContext.getOrCreate()), ctx)
+          }
+        }
+      } catch {
+        case t: Throwable if MetricHistory.isContained(t) =>
+          logDebug(s"scan not registered for history: ${t.getClass.getName}")
+      }
+    }
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream =

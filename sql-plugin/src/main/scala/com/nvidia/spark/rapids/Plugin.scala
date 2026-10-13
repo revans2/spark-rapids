@@ -35,6 +35,7 @@ import com.nvidia.spark.rapids.ScalableTaskCompletion.onTaskCompletion
 import com.nvidia.spark.rapids.filecache.{FileCache, FileCacheLocalityManager, FileCacheLocalityMsg}
 import com.nvidia.spark.rapids.io.async.TrafficController
 import com.nvidia.spark.rapids.jni.{GpuTimeZoneDB, Hash, JSONUtils, RmmSpark, TaskPriority}
+import com.nvidia.spark.rapids.perf.HistoryHeuristics
 import com.nvidia.spark.rapids.python.PythonWorkerSemaphore
 import com.nvidia.spark.rapids.shims.ShuffleManagerShimUtils
 import org.apache.commons.lang3.exception.ExceptionUtils
@@ -584,6 +585,7 @@ class RapidsDriverPlugin extends DriverPlugin with Logging {
     historyMetricsProviderName = conf.historyMetricsProvider
     logInfo(s"History metrics: requested=$historyMetricsProviderName, " +
       "activation deferred until Spark assigns the application ID")
+    HistoryHeuristics.start(sc, conf)
 
     logDebug("Loading extra driver plugins: " +
       s"${extraDriverPlugins.map(_.getClass.getName).mkString(",")}")
@@ -609,6 +611,7 @@ class RapidsDriverPlugin extends DriverPlugin with Logging {
           logError("History metrics activation failed; history-backed heuristics remain disabled",
             failure)
       } finally {
+        HistoryHeuristics.activate()
         historyMetricsSparkContext = null
         historyMetricsConfiguration = null
         historyMetricsProviderName = null
@@ -622,7 +625,8 @@ class RapidsDriverPlugin extends DriverPlugin with Logging {
     historyMetricsConfiguration = null
     historyMetricsProviderName = null
     RapidsPluginUtils.safeShutdown(
-      Seq(() => historyMetricsManager.shutdown()) ++
+      // Heuristics stop before the provider shuts down.
+      Seq(() => HistoryHeuristics.stop(), () => historyMetricsManager.shutdown()) ++
         extraDriverPlugins.map(plugin => () => plugin.shutdown()) ++
         Seq(
           () => FileCacheLocalityManager.shutdown(),
