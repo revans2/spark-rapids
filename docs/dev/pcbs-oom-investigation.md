@@ -167,6 +167,91 @@ runs before GPU decode. No claim is made that GPU concurrency never affects
 heap pressure during other stages. No off-heap lifetime or spill design chosen;
 callbacks, eviction ownership and cleanup remain design questions for discussion.
 
+## CPU-only follow-up
+
+Status: reproduction established with and without PCBS. No production changes.
+All work remains through MCP sandbox tools; the release record above still applies.
+
+The same diagnostic ran with CPU Project/Range plans, eight task slots, eight
+partitions, 4M rows per partition and 16 seeded random Double columns. This
+matches the GPU workload's shape; CPU and GPU random values are not claimed to
+be bit-identical. SQLPlugin is absent in every CPU run. Default-serializer runs
+omit the RAPIDS jar entirely. PCBS CPU runs include the existing built jar but
+set spark.rapids.sql.enabled=false. A GPU check during CPU jobs showed only
+16 MiB in use and 0% utilization. No GPU code change or rebuild was needed.
+
+All runs use memory fraction 0.15 and MEMORY_AND_DISK deserialized storage.
+Every failing run completed sequential population of all eight partitions,
+reported 0 B in memory / 3.8 GiB on disk, and then failed during concurrent
+reload. Outcomes are based on success markers or explicit OOM stacks, not
+persisted exit codes. CPU runs used the same committed diagnostic without edits.
+
+| Run | Serializer | Heap | SQL cache row limit | Java stream reset | Reported bytes/batch | Result |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| cpu-default | Spark default | 3 GiB | 10,000 (default) | 100 | 1,280,000 | PASS, 32M rows |
+| cpu-default100k | Spark default | 3 GiB | 100,000 | 100 | 4,194,304; final 294,912 | reload heap OOM |
+| cpu-default100kreset1 | Spark default | 3 GiB | 100,000 | 1 | same as above | PASS, 32M rows |
+| cpu-default1g | Spark default | 1 GiB | 10,000 (default) | 100 | 1,280,000 | reload heap OOM |
+| cpu-default1greset1 | Spark default | 1 GiB | 10,000 (default) | 1 | 1,280,000 | PASS, 32M rows |
+| cpu-pcbs64 | PCBS CPU writer | 3 GiB | 10,000 | 100 | about 62,874,200; final 9,243,960 | reload heap OOM |
+| cpu-pcbs64reset1 | PCBS CPU writer | 3 GiB | 10,000 | 1 | same range as above | PASS, 32M rows |
+
+Spark-default failures show ObjectInputStream.readArray followed by
+PartiallyUnrolledIterator.hasNext (MemoryStore.scala:774). PCBS CPU failure
+shows readArray followed by MemoryStore.putIterator:223 and
+maybeCacheDiskValuesInMemory:1735. Both match the relevant customer paths.
+PCBS CPU used batchSizeBytes=67108864, producing nine records per partition.
+The default serializer at 100,000 rows still stopped at 32,768 rows / 4 MiB,
+producing 122 full records and one tail record per partition.
+
+CPU-only command (from repository root):
+
+```sh
+env PCBS_ROWS=4000000 PCBS_PARTS=8 PCBS_COLUMNS=16 \
+  /home/roberte/src/spark_3.5.5/bin/spark-shell \
+  --master 'local[8]' --driver-memory 3g \
+  --conf spark.plugins= \
+  --conf spark.sql.cache.serializer=org.apache.spark.sql.execution.columnar.DefaultCachedBatchSerializer \
+  --conf spark.sql.adaptive.enabled=false \
+  --conf spark.memory.fraction=0.15 \
+  --conf spark.serializer.objectStreamReset=100 \
+  --conf spark.sql.inMemoryColumnarStorage.batchSize=100000 \
+  --conf spark.local.dir=/data/pcbs-oom/cpu-manual-local \
+  -i tools/pcbs_oom_repro.scala </dev/null > /data/pcbs-oom/cpu-manual.log 2>&1
+```
+
+For the default-setting control use batchSize=10000. For the smaller-heap
+control use driver-memory=1g with batchSize=10000. For reset controls change
+objectStreamReset to 1. For CPU PCBS add the built jar via --jars, change the
+serializer to com.nvidia.spark.ParquetCachedBatchSerializer, and add
+spark.rapids.sql.enabled=false plus spark.rapids.sql.batchSizeBytes=67108864.
+Do not add SQLPlugin. Full logs, GC logs and exact argv are saved under
+/data/pcbs-oom/<run>.log, <run>-gc.log and <run>-command.txt. The scratch CPU
+launcher is /data/pcbs-oom/launch_cpu.py.
+
+### Interpretation
+
+This is a general Spark/Java-serialization heap-pressure mechanism, amplified
+by PCBS's larger records, rather than a GPU-only issue. Default CPU caching is
+substantially more conservative: DefaultCachedBatchSerializer's loop in
+InMemoryRelation.scala:89 limits estimated payload to 4 MiB and also honors the
+10,000-row default. A single oversized row can exceed the byte target. The
+large row-batch setting reaches the byte target on ordinary Double rows.
+
+CachedBatchSerializer.scala:38 defines numRows and sizeInBytes, and the conversion
+API imposes no documented 4 MiB maximum on custom serializers. PCBS therefore
+is not shown to violate that API contract. However, the implementation does not
+provide a hard per-byte heap reservation before Java deserialization, and Java
+stream resets count objects rather than bytes. Spark's SQLConf.scala:483
+explicitly warns that larger cache row batches risk OOM. Reproducing an OOM
+therefore supports an upstream robustness issue/limitation; it does not by itself
+establish a violated Spark guarantee or identify the exact customer's root cause.
+
+The reset controls support object-stream retention as a contributor in both
+serializers. They are single diagnostic comparisons, not a recommendation to
+change a production setting globally. No end-to-end SQL performance or custom
+serializer lifetime contracts have been evaluated.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
