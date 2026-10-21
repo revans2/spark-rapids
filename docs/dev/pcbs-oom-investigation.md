@@ -252,6 +252,46 @@ serializers. They are single diagnostic comparisons, not a recommendation to
 change a production setting globally. No end-to-end SQL performance or custom
 serializer lifetime contracts have been evaluated.
 
+## Reset interval performance sweep (IN PROGRESS)
+
+Authorized follow-up: measure performance versus heap pressure and OOM frequency
+for objectStreamReset=1,2,4,8,16,100. Production serializers, configs and plugin
+artifact remain unchanged. New standalone benchmark is unreleased diagnostic code.
+Use MCP docker_exec tools for all sandbox operations, including workers; confirm
+at checkpoints. Existing release classification continues to apply.
+
+Plan: Spark-default CPU serializer (4 MiB batches), GPU PCBS with 64 MiB and
+256 MiB batch targets. Same 32M-row / 16-Double / eight-partition data shape,
+eight local task slots and GPU concurrency 1. Fresh 8 GiB JVM per configuration
+for performance; one warmup plus five timed disk reloads and full all-column
+SQL aggregates. Fresh 3 GiB JVMs for pressure, three independent trials per
+configuration, one warmup plus two reloads each. OOM frequency is per JVM,
+not per loop. Configuration order is shuffled deterministically.
+
+Memory fraction=0.03 intentionally keeps each 512 MiB partition larger than
+storage capacity at either heap size. Assert all partitions are on disk and
+0 B stored in memory after population and every scan. This differs from the
+initial reproduction's 0.15 and must not be treated as an identical workload.
+Record population separately, reload wall time, SQL wall time, JVM GC count/time,
+and heap use sampled every 10 ms. Sampled heap peaks are approximations, not live
+retained bytes or process RSS. Explicit GC precedes each timed scan, outside the
+timing. Population timing includes explicit GC between partitions. JVM startup
+is excluded. Save raw JVM and GC logs, structured metrics, exit codes, manifests,
+exact argv and source hashes. Timeout or unexpected errors park the sweep;
+classify only explicit heap OOMs as OOM. Validate smoke tests and benchmark review
+before the full sweep. No claims about production workload failure probabilities.
+
+The smoke tests passed on GPU PCBS64 with reset1/3GiB and reset100/8GiB.
+A review caught potential shuffle-output reuse when repeating one SQL aggregate;
+the benchmark now constructs a fresh execution each iteration and requires its
+cache-scan numOutputRows metric to equal 32M. Existing GPU metrics.level=DEBUG
+is enabled consistently. Both smoke cases verified six full SQL scans each.
+The lead read ShuffleExchangeExec's caching code to verify the concern.
+Strict runner checks require zero exit, complete markers, exact phase/scan counts;
+only non-timeout reload OOMs are accepted as expected failures. Reviewer verified
+these repairs. The source, compiled benchmark jar and plugin jar are hashed in
+manifests. Full sweep launched only after smoke validation and review.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
