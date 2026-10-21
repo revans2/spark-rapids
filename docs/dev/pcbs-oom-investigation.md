@@ -337,6 +337,34 @@ MCP-only access. Generated CSV line endings and SVG trailing whitespace were
 normalized for git diff --check; CSV cells and SVG element data were verified
 unchanged. The staged whitespace check passed. All operations used MCP docker_exec.
 
+## Larger-batch follow-up (IN PROGRESS)
+
+User requested a closer match to 1–2 GiB cached batches and clarification of
+objectStreamReset. Same released behavior and unchanged artifacts; diagnostics
+remain unreleased. Continue using MCP docker_exec for every sandbox operation,
+including workers, and confirm this at checkpoints.
+
+Source check: JavaSerializer.scala:44 increments a counter once per top-level
+writeObject and calls ObjectOutputStream.reset after the configured interval.
+The reader consumes the reset marker before its next object; it has no separate
+configured counter. This clears Java stream references, not task/byte admission.
+SerializerManager creates a separate stream for each serialized block. Cache
+must be rebuilt to change existing serialized reset markers. No per-thread,
+executor-wide or GPU concurrency limit is imposed by objectStreamReset.
+
+First validate unchanged CacheReloadBench with 64M rows per partition, eight
+partitions and 16 random Doubles: 61.035 GiB raw total, 7.629 GiB per partition.
+Use local[8], GPU concurrency8, GPU initial allocation32g/max40g, 1 GiB batch
+target and 80g heap for an initial full-scan smoke. Capture actual encoded batch
+sizes, storage, phase wall time/heap/GC, SQL row metrics and 1-second nvidia-smi
+utilization/memory telemetry. Raw evidence and runner: /data/pcbs-oom/large-reset/.
+Timeout1200s; unexpected failures park; no overlapping JVMs. Only after validating
+this prerequisite compare reset1/100 and consider 2 GiB targets and reduced heap.
+The customer's actual executor heap is requested but not yet known. An 80g
+headroom JVM is an experimental control, not a claim to match that executor.
+All-disk cache at memory.fraction0.03 and local-mode/explicit-GC caveats remain.
+Do not modify production code/config or report this follow-up as complete.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
