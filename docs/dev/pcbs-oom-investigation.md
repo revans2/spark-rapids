@@ -337,7 +337,7 @@ MCP-only access. Generated CSV line endings and SVG trailing whitespace were
 normalized for git diff --check; CSV cells and SVG element data were verified
 unchanged. The staged whitespace check passed. All operations used MCP docker_exec.
 
-## Larger-batch follow-up (IN PROGRESS)
+## Larger-batch follow-up (control READY FOR REVIEW; customer comparison pending)
 
 User requested a closer match to 1–2 GiB cached batches and clarification of
 objectStreamReset. Same released behavior and unchanged artifacts; diagnostics
@@ -351,6 +351,14 @@ configured counter. This clears Java stream references, not task/byte admission.
 SerializerManager creates a separate stream for each serialized block. Cache
 must be rebuilt to change existing serialized reset markers. No per-thread,
 executor-wide or GPU concurrency limit is imposed by objectStreamReset.
+For a stream containing three cached records, reset4 and reset100 both retain
+stream references through all three reads; neither has a reset before the last
+record. Reset1/2 can release references earlier, but Spark/unroll/iterator owners
+can still retain those records. Closing a partition stream ends its retention;
+a task thread's next partition uses a new stream/counter. Count records in the
+Java stream, not downstream GPU decode batches. A read-only worker independently
+verified these semantics from Spark source and installed Java17 bytecode, and
+confirmed MCP-only operations.
 
 First validate unchanged CacheReloadBench with 64M rows per partition, eight
 partitions and 16 random Doubles: 61.035 GiB raw total, 7.629 GiB per partition.
@@ -360,10 +368,37 @@ sizes, storage, phase wall time/heap/GC, SQL row metrics and 1-second nvidia-smi
 utilization/memory telemetry. Raw evidence and runner: /data/pcbs-oom/large-reset/.
 Timeout1200s; unexpected failures park; no overlapping JVMs. Only after validating
 this prerequisite compare reset1/100 and consider 2 GiB targets and reduced heap.
-The customer's actual executor heap is requested but not yet known. An 80g
-headroom JVM is an experimental control, not a claim to match that executor.
+Customer context subsequently supplied in chat: attempts19/20/23 used 48g
+heap and eight task slots, GPU concurrency unrestricted or capped at two, and
+1 GiB batch target; reported average cached partitions were about2.2–2.7GiB.
+Earlier four-slot/48g/GPU2 run succeeded. Hardware was T4 16GiB with device
+pool13.9GiB, host off-heap limit40g and pinned pool2g; whole cached data4.6–5.6TiB.
+These are reported production observations, not locally verified measurements.
+The currently running 80g/7.6GiB-partition case is a stress control, not a claim
+to match that executor. Subsequent controls should use48g,8slots,GPU2,1GiBtarget
+and actual encoded partitions around2–3GiB, then separately test mixed cache
+residency and natural GC. Average partition sizes do not bound the largest.
 All-disk cache at memory.fraction0.03 and local-mode/explicit-GC caveats remain.
-Do not modify production code/config or report this follow-up as complete.
+Do not modify production code/config or report the customer comparison as complete.
+
+The initial control completed: /data/pcbs-oom/large-reset/smoke-results.jsonl,
+exit0, no OOM/timeout, wall496.27s. Actual largest encoded batch1,068,538,171bytes
+(1019.037MiB); eight batches/partition,8,193,265,624encodedbytes/partition,
+512Mrows total,65,546,132,640diskbytes,zero cached memory. Four successful raw
+reloads and four full SQL scans include one warmup each; each SQL scan reported
+512Mrows. Three timed iterations had median raw reload12.110s and SQL28.826s.
+Maximum sampled occupied heap across timed SQL scans61.634GiB despite reset1;
+this is not live data and does not identify which owner retained it.
+SQL GPU telemetry ranged0–80%utilization; memory33068–33072MiB includes the
+32GiBpool reservation and is not a measure of actively used device buffers.
+
+The lead verified raw-log events against structured records, sizes, row counts,
+phase counts and timing medians with analyze_large.py. An MCP-only read-only
+worker independently verified the same evidence and GPU samples. No GPU
+process remained after completion. No reset100 comparison was performed in this
+control, so it yields no reset overhead claim. Current customer-scale48g,
+GPU2,2–3GiBpartition and mixed-residency/natural-GC comparisons remain pending;
+the completed 84-JVM sweep and this larger smoke are distinct experiments.
 
 ## Review and handoff
 
