@@ -410,8 +410,9 @@ is unreleased diagnostic code. All sandbox operations, including worker tasks,
 must use MCP docker_exec; confirm continued compliance at checkpoints.
 
 Use16partitions,local[8],48gheap,ParallelGC with4GCthreads and2ConcGCthreads,
-GPUconcurrent2/max2,hostoffheaplimit40g,pinnedpool2g. A6000 GPU pool12g/max14g
-approximates T4 capacity, not T4 throughput. Same installed Spark3.5.5 and plugin
+GPUconcurrent2/max2,hostoffheaplimit40g,pinnedpool2g. User corrected GPU memory
+to a fixed15GiB pool (allocSize15g/maxAllocSize15g), which supersedes the initial
+12g/14g proposal. A6000 with a fixed15GiB pool does not reproduce T4 throughput. Same installed Spark3.5.5 and plugin
 artifact reporting3cdf711ded; customer runtime was3.5.3/platform26.04.2.
 Java17 and native allocator thresholds131072 are retained. Local driver/executor
 share heap; no Kubernetes108GiB process/pod limit is imposed.
@@ -465,7 +466,28 @@ ParallelGC this produced27.4GiBMemoryStore capacity,matching the supplied UI.
 The first pilot's default initial heap gave25.4GiBcapacity and is not a matching
 control. Root independently verified raw events/structured records and medians;
 read-only worker review requested before the full-run handoff. All operations
-continue through MCP docker_exec. Full16partition reset comparison pending.
+continue through MCP docker_exec.
+
+Read-only worker independently verified calibration2 and runner, finding no
+material issues. After the user's fixed15GiB instruction, the incomplete12g/14g
+full comparison was stopped before any outcome. It is explicitly aborted in
+endpoints-aborted.json and excluded from failure/performance counts. Its logs,
+events and manifest remain; only its own scratch cache was removed after the
+JVM stopped. No old-pool result is mixed into the new comparison.
+
+Calibration15 passed at fixed15GiB in28.07s with exactsix-record shape,exit0,
+noOOM/timeout and verifiedSQLrows. Full fixed15GiB endpoint supervisor PID64319
+runs reset100 thenreset1, under /data/pcbs-oom/customer-six/endpoints15-*.
+Heap-dump-on-OOM startup flags are enabled for full runs; failed-run wall time
+may include dump writing and is not a performance measurement. Every job retains
+its own raw JVM/GC log, GPU telemetry, eventlog, effective argv/environment and
+hash manifest. Reset4/2 intermediate phase remains pending; no overlapping JVMs.
+
+The user approved the full16-column sum query after clarification. Raw cachedRDD
+reloads count batch rows before the SQL phase, measuring Java deserialization
+without GPU decode. A raw-phase OOM preventsSQL in that JVM; do not claim SQL
+query performance or failure location from a JVM that never reached it.
+Full16partition fixed15GiB comparison remains IN PROGRESS.
 
 ## Review and handoff
 
