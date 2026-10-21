@@ -487,7 +487,33 @@ The user approved the full16-column sum query after clarification. Raw cachedRDD
 reloads count batch rows before the SQL phase, measuring Java deserialization
 without GPU decode. A raw-phase OOM preventsSQL in that JVM; do not claim SQL
 query performance or failure location from a JVM that never reached it.
-Full16partition fixed15GiB comparison remains IN PROGRESS.
+Both fixed-15-GiB raw-reload endpoint runs have now completed with exit 52,
+Java heap OOM, no timeout, and accepted six-record shape. Reset100 failed in
+readArray -> PartiallyUnrolledIterator; reset1 failed in readArray ->
+MemoryStore.putIterator. Each populated16partitions /96records, totaling
+102,579,664,416 encoded bytes. Initial cache residency was23.884GiB in memory
+and71.651GiB on disk. Neither reachedSQL or completed a timed reload, so there
+is no SQL performance comparison from these JVMs.
+
+A metadata-only parser of the reset100 heap dump found eight distinct executor
+task-thread stacks in ObjectInputStream.readArray: five through putIterator
+and three through PartiallyUnrolledIterator. This establishes overlapping
+reader paths, not ownership of retained arrays. Spark event-log outstanding
+TaskStart minus TaskEnd counters reached ten because callbacks can lag; that
+counter must not be interpreted as ten physically executing tasks.
+
+To exercise the approved SQL query independently, add diagnostic CACHE_RELOAD
+(defaulttrue) and run fresh JVMs with it false. It guards only the raw-reload
+prefix; cache population, SQL query and row-count assertions are unchanged.
+Lead independently compiled the change against Spark3.5.5. Preserve prior
+source/jar as customer-six/frozen-*; new source SHA256 is
+70b05672362009d39ae32cddf2897227c9451a32847ab3ddd9331fe9f0f207b2,
+new jar SHA256 is395f1a2601d2cac253ff46aaa2d40b2a5222360fbc57298a3a8d903df6137e35.
+New evidence goes under /data/pcbs-oom/customer-query-only. Run a shape pilot,
+then fresh reset100/1 endpoint JVMs with all resource settings unchanged.
+Prioritize this query test over raw reset4/2 intermediates; intermediates remain
+unperformed. All project operations and delegated reviews remain MCP-only.
+The full SQL-only comparison is IN PROGRESS.
 
 ## Review and handoff
 

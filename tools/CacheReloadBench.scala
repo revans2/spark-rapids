@@ -87,6 +87,7 @@ object CacheReloadBench {
     val columns = sys.env.getOrElse("CACHE_COLUMNS", "16").toInt
     val iterations = sys.env.getOrElse("CACHE_ITERATIONS", "5").toInt
     val sqlScan = sys.env.getOrElse("CACHE_SQL", "true").toBoolean
+    val reloadScan = sys.env.getOrElse("CACHE_RELOAD", "true").toBoolean
     val forceGc = sys.env.getOrElse("CACHE_FORCE_GC", "true").toBoolean
     val requireDisk = sys.env.getOrElse("CACHE_REQUIRE_DISK", "true").toBoolean
     require(parts > 0 && rows > 0 && columns > 0 && iterations > 0)
@@ -102,7 +103,7 @@ object CacheReloadBench {
       "master" -> sc.master, "rows" -> expectedRows, "parts" -> parts,
       "source_parts" -> sourceParts,
       "columns" -> columns, "iterations" -> iterations,
-      "force_gc" -> forceGc, "require_disk" -> requireDisk,
+      "force_gc" -> forceGc, "require_disk" -> requireDisk, "reload_scan" -> reloadScan,
       "serializer" -> spark.conf.get("spark.sql.cache.serializer"),
       "reset" -> sc.getConf.get("spark.serializer.objectStreamReset"),
       "memory_fraction" -> sc.getConf.get("spark.memory.fraction"),
@@ -155,17 +156,19 @@ object CacheReloadBench {
       emit("event" -> "storage", "description" -> sc.getRDDStorageInfo.mkString(";"),
         "disk_bytes" -> sc.getRDDStorageInfo.find(_.id == buffers.id).get.diskSize)
       // Iteration zero warms the reader and is excluded from performance summaries.
-      for (i <- 0 to iterations) {
-        if (forceGc) System.gc()
-        measure("reload", i) {
-          val count = buffers.mapPartitions { it =>
-            var n = 0L
-            it.foreach(b => n += b.numRows)
-            Iterator(n)
-          }.collect().sum
-          require(count == expectedRows, s"Unexpected row count: $count")
+      if (reloadScan) {
+        for (i <- 0 to iterations) {
+          if (forceGc) System.gc()
+          measure("reload", i) {
+            val count = buffers.mapPartitions { it =>
+              var n = 0L
+              it.foreach(b => n += b.numRows)
+              Iterator(n)
+            }.collect().sum
+            require(count == expectedRows, s"Unexpected row count: $count")
+          }
+          checkCacheStorage("reload", i)
         }
-        checkCacheStorage("reload", i)
       }
       if (sqlScan) {
         var expected: Option[Seq[Double]] = None
