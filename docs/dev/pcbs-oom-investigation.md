@@ -249,10 +249,11 @@ establish a violated Spark guarantee or identify the exact customer's root cause
 
 The reset controls support object-stream retention as a contributor in both
 serializers. They are single diagnostic comparisons, not a recommendation to
-change a production setting globally. No end-to-end SQL performance or custom
-serializer lifetime contracts have been evaluated.
+change a production setting globally. These initial controls did not evaluate
+SQL performance; the follow-up sweep below does. Custom serializer lifetime
+contracts remain unevaluated.
 
-## Reset interval performance sweep (IN PROGRESS)
+## Reset interval performance sweep (READY FOR REVIEW)
 
 Authorized follow-up: measure performance versus heap pressure and OOM frequency
 for objectStreamReset=1,2,4,8,16,100. Production serializers, configs and plugin
@@ -294,16 +295,19 @@ manifests. Full sweep launched only after smoke validation and review.
 
 The initial grid has 72 JVMs: 18 headroom timing cells and 54 pressure trials.
 Because the initial timing differences are small, reset1 and reset100 endpoints
-will each receive two more fresh timing JVMs per serializer/batch mode after the
+each received two more fresh timing JVMs per serializer/batch mode after the
 grid, giving three independent JVMs per endpoint (12 additional jobs). All jobs
 run sequentially to avoid benchmark interference. Every sandbox checkpoint
 continues to use MCP-only access. No production code/config has changed.
 
-Checkpoint: full supervisor PID 16850; its log, manifest and JSONL are under
-/data/pcbs-oom/sweep/full-*. The confirmation waiter (PID 27910) launches the
-12 endpoint jobs only after all 72 grid records are present. The runner parks on
-unexpected failures. Do not launch overlapping benchmark jobs. Resume by reading
-this tracker and supervisor logs, then use the MCP tools to inspect progress.
+Completed: 72 grid jobs plus 12 endpoint confirmation jobs. Logs, manifests,
+commands and raw JSONL are under /data/pcbs-oom/sweep/full-* and confirm-*.
+All jobs ran sequentially. There were 54 successful JVMs and 30 expected heap
+OOMs during disk reload; no unexpected errors or timeouts. Every failure had
+already populated all eight partitions on disk. The lead ran verify.py against
+all 84 raw logs and independently recomputed all per-JVM timing medians.
+export_report.py checked unchanged source/artifact hashes, configuration, plans,
+partition metrics, storage and trial counts before exporting the report/CSVs.
 Analysis: analyze.py (combines full/confirm, excludes warmup, median of per-JVM
 medians); compare.py (endpoint deltas); plot.py (Matplotlib); export_report.py
 (requires all 84 records, valid outcomes and unchanged source/jar hashes before
@@ -314,8 +318,24 @@ Independent analysis review recomputed representative medians, checked every
 SQL scan's 32M rows and verified GC timestamp alignment. Post-GC values are
 occupied heap after various pause types, not measured live data. OOM predicates
 now match the runner (nonzero exit, no timeout, heap OOM, reload phase).
-Preliminary: 244 MiB records OOM even at reset1/3GiB; 64 MiB records passed all
-three reset4/3GiB trials. Do not present the incomplete grid as final results.
+Final results and measurement limits: [reset sweep report](pcbs-reset-sweep.md).
+At 8 GiB, reset1 versus reset100 changed PCBS reload times by less than 1%;
+SQL aggregate times increased 4.2% (64 MiB) and 1.2% (244 MiB), with overlapping
+fresh-JVM timing ranges. Population increased about 3.6–3.7%. CPU SQL scans
+improved 23.3%. At 3 GiB, PCBS64 passed 3/3 at reset1/2/4 and failed 3/3 at
+reset8/16/100; PCBS244 failed 3/3 at every interval, including reset1.
+CPU passed 3/3 through reset16 and failed 3/3 at reset100. These frequencies
+are observations under this controlled load, not production probabilities.
+The larger-batch failures qualify the earlier reset1 success: it is a mitigation,
+not a guarantee. Smaller PCBS batches cost about 60% in the tested SQL scan
+at reset100. No global config change or production fix is proposed.
+The benchmark compiled, smoke checks passed, raw-log verification passed and
+exported metrics passed consistency checks. A read-only worker's final review
+found no material issues: all 18 timing rows, endpoint percentages, 36 summary
+groups, 84 outcomes and chart/CSV exports agreed with the analysis. It confirmed
+MCP-only access. Generated CSV line endings and SVG trailing whitespace were
+normalized for git diff --check; CSV cells and SVG element data were verified
+unchanged. The staged whitespace check passed. All operations used MCP docker_exec.
 
 ## Review and handoff
 
@@ -338,7 +358,9 @@ rejection while reading ordinary Spark memory-management code. A narrower
 read-only continuation succeeded. No code or workload was blocked in the main
 investigation; no alternate execution environment was used.
 
-Only the diagnostic and this tracker are included in the signed-off commit.
-Production fixes, end-to-end performance testing, repeatability statistics,
-customer-specific sizing, serialized-memory controls and off-heap ownership
-remain for architect discussion. This task is READY FOR REVIEW, not DONE.
+The diagnostic, standalone benchmark, this tracker and sweep report/data are
+included in signed-off commits. The sweep adds repeated full SQL aggregate
+measurements; broader application performance and statistical confidence bounds
+remain unverified. Production fixes, customer-specific sizing, serialized-memory
+controls and off-heap ownership remain for architect discussion.
+This task is READY FOR REVIEW, not DONE.
