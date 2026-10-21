@@ -292,6 +292,31 @@ only non-timeout reload OOMs are accepted as expected failures. Reviewer verifie
 these repairs. The source, compiled benchmark jar and plugin jar are hashed in
 manifests. Full sweep launched only after smoke validation and review.
 
+The initial grid has 72 JVMs: 18 headroom timing cells and 54 pressure trials.
+Because the initial timing differences are small, reset1 and reset100 endpoints
+will each receive two more fresh timing JVMs per serializer/batch mode after the
+grid, giving three independent JVMs per endpoint (12 additional jobs). All jobs
+run sequentially to avoid benchmark interference. Every sandbox checkpoint
+continues to use MCP-only access. No production code/config has changed.
+
+Checkpoint: full supervisor PID 16850; its log, manifest and JSONL are under
+/data/pcbs-oom/sweep/full-*. The confirmation waiter (PID 27910) launches the
+12 endpoint jobs only after all 72 grid records are present. The runner parks on
+unexpected failures. Do not launch overlapping benchmark jobs. Resume by reading
+this tracker and supervisor logs, then use the MCP tools to inspect progress.
+Analysis: analyze.py (combines full/confirm, excludes warmup, median of per-JVM
+medians); compare.py (endpoint deltas); plot.py (Matplotlib); export_report.py
+(requires all 84 records, valid outcomes and unchanged source/jar hashes before
+export). Plot with /home/roberte/miniconda3/bin/python; the script appends the
+image Python site-packages for its missing pure-Python six dependency. All
+benchmark JVMs and other Python scripts use the image tools, not Miniconda.
+Independent analysis review recomputed representative medians, checked every
+SQL scan's 32M rows and verified GC timestamp alignment. Post-GC values are
+occupied heap after various pause types, not measured live data. OOM predicates
+now match the runner (nonzero exit, no timeout, heap OOM, reload phase).
+Preliminary: 244 MiB records OOM even at reset1/3GiB; 64 MiB records passed all
+three reset4/3GiB trials. Do not present the incomplete grid as final results.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
