@@ -513,7 +513,53 @@ New evidence goes under /data/pcbs-oom/customer-query-only. Run a shape pilot,
 then fresh reset100/1 endpoint JVMs with all resource settings unchanged.
 Prioritize this query test over raw reset4/2 intermediates; intermediates remain
 unperformed. All project operations and delegated reviews remain MCP-only.
-The full SQL-only comparison is IN PROGRESS.
+The full SQL-only comparison is complete: reset100 andreset1 both exited52
+with Java heap OOM on the first SQL scan, accepted shape, no timeout, and no
+completed timed SQL read. All experiment JVMs/monitors stopped; GPU returned to
+16MiB idle. No performance-overhead or OOM-probability estimate is available
+from these four single-JVM pressure cells.
+
+The user explicitly prioritized understanding the heap over further reruns or
+fixes. Captured all four heap dumps and analyzed actual field/root ownership
+with bounded disk-backed HPROF tooling under /data/pcbs-oom/heap-analysis.
+Both raw dumps contain44 arrays of1,068,538,171bytes =43.787GiB payload:
+24cached,7unroll,6completed reader records outside unroll/cache,7being filled.
+Reset100 retains all20noncached arrays through handle tables;3completed records
+are handle-only and3also iterator-held. Reset1 removes that history, but two
+unroll holders retain4+3records and6NextIterator.nextValue fields retain previous
+records. Its7in-progress arrays remain live in readArray. This is temporary
+strong retention at failure, not evidence of a permanent leak.
+
+Reset100 SQL dump independently confirms44large arrays:24cached,10active unroll,
+2returned unroll,2handle-only,2previous iterator values,1additional active GPU
+decode input,3arrays being filled. Of8task threads,2decode,2wait forGPU,3readArray,
+1fails to allocate. The semaphore is acquired after obtaining the CachedBatch,
+so GPU concurrency2 does not admit all preceding CPU-cache allocations.
+
+Storage accounting in raw dump reconciles exactly from cached entry sizes,
+small broadcast entry and unroll reservation map; reservations are~2.99GiB,
+while real noncached large arrays occupy~19.90GiB. Lead read MemoryStore:
+store before check, first-record then16-record-period checks, final check only
+after whole block, and values.hasNext before keepUnrolling. Lead read
+NextIterator: nextValue is not cleared by next(), and is replaced only after
+the next deserialization returns. FullGC before reset100 failure leaves only
+~99MiB old-gen and556MiB Eden free, neither enough for the next1019MiB array.
+
+Lead independently checked all44primitive headers, PCBS/layout fields, raw
+run events/configs/hashes/shape and source; second worker independently verified
+raw byte field offsets (including inheritance), strong Java-frame roots and
+typed ownership paths in both raw dumps and reset100SQL. Generic reverse BFS
+is not a dominator proof; conclusions use direct strong paths only.
+All sandbox work and review remained MCP docker_exec-only.
+Reset1SQL dump also has44large arrays:24cached,9active unroll,3returned unroll,
+4previous iterator values,4being filled; no historical handle-only arrays.
+One returned record is also a GPU decode input and is counted once. Independent
+review verified all four dumps' direct fields, array headers, inherited layouts,
+roots and exact accounting. Lead independently reran SQL typed-path checks,
+reset1SQL header/root checks and exact accounting verification.
+Detailed findings and limitations: pcbs-six-batch-test.md; compact measured
+ownership data: pcbs-six-batch-heap.csv. Diagnosis READY FOR
+REVIEW; production fixes remain for architect discussion.
 
 ## Review and handoff
 
