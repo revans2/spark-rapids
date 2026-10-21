@@ -106,6 +106,8 @@ It does not isolate Java serialization cost. Values are medians of three JVMs.
 ## Reproduce and evidence
 
 The standalone source is [CacheReloadBench.scala](../../tools/CacheReloadBench.scala).
+The source hash below records its version at commit `ca8cb52e14`, before the
+later mixed-cache telemetry extension; the archived benchmark jar is unchanged.
 Compile it against the Spark runtime jars, package the resulting classes and
 run with spark-submit. Exact per-run argv, environment overrides, JVM and GC logs,
 manifest and raw JSONL metrics are under `/data/pcbs-oom/sweep/`.

@@ -25,7 +25,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.columnar.CachedBatch
 import org.apache.spark.storage.StorageLevel
 
-/** Standalone disk-cache benchmark; see docs/dev/pcbs-oom-investigation.md. */
+/** Standalone cache benchmark; see docs/dev/pcbs-oom-investigation.md. */
 object CacheReloadBench {
   private def emit(fields: (String, Any)*): Unit = {
     println("CACHE_BENCH " + new ObjectMapper().writeValueAsString(fields.toMap.asJava))
@@ -82,30 +82,44 @@ object CacheReloadBench {
     val sc = spark.sparkContext
     sc.setLogLevel("WARN")
     val parts = sys.env.getOrElse("CACHE_PARTS", "8").toInt
+    val sourceParts = sys.env.getOrElse("CACHE_SOURCE_PARTS", parts.toString).toInt
     val rows = sys.env.getOrElse("CACHE_ROWS", "4000000").toLong
     val columns = sys.env.getOrElse("CACHE_COLUMNS", "16").toInt
     val iterations = sys.env.getOrElse("CACHE_ITERATIONS", "5").toInt
     val sqlScan = sys.env.getOrElse("CACHE_SQL", "true").toBoolean
+    val forceGc = sys.env.getOrElse("CACHE_FORCE_GC", "true").toBoolean
+    val requireDisk = sys.env.getOrElse("CACHE_REQUIRE_DISK", "true").toBoolean
     require(parts > 0 && rows > 0 && columns > 0 && iterations > 0)
+    require(sourceParts >= parts && sourceParts % parts == 0)
     val expectedRows = Math.multiplyExact(rows, parts.toLong)
-    val df = spark.range(0L, expectedRows, 1L, parts)
+    val source = spark.range(0L, expectedRows, 1L, sourceParts)
       .selectExpr((0 until columns).map(i => s"rand($i) as c$i"): _*)
+    val df = (if (sourceParts > parts) source.coalesce(parts) else source)
       .persist(StorageLevel.MEMORY_AND_DISK)
     val relation = spark.sharedState.cacheManager.lookupCachedData(df).get.cachedRepresentation
     val buffers = relation.cacheBuilder.cachedColumnBuffers
     emit("event" -> "config", "heap_max" -> Runtime.getRuntime.maxMemory(),
       "master" -> sc.master, "rows" -> expectedRows, "parts" -> parts,
+      "source_parts" -> sourceParts,
       "columns" -> columns, "iterations" -> iterations,
+      "force_gc" -> forceGc, "require_disk" -> requireDisk,
       "serializer" -> spark.conf.get("spark.sql.cache.serializer"),
       "reset" -> sc.getConf.get("spark.serializer.objectStreamReset"),
       "memory_fraction" -> sc.getConf.get("spark.memory.fraction"),
       "batch_target" -> spark.conf.get("spark.rapids.sql.batchSizeBytes", "unset"),
       "sql_batch_rows" -> spark.conf.get("spark.sql.inMemoryColumnarStorage.batchSize"),
       "plan" -> relation.cacheBuilder.cachedPlan.toString())
-    def assertDiskCache(): Unit = {
+    def checkCacheStorage(phase: String, iteration: Int): Unit = {
       val info = sc.getRDDStorageInfo.find(_.id == buffers.id).get
+      emit("event" -> "cache_storage", "phase" -> phase, "iteration" -> iteration,
+        "memory_bytes" -> info.memSize, "disk_bytes" -> info.diskSize,
+        "cached_partitions" -> info.numCachedPartitions)
       require(info.numCachedPartitions == parts, s"Missing cached partitions: $info")
-      require(info.memSize == 0 && info.diskSize > 0, s"Expected all disk cache: $info")
+      if (requireDisk) {
+        require(info.memSize == 0 && info.diskSize > 0, s"Expected all disk cache: $info")
+      } else {
+        require(info.memSize > 0 || info.diskSize > 0, s"Expected retained cache data: $info")
+      }
     }
     try {
       measure("populate", 0) {
@@ -116,28 +130,33 @@ object CacheReloadBench {
             var batches = 0L
             var largest = 0L
             var kind = ""
+            val batchRows = new scala.collection.mutable.ArrayBuffer[Int]
+            val batchBytes = new scala.collection.mutable.ArrayBuffer[Long]
             it.foreach { b =>
               n += b.numRows
               bytes += b.sizeInBytes
               batches += 1
               largest = math.max(largest, b.sizeInBytes)
               kind = b.getClass.getName
+              batchRows += b.numRows
+              batchBytes += b.sizeInBytes
             }
-            (n, bytes, batches, largest, kind)
+            (n, bytes, batches, largest, kind, batchRows.toArray, batchBytes.toArray)
           }, Seq(p)).head
           require(metrics._1 == rows)
           emit("event" -> "partition", "partition" -> p, "rows" -> metrics._1,
             "bytes" -> metrics._2, "batches" -> metrics._3,
-            "largest_batch" -> metrics._4, "class" -> metrics._5)
-          System.gc()
+            "largest_batch" -> metrics._4, "class" -> metrics._5,
+            "batch_rows" -> metrics._6, "batch_bytes" -> metrics._7)
+          if (forceGc) System.gc()
         }
       }
-      assertDiskCache()
+      checkCacheStorage("populate", 0)
       emit("event" -> "storage", "description" -> sc.getRDDStorageInfo.mkString(";"),
         "disk_bytes" -> sc.getRDDStorageInfo.find(_.id == buffers.id).get.diskSize)
       // Iteration zero warms the reader and is excluded from performance summaries.
       for (i <- 0 to iterations) {
-        System.gc()
+        if (forceGc) System.gc()
         measure("reload", i) {
           val count = buffers.mapPartitions { it =>
             var n = 0L
@@ -146,7 +165,7 @@ object CacheReloadBench {
           }.collect().sum
           require(count == expectedRows, s"Unexpected row count: $count")
         }
-        assertDiskCache()
+        checkCacheStorage("reload", i)
       }
       if (sqlScan) {
         var expected: Option[Seq[Double]] = None
@@ -156,7 +175,7 @@ object CacheReloadBench {
           if (i == 0) {
             emit("event" -> "sql_plan", "plan" -> aggregate.queryExecution.executedPlan.toString())
           }
-          System.gc()
+          if (forceGc) System.gc()
           val sums = measure("sql", i) {
             val result = aggregate.collect()
             require(result.length == 1)
@@ -178,7 +197,7 @@ object CacheReloadBench {
             }, "Aggregate changed between scans")
           }
           expected = Some(sums)
-          assertDiskCache()
+          checkCacheStorage("sql", i)
         }
       }
       emit("event" -> "complete", "success" -> true)

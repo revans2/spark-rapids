@@ -400,6 +400,73 @@ control, so it yields no reset overhead claim. Current customer-scale48g,
 GPU2,2–3GiBpartition and mixed-residency/natural-GC comparisons remain pending;
 the completed 84-JVM sweep and this larger smoke are distinct experiments.
 
+## Six-batch customer-shaped test (IN PROGRESS)
+
+User explicitly requested approximately6GiB per task with eight slots and a
+second wave of tasks, matching the customer heap/core/concurrency configuration.
+Authorized scope is diagnostic changes and experiments only; production
+serializers/config contracts remain released and unchanged. CacheReloadBench
+is unreleased diagnostic code. All sandbox operations, including worker tasks,
+must use MCP docker_exec; confirm continued compliance at checkpoints.
+
+Use16partitions,local[8],48gheap,ParallelGC with4GCthreads and2ConcGCthreads,
+GPUconcurrent2/max2,hostoffheaplimit40g,pinnedpool2g. A6000 GPU pool12g/max14g
+approximates T4 capacity, not T4 throughput. Same installed Spark3.5.5 and plugin
+artifact reporting3cdf711ded; customer runtime was3.5.3/platform26.04.2.
+Java17 and native allocator thresholds131072 are retained. Local driver/executor
+share heap; no Kubernetes108GiB process/pod limit is imposed.
+
+Configured batch target remains1GiB. Writer subtracts0.5% for metadata; with16
+Double values/row,8,346,664rows fit its per-record budget. Use6times that count:
+50,079,984rows/partition,5.970GiB raw values,95.520GiB over16partitions. Require
+exactly six measured cached records per partition, recording every row/encoded
+byte count; do not infer record count from config. Random Doubles compress poorly,
+so this is a large encoded-payload stress case, not the customer's schema.
+
+Extend diagnostic only to allow mixed MEMORY_AND_DISK cache and optional forced
+GC; new environment switches default to prior behavior, but do not constitute a
+production configuration or released contract. This experiment uses both false,
+normal memory.fraction0.6, and emits storage residency after every phase. Preserve
+historical benchmark jar/hash in /data/pcbs-oom/sweep; new artifact/scripts/logs/
+eventlogs/manifests are under /data/pcbs-oom/customer-six. Historical report source
+hash corresponds to gitca8cb52e14 before this diagnostic extension.
+
+Prerequisite calibration: one full-sized partition, one warmup and one measured
+reload/SQLscan. Then fresh JVMs at reset100/1 and reset4/2 with16partitions,
+one warmup plus three measured rawreloads and full SQL aggregates. Every SQL
+execution must independently report all expected scan rows; eventlogs verify
+actual task overlap rather than assuming it from configured slots. Track sampled
+occupied heap, GC, storage, GPU telemetry and phase wall time. Sequential cache
+population is not a benchmark of concurrent producers. Intermediate intervals
+have one JVM initially; no production OOM-probability/statistical claims.
+
+Runner requires exact batch shape, exit0/completion/counts/storage/SQLrows for
+success. Non-timeout explicit JavaheapOOM duringreload/SQL after verified
+population is an expected outcome; population OOM, GPU error, timeout or shape
+mismatch parks for investigation. Jobs run sequentially, timeout1800s each,
+cleanup only their own scratch cache directories. No weakening shape/scan
+validation to pass the experiment. Source compiled independently by worker and
+lead against3.5.5.
+
+Calibration1 ran successfully but failed shape acceptance (eight uneven records).
+It is preserved as non-accepted calibration evidence, not a measurement of the
+six-record scenario. Generate96source partitions then narrow-coalesce to16cache
+partitions (pilot6to1) to avoid large projection intermediates changing record
+shape. New diagnostic CACHE_SOURCE_PARTS is recorded; root read GpuCoalesceExec
+and Spark CoalescedRDD to verify this preserves child batch iteration. Preserve
+first source/jar as calibrate-first-*; source/jar hashes in every manifest.
+
+Calibration2 passed in28.07s: exactly6records,each8,346,664rows and1,068,538,171
+encodedbytes,50,079,984rows total,exit0,noOOM/timeout. Rawreload and SQL warmup
+plus measured scans passed; SQL scans each counted50,079,984rows. Entire pilot
+partition stayed in memory, so this validates shape/decoding, not mixed pressure.
+Add-Xms48g because Spark's Kubernetes executor entrypoint setsXms=Xmx; with
+ParallelGC this produced27.4GiBMemoryStore capacity,matching the supplied UI.
+The first pilot's default initial heap gave25.4GiBcapacity and is not a matching
+control. Root independently verified raw events/structured records and medians;
+read-only worker review requested before the full-run handoff. All operations
+continue through MCP docker_exec. Full16partition reset comparison pending.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
