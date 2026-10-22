@@ -35,8 +35,8 @@ production change; never weaken acceptance. Other independent work may proceed.
 
 - Document fixes: READY FOR REVIEW. Native optional/independent, borrowed-reader
   lifetime gap, unselected accounting choices and precise buffered-IO claims
-  recorded. Existing fixture size-only run measured197480Sparkmem/32768payload
-  before AND afterRAPIDSspill, still useMemory=true, diskBytes=0. Source/runner
+  recorded. Existing fixture size-only run measured 197,480 Spark memory bytes for 32,768 payload bytes
+  before and after RAPIDS spill, still useMemory=true, diskBytes=0. Source/runner
   untouched except accounting markers; run has normalend/no taskfailures.
   Evidence: /data/pcbs-oom/blockmanager-codec-confidence/docs-native-size/.
   Focused independent review passed; no new native feature or pressure claim.
@@ -52,11 +52,10 @@ production change; never weaken acceptance. Other independent work may proceed.
   Worker and independent root fresh runs passed; root read decisive code,
   rehashed inputs and reparsed raw logs/events; separate peer review passed.
   Evidence: /data/pcbs-oom/blockmanager-codec-confidence/D/root-verification/. MCP-only checkpoint confirmed.
-- B: IN PROGRESS after E/C/D verification; exact Spark 4.2.0 target selected.
-  Matching module jars/Scala compiler cached. Runtime lacks RoaringBitmap
-  1.6.10 and flatbuffers-java 25.2.10; DNS prevented exact dependency fetch.
-  Compile-only proof proceeding without substitute versions; runtime parked
-  unless exact dependencies become available.
+- B: READY FOR REVIEW. Exact Spark 4.2.0 revision 32f7299601108917fb01920a54e084595b7b3bf8 compiled independently; 188 hashes; partition-keyed statistics code preserved. Runtime PARKED: exact RoaringBitmap 1.6.10 and flatbuffers-java 25.2.10 unavailable; no substitutes.
+  Worker and independent root runs agree; decisive code and raw evidence
+  inspected, inputs rehashed; focused peer review passed. Evidence:
+  /data/pcbs-oom/blockmanager-codec-confidence/B/root420/. MCP docker_exec-only checkpoint confirmed.
 - F: IN PROGRESS; actual first-action partial read and once-injected decode
   failure in separate JVMs, unchanged cleanup behavior; park real lifecycle gaps.
 - G: IN PROGRESS; actual driver SQL unpersist(blocking=true) against a paused
