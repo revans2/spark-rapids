@@ -862,6 +862,39 @@ helper as minimalcap point; no newconfig, no change toCPUwriter. It does not
 bound eageroutputList/rowmaterialization orcoalesceGPUreads. Preserve those
 limits in eventualcomparison. MCPdocker_exec-only reaffirmed.
 
+Global batch-size comparison READY FOR REVIEW:
+Eight accepted JVMs:16MiB3/3PASS,32MiB3/3PASS,64MiB0/1 and512MiB0/1
+readheapOOM. Abortedfirst32excluded, oldunstartedmatrixcancelled,8notneeded.
+All currentcases defaultunroll16/reset100, fraction0.6 andsamefixedresources.
+Final medians:16fill271.168204198s/read44.989283228s/GC9.269873316%;
+32fill264.037786516s/read42.894320794s/GC15.039396887%.
+MaxpostFullGC31.129/35.006GiB, occupiedheap notdominatorretainedsize.
+Prior1GiB1/1 reference fill249.370s/read37.460s changesbothmemorychecks
+andbatchtarget; do notlabeldifference isolatedbatch-sizeoverhead.
+Root reran analyzer+separateworkerchecker onall8cases; rawGCwindows,
+effectiveconfigs/source+jar+pluginhashes/exactrows+sizes/storage verified.
+Worker reviewedreportmethodclaims. GPUemptyandallbenchmarkJVMsexited.
+No production orScala benchmarkchanges. AllprojectworkMCPdocker_exec-only.
+[Report](pcbs-batch-size-sweep.md), [caseCSV](pcbs-batch-size-sweep.csv).
+The syntheticaggregate, warmOSpagecache, sequentialfill andA6000 limitations
+are explicit. Earlier IN PROGRESS checkpoints superseded for this comparison.
+
+ConditionalPCBS-only experiment now eligible: user authorized it after
+smallerbatches workwithoutcrashes. Compare16MiB cached-record budget with
+globalGPUbatchtarget1GiB, defaultchecks andunchangedresources/data. Start
+small, then32MiB if16passes. Use isolatedsourceworktree andseparateartifacts,
+retainbaselineartifacthash, adapt existingGPUbudgethelper only; no new
+user-facingconfig, lifecycle/format/API changes, CPUwriter orGPUoperators.
+This is an intentionally different experimentalGPUcachelayout, not a selected
+productionpolicy or compatibilitypromise. Existingreleasedrepresentation,
+schema/values/order, empty/count-only handling andCPUfallbackcontracts remain.
+Read-onlydiscovery/rootreads verifiedcolumnar+rowGPUcallers andGPUdecode.
+EagerListproduction, whole-rowpartitionmaterialization andone-fileGPUdecode
+remain; smallerrecords alone do not guarantee largeGPUprocessingbatches.
+Verifyentry-point roundtrip andactualsplitlayout, build/sourceprovenance,
+targetedexistingtests andsamefullbenchmark before performanceclaims. No
+PCBSimplementation started before this globalcomparison completed.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
