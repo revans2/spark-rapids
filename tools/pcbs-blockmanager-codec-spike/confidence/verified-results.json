@@ -182,6 +182,22 @@
         "runtime_hashes_verified": 243
       },
       "scope": "PARKED: both first-action take(1) and once-injected decode failure returned exact later data and complete cache blocks, but each had one read stream without a successful close notification after completed actions. Snapshot precedes shutdown; no permanent leak is claimed. Decide codec versus integration cleanup ownership before a remedy."
+    },
+    "G": {
+      "status": "READY FOR REVIEW",
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/G/root-verification",
+      "checked": {
+        "valid": true,
+        "verified_hashes": 249,
+        "task_end_reasons": {
+          "Success": 2
+        },
+        "rows": 1000,
+        "replicas_removed": 2,
+        "actual_sql_blocking_unpersist": true,
+        "post_removal_local_inspection": true
+      },
+      "scope": "Spark 3.5.5; actual driver SQL unpersist(blocking=true) waited for a paused executor reader, then both replicas were absent. Exact 1,000 rows; two successful tasks; 249 hashes."
     }
   }
 }

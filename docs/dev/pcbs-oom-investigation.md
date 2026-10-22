@@ -60,8 +60,10 @@ production change; never weaken acceptance. Other independent work may proceed.
   Worker and independent root runs agree; decisive code and raw evidence
   inspected, inputs rehashed; focused peer review passed. Evidence:
   /data/pcbs-oom/blockmanager-codec-confidence/F/root-verification/. MCP docker_exec-only checkpoint confirmed.
-- G: IN PROGRESS; actual driver SQL unpersist(blocking=true) against a paused
-  executor reader. All workers confirm MCP docker_exec-only at checkpoint.
+- G: READY FOR REVIEW. Spark 3.5.5; actual driver SQL unpersist(blocking=true) waited for a paused executor reader, then both replicas were absent. Exact 1,000 rows; two successful tasks; 249 hashes.
+  Worker and independent root runs agree; decisive code and raw evidence
+  inspected, inputs rehashed; focused peer review passed. Evidence:
+  /data/pcbs-oom/blockmanager-codec-confidence/G/root-verification/. MCP docker_exec-only checkpoint confirmed.
 - A: NOT STARTED; last, after lower-risk confidence work.
 
 Architect reports independent reproduction of 81347f8ae9 at
