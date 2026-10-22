@@ -19,6 +19,33 @@ verify integrated conclusions without repeatedly importing entire source files.
 Preserve priorities here and in every relevant worker handoff after resets.
 All project actions remain MCP docker_exec-only.
 
+## Active BlockManager codec integration spike (2026-10-22)
+
+IN PROGRESS. Architect authorizes starting the focused research spike, including
+isolated Spark research source overlays. This does not authorize production
+Spark/plugin changes, public configuration, PRs or external posting. The earlier
+no-Spark-patch wording below describes the previous token spike only.
+
+Scope: first prove per-cache codec selection inside the real BlockManager,
+allowing heap payloads. Cover serialized unroll, disk and receiver-side codec
+context, mixed caches/defaults, existing recovery and blocking removal. Then
+validate RAPIDS-managed spillable payload integration; Spark OFF_HEAP storage
+is excluded because its separate pool cannot exchange capacity with RAPIDS.
+Keep existing 1 GiB PCBS/large-test controls unchanged; no new batch sweep.
+
+Release classification remains established: existing Spark cache/StorageLevel/
+serializer contracts RELEASED and preserved by default. Research hooks and
+fixtures UNRELEASED; no compatibility scaffolding for discarded experiments.
+
+Coordination: codec worker owns disposable overlay/fixture and runner; separate
+workers audit native ownership and transfer/version paths. Root owns tracker,
+reads decisive choices, independently runs acceptance checks, and requests
+focused peer review. All actions and every handoff/checkpoint use MCP
+docker_exec tools only; workers must confirm that continuing requirement.
+Park only for a genuine architectural conflict or missing prerequisite after
+reasonable investigation; report incomplete criteria explicitly. Verified
+research deliverables are READY FOR REVIEW, never architect-accepted DONE.
+
 ## Accepted upstream revision and next proof (2026-10-22)
 
 READY FOR REVIEW: [revised proposal](pcbs-cache-storage-api-proposal.md).
