@@ -27,6 +27,41 @@ RDD IDs, remote recovery and in-flight ownership remain to be specified.
 Existing Spark/PCBS released contracts must be preserved. Original investigation
 scope and chronological evidence follow below.
 
+## Production patch plan (2026-10-22)
+
+READY FOR REVIEW: [production plan](pcbs-shadow-payload-plan.md). User authorized
+a written plan and overview of unresolved design questions, not implementation
+or an architecture change. Root coordinated three bounded research tasks
+(ownership/retirement, transport/recovery, released compatibility/validation)
+and independently re-read the decisive Spark/PCBS code through MCP docker_exec.
+Continue using MCP docker_exec for all project actions; repeat at every worker
+handoff and progress checkpoint.
+
+Release classification: existing PCBS CPU/serializer-only and GPU behavior,
+logical statistics, supported storage/serializer/recovery semantics are RELEASED
+(main source, public API and docs/additional-functionality/cache-serializer.md).
+The disposable map/ID representation and proposed shadow protocol are UNRELEASED;
+they require no compatibility adapter. Preserve released contracts; storage-tier
+policy changes or new mandatory plugin/config requirements need architect
+decisions. This record supplements the prototype classification below.
+
+Plan prerequisites remain unresolved: exact persisted wrapper/incarnation
+association; operation retention before serialized-reference copies; ordered
+retirement including blocking unpersist; independently usable remote payloads
+or safe whole-partition recomputation. Async listeners/polling/GC/TTL alone do
+not satisfy these gates. Source research is not runtime protocol verification.
+Prefer existing Spark services where proven usable; include streaming
+self-contained serialization as an alternative and Spark changes only as the
+long-horizon last resort. No transport or retirement mechanism is selected.
+
+Validation for this planning task: source-backed compatibility review, focused
+peer review by two agents, local document-link and whitespace checks passed.
+Review refinements landed: qualify the tracked host limit, explicitly test
+retire-before-publication and discarded serialized copies, reject stale executor
+incarnations, and bound obsolete successful versions in a live cache generation.
+No production edits, builds, new GPU jobs or external messages/PRs. The prior
+benchmark results remain unchanged. Architect acceptance is pending.
+
 ## Active shadow prototype and parallel research
 
 READY FOR REVIEW: local registry/native-cache proofs, reduced-heap/stress
