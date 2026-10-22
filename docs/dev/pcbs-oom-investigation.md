@@ -895,6 +895,27 @@ Verifyentry-point roundtrip andactualsplitlayout, build/sourceprovenance,
 targetedexistingtests andsamefullbenchmark before performanceclaims. No
 PCBSimplementation started before this globalcomparison completed.
 
+PCBS-only implementation checkpoint IN PROGRESS:
+Globalreportcommitted971abb7d4c. Isolatedworktree
+/data/pcbs-oom/pcbs-split-experiment, branchpcbs-cache-size-experiment.
+Prototype16MiB source+tracker commitba6d57a9ab5e349fe53a5089f4c3449268d713b6:
+onlygetGpuBytesAllowedPerBatch cap, same0.5%metadata reserve, smallerglobal
+targets and2GiBsafetyguard preserved. RootreaddecisiveGPU/row/CPU/decode
+callers; workerfocusedsource+trackerreview foundnoblockingissue. NoCPU/API/
+ownership/config changes. Currentuserbranchsource remainsunchanged.
+
+Build supervisor90979, evidence/scripts /data/pcbs-oom/pcbs-only-sweep,
+sourceworktree build usesrapids-plugin-mvn package -pldist -am -Dbuildver355
+-DskipTests andisolatedsecondaryCacheDir. Testsnotyetclaimed; buildartifact
+willcopytoimmutable rapids-cap16-cuda12.jar withsource/revision/SHA metadata.
+No builds concurrentwithtimedbenchmarks. Next: targetedCachedBatchWriterSuite,
+known-valuepublicGPUrow+columnarentryroundtrip, fullsameoriginaldata3JVMs
+atglobal1GiB/default16/100. Actualexpectedlayout390records/cachepartition
+(64full130416rows+40tail peroriginalsource), notglobal16's402. Preserve
+allrawconfigs/source+artifacthashes/metrics/failures; stopfailedprototype
+beforeanylargercap. Onlyafter16success try32. MCPdocker_exec-only required
+onresume/handoff/checkpoint. Sourceexperiment remainsINPROGRESS.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
