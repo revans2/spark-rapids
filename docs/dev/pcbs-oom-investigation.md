@@ -1,7 +1,8 @@
 # PCBS heap OOM investigation (#16362)
 
-Status: READY FOR REVIEW. Reproduction and controls verified; independent
-review completed. No production fix selected. Architect acceptance pending.
+Status: IN PROGRESS — scheduler-token research spike, newer-version audit and
+upstream storage API proposal. Prior reproduction/prototype results remain
+READY FOR REVIEW. No production fix selected; architect acceptance pending.
 
 ## Current architecture priorities (read first)
 
@@ -25,6 +26,39 @@ Spark must continue storing descriptors: that was the earlier split-store
 candidate. SQL cache plan reuse can remain. The custom actual statistics-wrapper
 RDD lifecycle/compute interception is a concrete source candidate, not a tested
 implementation. Prefer recovery WITHOUT task failure; task retry is a fallback.
+
+## Active scheduler-token research spike (2026-10-22)
+
+IN PROGRESS. User now authorizes an executable disposable research spike, newer
+Spark compatibility investigation, and a long-term Apache Spark storage-extension
+proposal. This supersedes earlier discussion-only/no-implementation wording for
+research code ONLY. No production cache implementation, Spark patch, new public
+plugin configuration, external posting or PR is authorized.
+
+Acceptance: prove actual SQL cached-builder factory/lifecycle interception and
+native-store reads with genuine small regular-BM scheduler tokens; distinguish
+SQL correctness from scheduler awareness using a real upstream shuffle and
+controlled loss of its outputs. Cover explicit unpersist, empty partitions,
+token/payload loss and cache miss/recompute; label unsupported/failing cases.
+Small direct-native buffers are acceptable to isolate the storage mechanism,
+but do not claim this establishes PCBS/GPU/spill or large-data performance.
+Reuse the existing large PCBS evidence; preserve original 1 GiB batching.
+
+Parallel work: one worker owns isolated mechanism code/runs under
+/data/pcbs-oom/token-cache-spike; another owns source/binary/version comparison
+under /data/pcbs-oom/token-cache-version-audit; another owns the upstream API
+proposal under /data/pcbs-oom/token-cache-upstream-design. Root integrates,
+independently reads decisive code, reruns acceptance checks and coordinates
+focused peer review. MCP docker_exec ONLY at every handoff and checkpoint;
+all three worker assignments explicitly repeat this requirement.
+
+Released SQL/PCBS semantics remain unchanged. The research wrapper/token/native
+store is UNRELEASED and can change directly. Newer-version source evidence is
+not compile/runtime evidence; record exact references and missing coverage.
+Short-term requires unmodified Spark. Long-term upstream proposal should honor
+StorageLevel and offer supported storage/ownership/transport/scheduler hooks,
+not just a cache-format hook. No community acceptance is presumed. Park a path
+on a demonstrated architectural blocker; continue independent tracks.
 
 Latest proposed refinement: keep genuine small scheduler tokens under the actual
 owner's RDDBlockIds in regular BlockManager, while own custom RDD compute serves
