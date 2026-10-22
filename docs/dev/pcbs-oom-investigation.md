@@ -49,7 +49,12 @@ backend still used BlockManager serialization; existing native placement is
 not itself a generic-serialization bypass.
 
 Next proposed proof: one real BlockManager-integrated codec prototype, first
-allowing heap values, then optional native/direct storage. Cover serialized
+allowing heap values, then RAPIDS-managed spillable payload storage. Spark's
+existing OFF_HEAP pool is explicitly excluded by the architect: it is partitioned
+from cuDF/Spark-RAPIDS memory and cannot exchange capacity with it. Reusing
+BlockManager means coordination/lifecycle reuse, not its off-heap allocator.
+The earlier suggestion to prototype that pool was incorrect and is removed.
+Cover serialized
 unroll, partial admission, disk, multi-JVM remote/replica context, mixed caches,
 existing recovery and blocking-reader cleanup. A core-hook prototype belongs
 to isolated long-term Spark research, not the unmodified-Spark short-term path.

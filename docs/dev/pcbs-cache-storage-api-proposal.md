@@ -138,19 +138,21 @@ and [NettyBlockTransferService](https://github.com/apache/spark/blob/7c29c664cdc
 The source-only call-site audit is retained at
 /data/pcbs-oom/cache-codec-revision/findings.md.
 
-## Secondary goal: reuse native storage before adding a store SPI
+## Secondary goal: RAPIDS-managed spillable payload storage
 
-Spark already supports serialized off-heap memory entries. SerializedValuesHolder
-selects a direct-buffer allocator for OFF_HEAP, and MemoryStore disposes those
-buffers on eviction. It still calls the selected object serializer; native
-placement by itself does not bypass generic Java/Kryo encoding.
+Payloads must use RAPIDS-managed spillable storage, sharing its memory budget
+and spill machinery with cuDF/Spark-RAPIDS workloads. Spark's existing OFF_HEAP
+store is excluded: its separately partitioned memory pool cannot currently
+exchange capacity with RAPIDS memory management. It is not a prototype stage,
+fallback or proposed payload backend.
 
-Investigate the dedicated codec with this existing storage path first.
-BlockData/ManagedBuffer already offer byte views, streams, disposal and transfer
-ownership. A new native BlockData variant alone would not fix codec selection
+Reuse BlockManager's coordination, locking, publication and recovery wherever
+possible. This does not imply using its native allocator or memory pool.
+BlockData/ManagedBuffer may provide useful byte views, streams and transfer
+ownership. A native BlockData variant alone would not fix codec selection
 at the earlier value-to-byte boundaries.
 
-Only propose further hooks for demonstrated gaps, such as:
+The integration must establish hooks for:
 
 - Adopting a plugin-owned native buffer with explicit ownership and accurate
   memory accounting, rather than copying it into Spark-owned storage.
@@ -169,8 +171,9 @@ native-value ownership changes in the primary proof. It does not establish
 bounded heap. Native mode must separately account for retained cache memory,
 writer/restore buffers and transfer staging. StorageLevel semantics must remain
 explicit: memory-only cannot silently become disk-backed, disk-only cannot
-become permanent native retention, and OFF_HEAP must use the agreed accounting.
-Do not select a new native tier or public configuration in this proposal.
+become permanent native retention. Any OFF_HEAP StorageLevel request needs an
+explicit compatibility decision; it does not authorize Spark-owned payload
+allocation. Do not add public configuration in this proposal.
 
 ## Existing recovery and unpersist are the contract
 
@@ -211,8 +214,9 @@ The removed ExternalBlockManager's default value helpers and shipped Tachyon
 backend used BlockManager serialization; configurable backends could override
 those helpers. Tachyon's byte-read implementation allocated a whole-file
 byte array. Reintroducing that API would therefore not directly solve the
-primary codec goal. Reuse the later MemoryStore/direct-buffer machinery and
-standard filesystem paths where sufficient. Do not attribute the earlier
+primary codec goal. The later direct-buffer store is historical prior art,
+not a candidate payload backend: its pool is separate from RAPIDS memory.
+Reuse coordination and filesystem interfaces only where suitable. Do not attribute the earlier
 removal to SPARK-13992 or infer an undocumented performance/lifetime failure.
 
 Exact commit/source evidence is retained at
@@ -252,9 +256,11 @@ serializer test alone is only a preliminary codec experiment.
 
 ### B. Prove the optional native path
 
-Reuse the same codec and BlockManager with existing OFF_HEAP/direct storage
-first. Force spill/reload and remote transfers, account native retention and
-active buffers separately, and test reader/removal races and failed admission.
+Reuse the same codec and BlockManager coordination with RAPIDS-managed
+SpillableHostMemoryBuffer payloads and the RAPIDS spill framework. Enforce its
+host/spill limits; do not allocate cache payloads in Spark's OFF_HEAP pool.
+Force spill/reload and remote transfers, account native retention and active
+buffers separately, and test reader/removal races and failed admission.
 Integrate PCBS/GPU encoding/decoding only after these ownership paths are clear.
 
 **Pass:** no cache-payload-sized heap materialization in the selected native
@@ -286,8 +292,8 @@ future public proposal. No issue, mailing-list message or PR is authorized or
 posted here. API acceptance and the estimated five-year rollout are not promised.
 
 Open decisions are deliberately narrower: where to attach per-cache codec
-context, how to propagate it to receivers, whether existing direct storage
-suffices for native values, and how unsupported StorageLevel/provider
+context, how to propagate it to receivers, how BlockManager owns references to
+RAPIDS-managed spillable payloads, and how unsupported StorageLevel/provider
 combinations fall back or fail without silently changing existing behavior.
 No provider-owned driver publication API or new cache recovery protocol remains.
 
