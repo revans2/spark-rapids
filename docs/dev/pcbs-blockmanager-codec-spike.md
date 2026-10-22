@@ -176,3 +176,51 @@ DONE. F remains PARKED with an independently reproduced counterexample.
 | B | READY FOR REVIEW | Exact Spark 4.2.0 revision 32f7299601108917fb01920a54e084595b7b3bf8 compiled independently; 188 hashes; partition-keyed statistics code preserved. Runtime PARKED: exact RoaringBitmap 1.6.10 and flatbuffers-java 25.2.10 unavailable; no substitutes. |
 | F | PARKED | PARKED: both first-action take(1) and once-injected decode failure returned exact later data and complete cache blocks, but each had one read stream without a successful close notification after completed actions. Snapshot precedes shutdown; no permanent leak is claimed. Decide codec versus integration cleanup ownership before a remedy. |
 | G | READY FOR REVIEW | Spark 3.5.5; actual driver SQL unpersist(blocking=true) waited for a paused executor reader, then both replicas were absent. Exact 1,000 rows; two successful tasks; 249 hashes. |
+| A | READY FOR REVIEW | Eight independently audited fresh JVM cases; six complete and two classified 1 GiB Java fill OOMs; measured fill/read/GC/heap; no PCBS MEMORY_AND_DISK fix claimed. |
+
+## Codec-only benefit measurement
+
+Worker and independent root runs used opposite mode order, fresh JVMs,
+local[8], 48 GiB configured heap, ParallelGC, 16 partitions and six records
+per task. Fraction/reset/unroll defaults stayed unchanged. At 256 MiB per
+record the cache held 24 GiB; at 1 GiB it held 96 GiB when completed.
+DISK_ONLY forces byte IO; this is a synthetic heap-backed format, without
+Parquet, PCBS or GPU compute.
+
+Root measurements:
+
+| Record | Mode | Fill seconds | Median read seconds | GC ms across 3 reads | Sampled heap peak GiB |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 256 MiB | java | 15.52 | 4.72 | 3,199 | 42.75 |
+| 256 MiB | codec | 14.27 | 5.07 | 984 | 22.74 |
+| 1 GiB | Java | Heap OOM | Not reached | Not available | 31.11 before failure |
+| 1 GiB | codec | 81.40 | 25.06 | 13,865 | 44.46 |
+
+Fill includes generation, writing, first decoding and full-byte validation.
+Read is the median of three measured reads after one warmup. GC is summed
+across those three reads. Sampled occupancy includes garbage, not just live
+data. Neither wall time nor GC time is a production throughput estimate.
+These JVMs used Java 17.0.20.1 and 43 ergonomically selected parallel GC workers,
+rather than the customer's four configured GC workers.
+
+Both independent 1 GiB Java cases failed allocating the next producer array,
+before any cache block was published; they did not reach deserialization.
+The codec completed in both runs. At 256 MiB, lower codec GC did not produce
+a read-time improvement. This supports bypassing generic serialization as
+a useful separate goal, without claiming a fix for MEMORY_AND_DISK unrolling.
+The early failed Java occupancy peak is not a smaller memory requirement.
+
+All six completed cases validated every payload byte and all 96 seed values
+in each of five actions: 480 records, 80 successful tasks, no task failures.
+Actual disk sizes were 25,769,804,928 bytes (256 MiB codec),
+25,769,807,680 bytes (256 MiB Java), and 103,079,216,256 bytes (1 GiB codec).
+Each completed case published 16 blocks; both large Java cases published zero.
+Eight independent audits checked raw logs/events/GC and immutable inputs;
+all runtime source hashes match. Raw block cleanup is recorded; raw content
+hashes were not computed.
+
+[Paired results and controls](../../tools/pcbs-blockmanager-codec-spike/confidence/benefit_measurement/independently-verified-results.json)
+include both fresh observations and the individual read times.
+[Reproduction instructions](../../tools/pcbs-blockmanager-codec-spike/confidence/benefit_measurement/README.md)
+describe methods and limits. The F cleanup counterexample remains PARKED;
+B runtime remains blocked by missing exact dependencies.

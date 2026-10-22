@@ -127,7 +127,9 @@ would not prove per-cache selection or safe coexistence of multiple formats.
 The proposal must explain how context reaches remote/replica receivers:
 for example, an optional codec descriptor in existing block-transfer metadata,
 or a self-describing stream envelope with an installed dispatcher. Neither is
-selected yet. A task thread-local or ClassTag alone is insufficient.
+selected yet. A task thread-local or an unextended ClassTag[CachedBatch] cannot
+provide a receiver with per-cache codec context. The research carrier adds
+that context; no public propagation API is selected.
 
 Confidence F found a cleanup gap in the unreleased overlay: after first-action
 take(1) or an injected decode exception, exact later reads passed, but one read

@@ -198,6 +198,15 @@
         "post_removal_local_inspection": true
       },
       "scope": "Spark 3.5.5; actual driver SQL unpersist(blocking=true) waited for a paused executor reader, then both replicas were absent. Exact 1,000 rows; two successful tasks; 249 hashes."
+    },
+    "A": {
+      "status": "READY FOR REVIEW",
+      "scope": "Controlled codec-only versus Java benefit measurements: six completed cases and two classified heap OOMs, independently repeated in reverse order. No PCBS MEMORY_AND_DISK fix claimed.",
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/A",
+      "results": "benefit_measurement/independently-verified-results.json",
+      "results_sha256": "ff8ee625aa0a5860d63f81a52aa551a5f243f71ccf9aab9504265fb0cd0f1f55",
+      "runtime_sources_identical": true,
+      "cases_checked": 8
     }
   }
 }

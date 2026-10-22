@@ -7,7 +7,11 @@ acceptance are pending.
 
 ## Confidence handoff (2026-10-22)
 
-IN PROGRESS. Contradiction check before edits: the prior proposal and tracker
+Research results READY FOR REVIEW. F remains PARKED on the independently
+reproduced cleanup gap; B runtime remains blocked by missing exact dependencies.
+No production implementation or architect acceptance is claimed.
+
+Contradiction check before edits: the prior proposal and tracker
 sometimes implied native integration was a required next stage and excluded
 charging native size against Spark accounting. The architect now explicitly
 makes native payload storage OPTIONAL (nice-to-have), independent of the codec
@@ -64,15 +68,21 @@ production change; never weaken acceptance. Other independent work may proceed.
   Worker and independent root runs agree; decisive code and raw evidence
   inspected, inputs rehashed; focused peer review passed. Evidence:
   /data/pcbs-oom/blockmanager-codec-confidence/G/root-verification/. MCP docker_exec-only checkpoint confirmed.
-- A: IN PROGRESS after B/F/G results were independently checked and recorded.
-  Controlled codec versus Java, fresh JVMs, local[8], 48 GiB heap, six payload
-  records per task, 16 partitions. Start with 256 MiB records, then 1 GiB if
-  feasible; Spark memory fraction/reset/unroll defaults unchanged. DISK_ONLY
-  forces byte IO and isolates codec cost; synthetic heap byte records, not a
-  PCBS/GPU or customer storage-level performance result. Measure actual bytes,
-  heap occupancy/GC/fill/read times and exact data. Pressure OOM is an allowed
-  result; other non-fixture failures park. Native remains optional/excluded.
-  Worker confirms MCP docker_exec-only at the design checkpoint.
+- A: READY FOR REVIEW. Worker and root ran four fresh JVM cases each, in
+  opposite mode order; identical runtime sources and controls. Six cases
+  completed exactly, two 1 GiB Java cases hit producer-allocation heap OOM
+  before publishing any block. Eight raw/source/artifact/event/GC hash audits
+  passed; no timeouts. Local[8], 48 GiB heap, six records per task, 16 partitions,
+  DISK_ONLY; fraction/reset/unroll defaults unchanged. Root 256 MiB Java/codec:
+  fill 15.52/14.27 s, median read 4.72/5.07 s, GC across three reads
+  3,199/984 ms, sampled peak 42.75/22.74 GiB. Root 1 GiB codec: fill
+  81.40 s, median read 25.06 s, sampled peak 44.46 GiB; Java fill failed.
+  These are synthetic heap-payload measurements, not a PCBS MEMORY_AND_DISK
+  fix or production GPU performance claim. Occupancy includes garbage.
+  Evidence: /data/pcbs-oom/blockmanager-codec-confidence/A/*-final/.
+  Full paired results: tools/pcbs-blockmanager-codec-spike/confidence/
+  benefit_measurement/independently-verified-results.json. Peer review passed;
+  MCP docker_exec-only confirmed throughout. Native remains optional.
 
 Architect reports independent reproduction of 81347f8ae9 at
 /data/pcbs-oom/blockmanager-codec-spike/architect-rerun355,
