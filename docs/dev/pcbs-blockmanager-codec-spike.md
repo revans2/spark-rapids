@@ -163,9 +163,10 @@ not block the codec goal.
 ## Confidence handoff results
 
 These are independent heap-codec confidence runs. Native work is optional.
-Every listed case has a fresh worker run, fresh root rerun, input/artifact
-hashes, raw logs/events and a result/verifier JSON. Each case is committed with
-the tracker and marked READY FOR REVIEW, not architect-accepted DONE.
+Each case has worker and independent root evidence with input/artifact hashes
+and a result/verifier JSON. Runtime cases retain raw logs/events; B is explicitly
+compile-only. Passing criteria are READY FOR REVIEW, not architect-accepted
+DONE. F remains PARKED with an independently reproduced counterexample.
 
 | Case | Status | Verified scope |
 | --- | --- | --- |

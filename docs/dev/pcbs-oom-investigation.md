@@ -64,7 +64,15 @@ production change; never weaken acceptance. Other independent work may proceed.
   Worker and independent root runs agree; decisive code and raw evidence
   inspected, inputs rehashed; focused peer review passed. Evidence:
   /data/pcbs-oom/blockmanager-codec-confidence/G/root-verification/. MCP docker_exec-only checkpoint confirmed.
-- A: NOT STARTED; last, after lower-risk confidence work.
+- A: IN PROGRESS after B/F/G results were independently checked and recorded.
+  Controlled codec versus Java, fresh JVMs, local[8], 48 GiB heap, six payload
+  records per task, 16 partitions. Start with 256 MiB records, then 1 GiB if
+  feasible; Spark memory fraction/reset/unroll defaults unchanged. DISK_ONLY
+  forces byte IO and isolates codec cost; synthetic heap byte records, not a
+  PCBS/GPU or customer storage-level performance result. Measure actual bytes,
+  heap occupancy/GC/fill/read times and exact data. Pressure OOM is an allowed
+  result; other non-fixture failures park. Native remains optional/excluded.
+  Worker confirms MCP docker_exec-only at the design checkpoint.
 
 Architect reports independent reproduction of 81347f8ae9 at
 /data/pcbs-oom/blockmanager-codec-spike/architect-rerun355,
