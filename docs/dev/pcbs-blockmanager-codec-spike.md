@@ -170,3 +170,4 @@ the tracker and marked READY FOR REVIEW, not architect-accepted DONE.
 | Case | Status | Verified scope |
 | --- | --- | --- |
 | C | READY FOR REVIEW | Spark4.0.1;13Success+1genuineFetchFailed;exact10000rows;2removalgates;actualBMmigration;287hashes. |
+| D | READY FOR REVIEW | Spark3.5.5;3freshJVMs;1cachepartition;producer1receiver0;receiver noWRITE/noPRODUCE,READwithouttask;1000rows/2000values;sourcecomputedonce;248hashes. |

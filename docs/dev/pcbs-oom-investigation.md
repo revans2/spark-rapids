@@ -45,7 +45,10 @@ production change; never weaken acceptance. Other independent work may proceed.
   Worker and independent root fresh runs passed; root read decisive code,
   rehashed inputs and reparsed raw logs/events; separate peer review passed.
   Evidence: /data/pcbs-oom/blockmanager-codec-confidence/C/root401/. MCP-only checkpoint confirmed.
-- D: IN PROGRESS (clean receiver worker).
+- D: READY FOR REVIEW. Spark3.5.5;3freshJVMs;1cachepartition;producer1receiver0;receiver noWRITE/noPRODUCE,READwithouttask;1000rows/2000values;sourcecomputedonce;248hashes.
+  Worker and independent root fresh runs passed; root read decisive code,
+  rehashed inputs and reparsed raw logs/events; separate peer review passed.
+  Evidence: /data/pcbs-oom/blockmanager-codec-confidence/D/root-verification/. MCP-only checkpoint confirmed.
 - B, F, G: NOT STARTED; depend on first batch.
 - A: NOT STARTED; last, after lower-risk confidence work.
 
