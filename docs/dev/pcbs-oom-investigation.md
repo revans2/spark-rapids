@@ -691,6 +691,28 @@ settings, deterministic shuffled round-robin order. All fraction0.6; no
 resource changes. Worker independently audits using MCP docker_exec only.
 Report/performance acceptance remains IN PROGRESS until repeats and review.
 
+Final fixed-memory sweep checkpoint — READY FOR REVIEW:
+All 14 accepted JVMs completed: nine PASS and five first-SQL heap OOMs.
+Period/reset 1/1, 1/2 and 2/1 each passed three fresh JVMs. Median of JVM
+scan medians: 37.459692076s, 37.763941794s and 42.298277415s respectively.
+Median timed GC: 24.703%, 23.898%, 33.276%; maximum post-full-GC whole-heap
+occupancy: 41.867, 41.867, 42.862 GiB. Periods 4/8/16 with reset1 and
+period1 with resets4/100 failed on first SQL warmup, each one screening JVM.
+No default-period successful timing exists; do not claim generic check
+overhead. Reset1/reset2 ranges overlap; no clear reset2 performance win.
+Three JVMs do not establish production reliability or an OOM probability.
+
+Root reran analysis against all raw evidence and independently executed the
+worker's separate raw/config/GC/math checks. Both workers reviewed report
+interpretation; final size-check wording corrected to be conditional.
+No production or benchmark changes. Memory fraction 0.6 for every accepted
+case; aborted 0.4 case excluded. GPU compute processes cleared after final
+JVM exit. All project operations and reviews remained MCP docker_exec-only.
+No further experiments or external posting. Final report and all 14 case
+rows: [sweep report](pcbs-unroll-period-sweep.md) and
+[CSV](pcbs-unroll-period-sweep.csv). Architect acceptance remains pending.
+The earlier IN PROGRESS checkpoints above are superseded by this result.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
