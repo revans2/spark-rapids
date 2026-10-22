@@ -561,6 +561,40 @@ Detailed findings and limitations: pcbs-six-batch-test.md; compact measured
 ownership data: pcbs-six-batch-heap.csv. Diagnosis READY FOR
 REVIEW; production fixes remain for architect discussion.
 
+## Follow-up: check unroll accounting every record
+
+The user approved trying spark.storage.unrollMemoryCheckPeriod=1 together with
+objectStreamReset=1. Reuse the exact SQL-only six-record pressure scenario:
+16partitions,8task slots,48GiB heap,15GiB fixed GPU pool,GPU concurrency2,
+normal memory fraction0.6,no harness GC. No source/artifact changes and no
+storage-level or user-API changes. Evidence is isolated under
+/data/pcbs-oom/unroll-check1; supervisor70450. One fresh JVM requests a warmup
+plus3measured SQL scans. Acceptance preserves exact96records and full
+801,279,744rows per scan; otherwise classify explicit failure honestly.
+Status READY FOR REVIEW. The fresh JVM exited0 with noheapOOM/timeout, accepted
+96recordshape, warmup+3SQLscans each801,279,744rows, finite repeatable sums, and
+unchanged16partition memory/diskresidency. Measuredscans38.868/39.569/39.165s;
+median39.165s. GC10.414/9.651/9.635s (~25%elapsed),11/12/11fullcollections.
+Sampledoccupiedpeak44.287GiB includesgarbage; largestpostfullGC40.872GiB.
+OnefreshJVMisnotanOOMprobabilityestimate. No performanceoverheadcomparison is
+possibleagainstthefailingcheck16case. Rootindependentlyauditedfullraw
+events/config/hash/shape/SQLcounts/GC logandreransummarychecks.
+A read-only worker independently verified final logs, hashes, exact record/row
+counts, effective SparkEnvironmentUpdate settings, GC data and report/CSV;
+no material findings. No source, storage-level or user-API changes were made;
+all processes stopped.
+All project operations/review remain MCP docker_exec-only.
+
+Design steering: serialized/off-heap StorageLevel is not a transparent fix,
+because it requires application API changes. Small cache records may be tried
+later by adapting the existing splitting path; do not assume a GPU writer can
+efficiently emit many independent Parquet buffers. Off-heap ownership remains
+future design work, potentially requiring an RDD persistence layer. Spark
+patches are last resort. No implementation beyond the approved config
+experiment is authorized. Clarified that bounded serialization chunks meant
+bytes within one CachedBatch object, not fragments as separate RDD records;
+the latter would introduce ordering/predicate concerns and is not proposed.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed

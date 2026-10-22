@@ -2,8 +2,10 @@
 
 Status: READY FOR REVIEW. Diagnosis only; no production fix. Architect acceptance pending.
 
-Both the customer-shaped raw cache reload and full SQL scan fail with
-`spark.serializer.objectStreamReset=100` and `1`. Heap dumps show that the
+With the default unroll check period of 16, both the customer-shaped raw cache
+reload and full SQL scan fail with `spark.serializer.objectStreamReset=100`
+and `1`. A follow-up with check period 1 and reset 1 passes four full SQL scans
+in one fresh JVM; details below. Heap dumps show that the
 readers retain substantially more than one batch each. Resetting Java stream
 handles removes one source of retention, but Spark's unroll buffers and
 iterators retain other batches.
@@ -64,6 +66,52 @@ Population passed with the exact accepted record shape in all completed cells.
 A separate one-partition pilot passed the SQL scans and shape checks; it is
 entirely memory-resident and is not a pressure result. The earlier incomplete
 12/14 GiB GPU-pool experiment is excluded. Raw reset 4/2 cases were not run.
+
+## Follow-up: check unroll memory every record
+
+The user approved trying the existing internal Spark configuration:
+
+```properties
+spark.storage.unrollMemoryCheckPeriod=1
+spark.serializer.objectStreamReset=1
+```
+
+Compared with the reset-1 SQL failure above, only the check period changes
+from 16 to 1. The benchmark source, plugin and diagnostic jars, query, data,
+heap, task slots, GPU pool, GPU concurrency, storage level and GC settings are
+unchanged. This is a configuration experiment, not a production code change.
+
+The fresh JVM exited 0 without heap OOM or timeout. Population produced the
+same 96 records and encoded byte count. The warmup plus three measured scans
+each reported exactly 801,279,744 rows, with finite repeatable aggregates and
+all 16 cached partitions retained. Memory/disk residency remained unchanged.
+
+| SQL iteration | Elapsed seconds | GC seconds | Full GCs |
+|---|---:|---:|---:|
+| Warmup | 42.031 | 12.344 | 11 |
+| 1 | 38.868 | 10.414 | 11 |
+| 2 | 39.569 | 9.651 | 12 |
+| 3 | 39.165 | 9.635 | 11 |
+
+The measured median is 39.165 seconds; about 25% of measured elapsed time is
+GC time. The maximum sampled occupied heap across measured scans is 44.287 GiB,
+which includes garbage and is not a retained/live-size estimate. Full GCs
+during scans reduce occupancy; the largest post-full-GC occupancy is about
+40.872 GiB. This differs from the previous failing snapshot's approximately
+43.8 GiB of live large-array payload alone.
+
+This supports per-record checks as a mitigation for the tested workload.
+It is one fresh JVM with four scans, not an OOM probability estimate or proof
+of safety for other schemas/concurrency. Since the check-period-16 comparison
+fails on its first scan, this does not quantify the performance overhead of
+more frequent checks.
+
+Evidence: /data/pcbs-oom/unroll-check1, including raw logs, effective commands,
+hash manifest, event log, GPU telemetry, results and independent summaries.
+The completed run is check1-reset1-parts16-trial0. Source and artifact hashes
+match the SQL baseline. Timings are also saved in
+[pcbs-unroll-check1.csv](pcbs-unroll-check1.csv).
+All JVM and monitor processes stopped after completion.
 
 ## What the raw heap dumps contain
 
@@ -181,6 +229,8 @@ exactly after including the small non-PCBS cached entries and the serialized
 broadcast entry. Broad reverse BFS is not a dominator analysis; none of the
 ownership conclusions relies on it.
 
-All four full-size JVMs exited with Java heap OOM after successful population;
-none completed a timed read. All test JVMs and GPU monitoring processes stopped.
+All four full-size JVMs using the default check period exited with Java heap
+OOM after successful population; none completed a timed read. The check-period-1
+follow-up completed all four SQL scans as described above. All test JVMs and
+GPU monitoring processes stopped.
 No configuration or implementation fix has been selected.
