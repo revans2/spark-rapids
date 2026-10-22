@@ -1084,6 +1084,27 @@ new configuration, runtime RPC trace or failure-injection result claimed.
 MCP docker_exec-only confirmed by every worker and lead, and required at all
 future resume/handoff/checkpoints. Only documentation/tracker files changed.
 
+## BlockManager replacement feasibility
+
+Source-only answer to follow-up: BlockManager and removeRdd are nonfinal
+Spark-internal classes/methods. SparkEnv.scala:365 directly constructs
+new BlockManager and :68 stores it as a val; no replacement factory/config
+is consulted. Executor.scala:151 initializes/registers it before plugins
+at :335–337. Standard ExecutorPlugin initialization cannot select a replacement.
+
+If SparkEnv construction supplied a subclass, the inherited storage endpoint
+would dispatch existing RemoveRdd commands to its override: BlockManager
+:240–242 constructs the endpoint with this; storage endpoint:51–53 calls
+virtual removeRdd. This does not require replacing the driver master.
+A Spark construction-path change would therefore allow a focused subclass
+rather than a complete block-manager rewrite. This is feasibility reasoning,
+not a selected or implemented design; runtime safety remains unverified.
+
+Lead independently read construction/field/class declarations and previously
+verified RemoveRdd dispatch; worker checked construction order, virtual dispatch
+and matching3.5.3 code. Released contracts unchanged. MCP docker_exec-only
+confirmed; no source/config/runtime changes. Investigation READY FOR REVIEW.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
