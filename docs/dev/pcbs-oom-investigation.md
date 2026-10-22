@@ -682,6 +682,15 @@ each; generate randomized round-robin repeats only after reset screening.
 The aborted memory-fraction case is excluded and never retried. No production
 changes or external posting. Full sweep/report remains IN PROGRESS.
 
+Screening checkpoint: all8 approved cells complete. At period1, reset1 and2
+PASS; reset4 and100 heapOOM in firstSQLscan. period2/reset1PASS;
+periods4/8/16reset1 heapOOM. Root reran accepted-case validation against
+raw artifacts and effective settings. Repeats supervisor78119 started after
+screening ended: two fresh JVMs for each of the three initially passing
+settings, deterministic shuffled round-robin order. All fraction0.6; no
+resource changes. Worker independently audits using MCP docker_exec only.
+Report/performance acceptance remains IN PROGRESS until repeats and review.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
