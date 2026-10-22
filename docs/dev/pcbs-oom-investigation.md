@@ -27,6 +27,52 @@ RDD IDs, remote recovery and in-flight ownership remain to be specified.
 Existing Spark/PCBS released contracts must be preserved. Original investigation
 scope and chronological evidence follow below.
 
+## Active shadow prototype and parallel research
+
+IN PROGRESS, user authorized two parallel tracks on2026-10-22:
+1. Disposable LOCAL-MODE PCBS payload registry: JVM map ID to existing
+SpillableHostBuffer, small Spark cached descriptors, no deletion handling.
+Fresh JVM for every cache population. Start from original1GiB splitting;
+REVERT/EXCLUDE prior16/32MiB experimental caps. Preserve six approximately
+1GiB payloads per cache partition in the original full workload.
+2. Research missing production ownership/remote/recovery mechanisms and cache
+metadata consumers, including newer mounted Spark releases. Report any planning
+dependencies rather than assume metadata is never used by the optimizer.
+
+Prototype source is isolated on pcbs-shadow-experiment, based on4ca06aded8,
+worktree /data/pcbs-oom/pcbs-shadow-experiment. Main production source/artifacts
+must remain unchanged. This experimental representation is UNRELEASED and
+intentionally local-only/non-cleaning; it is not a proposed production contract.
+Preserve numRows and original encoded-payload sizeInBytes even though actual
+Spark descriptors are small. Released query/schema/filter/statistics semantics
+remain required when comparing the workload.
+
+Baseline test: Spark3.5.5/local[8]/48GiB heap, ParallelGC; globalGPUtarget1GiB,
+GPUconcurrency/max2, fixed15GiB devicepool, host40GiB/pinned2GiB; fraction0.6,
+defaultunroll16/reset100. Sixteen cache partitions (~6GiB each),96sources,
+801279744rows and16Doublecolumns. Do not change memoryfraction or reducebatch
+sizes to obtain a pass. Keep original sequential fill +warmup/three timed
+full SQL reads for comparison; verify measured payload sizes, storage tiers,
+correct rows/values, source/artifact/config hashes and fresh-JVM exit status.
+Small functional checks must force descriptor serialization/disk reload.
+
+Conditional next steps ONLY after registry proof passes: full GPU bulk path
+whose encoded/column payload bytes avoid Java heap, then decrease ONLY heap
+to find a measured passing/failing boundary. Metadata, bounded control/staging
+buffers and final aggregate results must be distinguished from bulk payloads.
+Source/plan/allocation evidence is needed; low observed heap alone is not proof
+that no payload allocation occurred. Preserve all failures; do not blindly
+repeat a failed variant or generalize local success to distributed correctness.
+
+Workers: pcbs_only_plan owns isolated implementation/build/check preparation;
+spark_cache_trace owns metadata/version research; heap_review owns full-design
+lifecycle/remote research. Lead coordinates GPU/build exclusivity and benchmarks,
+independently reads decisive changed code, verifies evidence and integrates.
+Full details stay in worker notes; report compact findings with citations.
+All use MCP docker_exec ONLY and confirm at handoff/checkpoint/resume.
+No production fix, new public configuration, Spark patch, external post or PR
+is authorized. Any Spark-change option remains explicitly labeled LAST RESORT.
+
 ## Scope and acceptance
 
 Reproduction only, timeboxed through tomorrow morning (America/Chicago; exact
