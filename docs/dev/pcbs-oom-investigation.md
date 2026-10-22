@@ -952,6 +952,16 @@ is not a productiondefaultdecision. EageroutputList/whole-rowmaterialization
 remain. Actualscanplan has no coalescer beforepartialaggregate. MCPdocker_exec
 only confirmed and required onresume/delegation/checkpoints.
 
+PCBS-only32MiB prerequisite checkpoint:
+Build passed152.943s, artifactSHA256
+ab3167db471c90a97068ee3ca1923d028e941e74edfe324a75c99de2ca0efaf7.
+BothpublicGPUwriterentryroundtrips passed1.2Mknownorderedrows/tworecords.
+TargetedCachedBatchWriterSuite passed17tests/zeroerrors/failures/skips;
+freshXMLmtime/testcasecount andbefore/afterHEAD/sourceSHA validated.
+Root+worker independently verified entry/unit evidence. Full benchmark
+supervisor105278 now runs3JVMs, stoponfailure, no build/test concurrency.
+Source+artifact andallrawlogs retained inpcbs-only-sweep. MCP-onlyconfirmed.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
