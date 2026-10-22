@@ -29,7 +29,9 @@ scope and chronological evidence follow below.
 
 ## Active shadow prototype and parallel research
 
-IN PROGRESS, user authorized two parallel tracks on2026-10-22:
+READY FOR REVIEW: local registry/native-cache proofs, reduced-heap/stress
+results and source research verified. Production ownership and literal zero-heap
+spill are not implemented/claimed. User authorized two parallel tracks on2026-10-22:
 1. Disposable LOCAL-MODE PCBS payload registry: JVM map ID to existing
 SpillableHostBuffer, small Spark cached descriptors, no deletion handling.
 Fresh JVM for every cache population. Start from original1GiB splitting;
@@ -206,7 +208,7 @@ The local[16]/32-partition/48 GiB/1 GiB-record/capped2 case PASSED: 192 payloads
 Independent checks passed with no audit issues. Stock executor gauge sampled
 16 active task threads in every read; GPU admission remained 2. Initial servlet
 HTTP302 samples are retained separately; corrected /metrics/json/ sampling had
-valid read coverage, plus 18 URI errors after JVM shutdown. These are not hidden.
+valid read coverage, plus 18 connection errors after JVM shutdown. These are retained.
 Root ran new large-record acceptance fixtures PASS and independently reran the
 completed-read comparison. Warmup spill read/materialization summed task time
 was 182.749 s versus baseline 29.728 s; GPU utilization averaged 9.6% versus40%.
@@ -224,14 +226,38 @@ in the measured-read sampled subwindows (84.4/95.0/97.2% coverage), despite
 approximately 55–61 GiB logical rchar deltas. These are partial process-wide
 windows, not exact payload-only/full-phase totals; cold storage reads are not
 supported as the cause of this case's slowdown.
-Current combined case is gpuhash-g2-project3g-taskconf-slots16-automatic-heap512m,
-supervisor 149011, under /data/pcbs-oom/pcbs-gpu-generator, using local[16],
-32 partitions, 2 GiB target, automatic GPU concurrency and 512 MiB heap. First
-partition verified three original large records; full fill/reads IN PROGRESS.
-Stock task-thread sampler149029 and IO sampler149080 retain errors/coverage.
-The combined 48 GiB variant and intermediate heaps are not implied tested.
-All fixed native limits/default checks remain unchanged. Root owns launches;
-workers reconfirmed MCP docker_exec-only.
+The combined case gpuhash-g2-project3g-taskconf-slots16-automatic-heap512m
+PASSED: local[16], 32 partitions, 2 GiB target, automatic GPU concurrency and
+512 MiB configured heap. Exact 96 payloads/205,169,437,824 encoded bytes; Spark
+reference storage 4,096 bytes. Fill 358.876 s, warmup 115.575 s, measured reads
+106.227/105.117/109.340 s (median 106.227 s), read GC 47 ms/0.0147%, sampled heap
+peak 0.234 GiB (~239 MiB), process RSS 39.66 GiB. Normal JVM exit 0, all 32 actual
+threshold markers 3 GiB, native-path counters, row/aggregate/config checks and
+independent strict analysis passed with no audit issues. Effective concurrency
+overrides were absent; raw task-local GPU admission MAX 3 and stock sampled
+active executor threads MAX 16 in each read. Recoverable pinned-pool allocation
+fallback messages remain in raw logs; no heap OOM occurred.
+Measured IO subwindows covering 98.8–98.9% of reads recorded 155.5–160.0 GiB kernel backing
+reads. These are sampled process-wide subwindows, not exact payload/phase totals.
+Root reran the warmup comparison, and independent final evidence review found
+no material issue. Sampler startup/shutdown errors and coverage remain recorded.
+Root rehashed 8 frozen source/artifact checks after final exit: all matched,
+including original baseline plugin/benchmark. GPU was released. Root also
+reconstructed all seven CSV rows from raw phase/partition/TaskEnd events:
+report-csv-verification.json passed. CSV line endings were normalized after the
+Git whitespace check, then the numeric audit was rerun unchanged. Final focused
+report/CSV peer review found
+no material issue. Seven accepted GPU-generator cases are in
+docs/dev/pcbs-shadow-performance.csv; full scratch
+aggregate retains both invalid-shape fixtures and all raw evidence under
+/data/pcbs-oom/pcbs-gpu-generator. Exact minimum/failing heap boundary, combined
+48 GiB and intermediate heaps were not tested. No further benchmark is queued.
+Local proof/results READY FOR REVIEW; architect acceptance pending. Existing
+compressed spill still uses bounded heap buffers, so literal zero heap remains
+unmet. Production owner registration, cleanup leases, remote fetch/recovery and
+Spark-version runtime coverage remain future design/verification work. Main
+production source/artifacts were unchanged by this experiment; native code is
+isolated at d247fe7a6e. All workers reconfirmed MCP docker_exec-only.
 Literal zero-heap compressed spill remains open. GPU jobs/builds/tests stay
 serialized; MCP docker_exec-only confirmed by workers at this checkpoint.
 

@@ -1,13 +1,20 @@
 # Local spillable PCBS payload proof
 
-Status: READY FOR REVIEW for the first proof. Direct host-buffer GPU path and
-stress tests are in progress; no production design is selected.
+Status: READY FOR REVIEW for the local registry, native GPU cache path,
+reduced-heap controls and stress tests. No production design is selected.
 
 The disposable registry prototype passed the original large workload with the
 default unroll period (16) and Java object-stream reset interval (100). Spark
 retained small references while the registry retained the Parquet payloads in
 spillable native buffers and disk files. This proves the local retention idea
 for this workload, not distributed ownership, deletion or failure recovery.
+
+The strongest completed case cached 191.08 GiB as 96 approximately 2 GiB
+payloads with a configured 512 MiB heap and local[16]. All four complete reads
+passed; automatic GPU admission reached 3. Default unroll/reset stayed 16/100,
+with host40/pinned2/GPU15 GiB limits. Peak sampled heap was 239 MiB and process
+RSS 39.66 GiB. This eliminates batch-sized PCBS Java arrays; bounded spill
+codec/staging arrays remain, so literal zero heap traffic is not established.
 
 ## First proof: array-copy path
 
@@ -138,8 +145,9 @@ read-stage GPU admission high-watermarks were 7 versus 2 when capped. This is
 semaphore admission, not simultaneous kernels. PCBS registry array put/get
 counters remained zero. All fixed limits
 and default checks remain unchanged. The heap, automatic-concurrency, 16-thread
-and actual 2 GiB-record controls have passed. The combined stress remains in
-progress.
+and actual 2 GiB-record controls have passed. The combined stress also passed
+as recorded below. Each case uses one fresh JVM and three measured reads after
+warmup; these are local synthetic timings, not a customer MERGE prediction.
 
 512 MiB is the lowest heap tested, not a proven exact minimum. The intermediate
 8/4/2/1 GiB sizes were skipped after 16 GiB passed. Reduced heap does not reduce
@@ -189,7 +197,38 @@ physical disk/cache-miss attribution is not established. Only one additional
 approximately 1 GiB spill write and exact registry read counts were observed,
 so repeated payload rewrite/retry is not supported as the explanation.
 
-Evidence: `/data/pcbs-oom/pcbs-gpu-generator`, including the oracle, frozen v4
+The combined local[16]/32-partition/2 GiB-target/automatic-GPU/512 MiB case
+PASSED, including normal JVM exit and independent strict record/config checks.
+It retained 96 payloads of 2,137,181,644 bytes each (205,169,437,824 bytes total),
+with 15 host/81 disk handles after reads. Spark references occupied 4,096 bytes.
+All 32 task threshold markers were 3 GiB; array put/get counters remained zero,
+and native reads were exactly 96/192/288/384 across the four full reads.
+
+| Additional stress | Encoded data | Fill | Median read | Read GC | Peak sampled heap / RSS |
+|---|---:|---:|---:|---:|---:|
+| 1 GiB, 16 threads, 48 GiB heap, GPU capped 2 | 191.08 GiB | 300.317 s | 94.997 s | 0 ms | 7.74 / 43.86 GiB |
+| 2 GiB, 8 threads, 48 GiB heap, GPU capped 2 | 95.54 GiB | 161.977 s | 34.361 s | 0 ms | 5.34 / 41.85 GiB |
+| 2 GiB, 16 threads, 512 MiB heap, automatic GPU | 191.08 GiB | 358.876 s | 106.227 s | 47 ms (0.0147%) | 0.234 / 39.66 GiB |
+
+Combined warmup was 115.575 s; measured reads were 106.227/105.117/109.340 s.
+No ordinary/internal concurrency overrides were present. GPU admission MAX was
+3 and sampled active executor threads reached 16 in every read; neither metric
+is simultaneous kernel/CPU execution. Process IO subwindows covered 98.8–98.9%
+of measured reads and recorded 155.5–160.0 GiB kernel-accounted backing reads.
+This supports substantial storage IO, without claiming exact whole-phase or
+payload-only totals. Recoverable pinned-pool capacity/fallback messages remain
+in the logs; successful exit does not mean those messages were absent.
+
+Seven accepted GPU-generator cases, timing/memory/row-byte measurements and
+source/artifact hashes are in [pcbs-shadow-performance.csv](pcbs-shadow-performance.csv).
+The full scratch aggregate retains both invalid-shape fixtures separately.
+Root rehashed eight frozen source/artifact checks after the final JVM exited;
+all matched, including the unchanged original benchmark and baseline plugin.
+Root also reconstructed all seven CSV rows from raw phase/partition/task events;
+the audit passed. Final focused evidence and report reviews found no material
+issue. Local results remain READY FOR REVIEW pending architect acceptance.
+
+Evidence: `/data/pcbs-oom/pcbs-gpu-generator`, including the oracle, frozen v4/v5
 source/jar provenance and per-case results/raw logs/independent analysis. The
 allocation probe is under `/data/pcbs-oom/generation-allocation-probe`.
 Literal zero-heap compressed spill remains an unresolved implementation/design
@@ -238,15 +277,17 @@ No broad unit-suite pass is claimed: packaging skipped tests, and the scoped
 checks deliberately use a fresh JVM rather than unsupported multi-session or
 plugin-disabled behavior.
 
-## Remaining tests and production limits
+## Tested boundaries and production limits
 
-The user authorized a direct native GPU writer/reader after this first pass,
-then a heap-size boundary and independent 2 GiB, automatic GPU concurrency and
-16-thread cases before combinations. Keep tracked host allocation bounded at
-40 GiB with disk spill, pinned 2 GiB and GPU 15 GiB. At 16 threads use 32 cache
-partitions for two waves. To create actual roughly 2 GiB records, generate three
-larger source partitions per cache partition instead of six smaller sources;
-keep the same approximately 6 GiB per cached partition and report that change.
+The native cache path, 512 MiB heap, independent 2 GiB/automatic-GPU/16-thread
+controls and combined stress passed. The exact minimum heap and a failing heap
+boundary were not determined; intermediate heaps and the combined 48 GiB variant
+were not run. The host limit stayed enabled at 40 GiB, pinned2/GPU15 GiB, memory
+fraction0.6, unroll16/reset100. At 16 threads, 32 partitions provide two waves.
+Actual 2 GiB records require three source partitions per cache partition plus
+existing test-only spark.rapids.sql.test.overrides.splitUntilSize=3221225472,
+explicitly propagated to task-local properties for direct fill. This is a
+fixture adaptation, not a proposed production configuration.
 
 The prototype intentionally never deletes published payloads. IDs are valid
 only within one JVM, which exits after each test. No remote fetch, actual RDD
