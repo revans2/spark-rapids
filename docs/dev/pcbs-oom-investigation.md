@@ -162,10 +162,33 @@ This changes the dataset and fill cost, so v4 requires a separate baseline.
 The GPU-generated 48 GiB baseline PASSED: fill 125.243 s, median read 20.486 s,
 read GC 0 ms, sampled heap peak 4.75 GiB and RSS peak 42.21 GiB. Its 96 payloads
 totaled 102,584,813,088 encoded bytes; native bulk and independent raw-event
-checks passed with normal JVM exit. Current case is the corresponding 16 GiB
-heap control, supervisor 141039, under /data/pcbs-oom/pcbs-gpu-generator. All
-fixed native limits and unroll/reset/fraction settings are preserved. Subsequent
-heap/stress cases stay gated on verified predecessor results; root owns launches.
+checks passed with normal JVM exit. The matching 16 GiB control also PASSED:
+fill 127.860 s, median read 20.533 s, read GC 0 ms, sampled heap peak 2.58 GiB
+and RSS peak 42.18 GiB, unchanged payload totals and no independent audit issues.
+The read-only overlap/automatic-environment analyzer fixtures passed in the idle
+window. Task timestamps measure driver-recorded task lifetime, not physical CPU
+execution. Even per-stage overlap can exceed configured slots: local scheduler
+slot reuse precedes asynchronous result handling that records task finish time.
+Do not interpret these intervals as proof of simultaneous executor task bodies.
+The first 2 GiB-target case exited normally but FAILED fixture shape: it still
+produced six approximately 1 GiB records, not three approximately 2 GiB records.
+Do not count it as a passing large-record stress. Independent analysis retained
+the invalid shape. Root and worker missed GpuProject's independent pre-split
+threshold, default GPU pool/8 = 1.875 GiB here, which halves projected output
+before PCBS. Source review confirmed this in the isolated artifact worktree.
+A separately named fixture will use the existing test-only splitUntilSize
+3 GiB override; native limits stay unchanged. This additional test dimension
+precludes attributing its performance difference solely to the PCBS batch target.
+The 1 GiB/local[8]/48 GiB automatic-concurrency case PASSED: fill 126.816 s,
+median read 13.013 s, read GC 0 ms, sampled heap peak 4.54 GiB/RSS 41.31 GiB.
+Independent checks passed, including absence of ordinary/internal inherited
+concurrency overrides. GPU admission high-watermark was 7 in read stages.
+Current case is gpuhash-g1-slots8-capped2-heap512m, supervisor 144545, under
+/data/pcbs-oom/pcbs-gpu-generator. Root chose a direct 512 MiB lower-heap probe
+after 16 GiB passed; intermediate 8/4/2/1 GiB cases are NOT implied tested. If it
+fails, work upward. All fixed native limits and unroll/reset/fraction settings
+are preserved. Subsequent stress cases stay gated on verified predecessor
+results; root owns launches.
 Literal zero-heap compressed spill remains open. GPU jobs/builds/tests stay
 serialized; MCP docker_exec-only confirmed by workers at this checkpoint.
 

@@ -122,15 +122,29 @@ produce sixteen Double columns. Its oracle verified 160,000 CPU/GPU values by
 raw bits, GPU-only computational expressions and 128 native bytes per row.
 The dataset and generation cost differ from rand, requiring a new baseline.
 
-| Heap | Fill | Median full read | Read GC | Peak sampled heap | Peak RSS |
+| Heap / GPU mode | Fill | Median full read | Read GC | Peak sampled heap | Peak RSS |
 |---|---:|---:|---:|---:|---:|
-| 48 GiB | 125.243 s | 20.486 s | 0 ms | 4.75 GiB | 42.21 GiB |
+| 48 GiB / capped 2 | 125.243 s | 20.486 s | 0 ms | 4.75 GiB | 42.21 GiB |
+| 16 GiB / capped 2 | 127.860 s | 20.533 s | 0 ms | 2.58 GiB | 42.18 GiB |
+| 48 GiB / automatic | 126.816 s | 13.013 s | 0 ms | 4.54 GiB | 41.31 GiB |
 
 This baseline passed exact row/shape/aggregate checks and normal exit. It held
 96 payloads totaling 102,584,813,088 encoded bytes, with 37 host/59 disk handles
-after reads. PCBS registry array put/get counters remained zero. All fixed limits
+after capped reads. Automatic mode passed the same payload/shape checks with
+32 host/64 disk handles after its first measured read. Both ordinary and internal
+plugin-prefixed concurrency overrides were absent from effective configuration;
+read-stage GPU admission high-watermarks were 7 versus 2 when capped. This is
+semaphore admission, not simultaneous kernels. PCBS registry array put/get
+counters remained zero. All fixed limits
 and default checks remain unchanged. Smaller heaps and the authorized independent
 2 GiB, automatic-concurrency and 16-thread dimensions are in progress.
+
+The first 2 GiB-target run exited normally but failed the required three-record
+shape: it still emitted six approximately 1 GiB records. GpuProject pre-splits
+at GPU pool/8 (1.875 GiB here), independently of PCBS. This outcome is retained
+as an invalid stress fixture. A separately named test will raise the existing
+test-only projection threshold to 3 GiB while keeping the 15 GiB device pool
+and host limits. This extra dimension must accompany any timing comparison.
 
 Evidence: `/data/pcbs-oom/pcbs-gpu-generator`, including the oracle, frozen v4
 source/jar provenance and per-case results/raw logs/independent analysis. The
