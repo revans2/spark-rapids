@@ -63,6 +63,62 @@
         "upstream_computes": 1
       },
       "scope": "Spark3.5.5;3freshJVMs;1cachepartition;producer1receiver0;receiver noWRITE/noPRODUCE,READwithouttask;1000rows/2000values;sourcecomputedonce;248hashes."
+    },
+    "E": {
+      "status": "READY FOR REVIEW",
+      "title": "Kryo/compression/encryption",
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/E/root-matrix1",
+      "checked": {
+        "valid": true,
+        "cases": {
+          "kryo": {
+            "directory": "/data/pcbs-oom/blockmanager-codec-confidence/E/root-matrix1/kryo",
+            "spark_version": "3.5.5",
+            "valid": true,
+            "kind": "heap codec",
+            "verified_hashes": 249,
+            "artifact_sha256": "3900fb3362e7af07d68222982c70e5416f04d8460a70b73ecfba8f09b10c03c1",
+            "task_ends": 44,
+            "executor_jvms": 2,
+            "application_ends": 1,
+            "task_failures": {},
+            "settings": {
+              "spark.serializer": "org.apache.spark.serializer.KryoSerializer"
+            }
+          },
+          "compression": {
+            "directory": "/data/pcbs-oom/blockmanager-codec-confidence/E/root-matrix1/compression",
+            "spark_version": "3.5.5",
+            "valid": true,
+            "kind": "heap codec",
+            "verified_hashes": 249,
+            "artifact_sha256": "9e54796cf60e1e75f0bd4907724e187ceaca60ab5cf08d5967f4e4c991c4a5e3",
+            "task_ends": 44,
+            "executor_jvms": 2,
+            "application_ends": 1,
+            "task_failures": {},
+            "settings": {
+              "spark.rdd.compress": "true"
+            }
+          },
+          "encryption": {
+            "directory": "/data/pcbs-oom/blockmanager-codec-confidence/E/root-matrix1/encryption",
+            "spark_version": "3.5.5",
+            "valid": true,
+            "kind": "heap codec",
+            "verified_hashes": 249,
+            "artifact_sha256": "639fa35219a3e4dd112b13bf877f7aab145329323391a3f0923d7a8d5f85ba9a",
+            "task_ends": 44,
+            "executor_jvms": 2,
+            "application_ends": 1,
+            "task_failures": {},
+            "settings": {
+              "spark.io.encryption.enabled": "true"
+            }
+          }
+        }
+      },
+      "scope": "Spark3.5.5;3independentconfigs;44successfultasks percase;allprimarychecks;actualLZ4/crypto paths;no combos/native/performance claim."
     }
   }
 }

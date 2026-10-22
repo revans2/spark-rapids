@@ -40,7 +40,10 @@ production change; never weaken acceptance. Other independent work may proceed.
   untouched except accounting markers; run has normalend/no taskfailures.
   Evidence: /data/pcbs-oom/blockmanager-codec-confidence/docs-native-size/.
   Focused independent review passed; no new native feature or pressure claim.
-- E: IN PROGRESS (codec worker).
+- E: READY FOR REVIEW. Spark3.5.5;3independentconfigs;44successfultasks percase;allprimarychecks;actualLZ4/crypto paths;no combos/native/performance claim.
+  Worker and independent root fresh runs passed; root read decisive code,
+  rehashed inputs and reparsed raw logs/events; separate peer review passed.
+  Evidence: /data/pcbs-oom/blockmanager-codec-confidence/E/root-matrix1/. MCP-only checkpoint confirmed.
 - C: READY FOR REVIEW. Spark4.0.1;13Success+1genuineFetchFailed;exact10000rows;2removalgates;actualBMmigration;287hashes.
   Worker and independent root fresh runs passed; root read decisive code,
   rehashed inputs and reparsed raw logs/events; separate peer review passed.
