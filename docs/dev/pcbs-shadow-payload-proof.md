@@ -137,8 +137,9 @@ plugin-prefixed concurrency overrides were absent from effective configuration;
 read-stage GPU admission high-watermarks were 7 versus 2 when capped. This is
 semaphore admission, not simultaneous kernels. PCBS registry array put/get
 counters remained zero. All fixed limits
-and default checks remain unchanged. Smaller heaps and the authorized independent
-2 GiB, automatic-concurrency and 16-thread dimensions are in progress.
+and default checks remain unchanged. The independent 2 GiB-record case and
+combined stress case remain in progress; the heap, automatic-concurrency and
+16-thread controls have passed as recorded here.
 
 512 MiB is the lowest heap tested, not a proven exact minimum. The intermediate
 8/4/2/1 GiB sizes were skipped after 16 GiB passed. Reduced heap does not reduce
@@ -154,6 +155,23 @@ failures remain in the evidence. V5 now sets/restores only that task-local key,
 checks its actual getter in every population task, and requires measured encoded
 records >95% of the 2 GiB target. The device pool and host limits remain fixed;
 this extra fixture dimension must accompany any timing comparison.
+
+The independent 16-thread case also PASSED with 32 cache partitions and twice
+the data (205,169,626,176 encoded bytes): fill 300.317 s, warmup 104.013 s,
+measured reads 94.637/95.151/94.997 s, read GC 0 ms, sampled heap peak 7.74 GiB
+and RSS 43.86 GiB. Spark retained 9,984 bytes of references; 192 payloads remained
+present, with 36 host/156 disk handles after reads. Native bulk and independent
+correctness checks passed. Stock executor gauge observed 16 active task threads
+in every read while GPU admission stayed at 2. The first sampler URL redirected;
+its failed coverage and later shutdown errors are retained, not counted as zero
+threads. Corrected samples cover all reads.
+
+This larger case is slower per byte: warmup GPU utilization averaged 9.6% versus
+40% in the smaller baseline. Spill read/materialization summed task time was
+182.749 s versus 29.728 s. That timer includes open/read/decompression/copy;
+physical disk/cache-miss attribution is not established. Only one additional
+approximately 1 GiB spill write and exact registry read counts were observed,
+so repeated payload rewrite/retry is not supported as the explanation.
 
 Evidence: `/data/pcbs-oom/pcbs-gpu-generator`, including the oracle, frozen v4
 source/jar provenance and per-case results/raw logs/independent analysis. The

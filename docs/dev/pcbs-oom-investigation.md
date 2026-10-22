@@ -200,13 +200,27 @@ population task. Independent review found a byte-size acceptance gap; runner
 now requires each measured encoded record >95% of the 2 GiB target as well as
 strict three-record row shape. V5 compiled in the idle window (3.085 s), SHA256
 828e016bd211bd894533e64eb631983e84a6bcc62213b65e89b73fbbac352637.
-Current case is gpuhash-g1-slots16-capped2-heap49152m, supervisor 146744, under
-/data/pcbs-oom/pcbs-gpu-generator. External stock executor active-thread sampling
-started with an incorrect servlet URL (HTTP302, retained missing coverage), then
-was corrected to /metrics/json/; new sampler 147311 records valid gauge samples.
-All fixed native limits and unroll/reset/fraction settings are preserved.
-Subsequent stress cases stay gated on verified predecessor results; root owns
-launches. All workers reconfirmed MCP docker_exec-only at this checkpoint.
+The local[16]/32-partition/48 GiB/1 GiB-record/capped2 case PASSED: 192 payloads,
+205,169,626,176 encoded bytes, fill 300.317 s, warmup 104.013 s, measured reads
+94.637/95.151/94.997 s, read GC 0 ms, sampled heap peak 7.74 GiB/RSS 43.86 GiB.
+Independent checks passed with no audit issues. Stock executor gauge sampled
+16 active task threads in every read; GPU admission remained 2. Initial servlet
+HTTP302 samples are retained separately; corrected /metrics/json/ sampling had
+valid read coverage, plus 18 URI errors after JVM shutdown. These are not hidden.
+Root ran new large-record acceptance fixtures PASS and independently reran the
+completed-read comparison. Warmup spill read/materialization summed task time
+was 182.749 s versus baseline 29.728 s; GPU utilization averaged 9.6% versus40%.
+This is open/read/decompression/copy time, not proof of physical disk misses.
+One additional 1 GiB write and no registry retry inflation argue against a
+rewrite storm. Page-cache pressure remains a hypothesis pending IO evidence.
+Current case is gpuhash-g2-project3g-taskconf-slots8-capped2-heap49152m, supervisor
+148160, under /data/pcbs-oom/pcbs-gpu-generator. First partition now VERIFIED:
+three 16,693,328-row payloads of 2,137,181,644 bytes each, actual executor getter
+3 GiB. Full fill/reads remain IN PROGRESS. Next combined stress, conditional on
+this independent case passing, uses local[16]/32 partitions, 2 GiB target,
+automatic GPU concurrency and the already-passing 512 MiB heap. The combined
+48 GiB variant is not implied tested. All fixed native limits/default checks
+remain unchanged. Root owns launches; workers reconfirmed MCP docker_exec-only.
 Literal zero-heap compressed spill remains open. GPU jobs/builds/tests stay
 serialized; MCP docker_exec-only confirmed by workers at this checkpoint.
 
