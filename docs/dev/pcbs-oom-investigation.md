@@ -183,12 +183,30 @@ The 1 GiB/local[8]/48 GiB automatic-concurrency case PASSED: fill 126.816 s,
 median read 13.013 s, read GC 0 ms, sampled heap peak 4.54 GiB/RSS 41.31 GiB.
 Independent checks passed, including absence of ordinary/internal inherited
 concurrency overrides. GPU admission high-watermark was 7 in read stages.
-Current case is gpuhash-g1-slots8-capped2-heap512m, supervisor 144545, under
-/data/pcbs-oom/pcbs-gpu-generator. Root chose a direct 512 MiB lower-heap probe
-after 16 GiB passed; intermediate 8/4/2/1 GiB cases are NOT implied tested. If it
-fails, work upward. All fixed native limits and unroll/reset/fraction settings
-are preserved. Subsequent stress cases stay gated on verified predecessor
-results; root owns launches.
+The direct 512 MiB heap probe PASSED: fill 126.489 s, median read 20.453 s,
+read GC 0.0404%, sampled heap peak 0.194 GiB/RSS 40.82 GiB. Exact shape/payload,
+rows/aggregates, native counters, normal exit and independent raw analysis passed.
+Intermediate 8/4/2/1 GiB cases are NOT implied tested; 512 MiB is lowest tested,
+not an exact minimum. Native limits and process memory remain substantial.
+The project3g fixture also exited normally but FAILED shape: the direct
+sc.runJob fill did not propagate the driver SQL setting to tasks. Raw population
+JobStart properties were empty; each task still reported three pre-splits.
+Root independently read SQLConf/ReadOnlySQLConf/SQLExecution propagation code.
+Lesson: verify the executor getter and the first actual record before accepting
+a large stress fixture. Both invalid-shape runs are retained, never counted PASS.
+A separately versioned v5 benchmark now sets/restores ONLY that existing local
+property around direct fill and requires its actual 3 GiB getter value in every
+population task. Independent review found a byte-size acceptance gap; runner
+now requires each measured encoded record >95% of the 2 GiB target as well as
+strict three-record row shape. V5 compiled in the idle window (3.085 s), SHA256
+828e016bd211bd894533e64eb631983e84a6bcc62213b65e89b73fbbac352637.
+Current case is gpuhash-g1-slots16-capped2-heap49152m, supervisor 146744, under
+/data/pcbs-oom/pcbs-gpu-generator. External stock executor active-thread sampling
+started with an incorrect servlet URL (HTTP302, retained missing coverage), then
+was corrected to /metrics/json/; new sampler 147311 records valid gauge samples.
+All fixed native limits and unroll/reset/fraction settings are preserved.
+Subsequent stress cases stay gated on verified predecessor results; root owns
+launches. All workers reconfirmed MCP docker_exec-only at this checkpoint.
 Literal zero-heap compressed spill remains open. GPU jobs/builds/tests stay
 serialized; MCP docker_exec-only confirmed by workers at this checkpoint.
 

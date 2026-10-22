@@ -127,6 +127,7 @@ The dataset and generation cost differ from rand, requiring a new baseline.
 | 48 GiB / capped 2 | 125.243 s | 20.486 s | 0 ms | 4.75 GiB | 42.21 GiB |
 | 16 GiB / capped 2 | 127.860 s | 20.533 s | 0 ms | 2.58 GiB | 42.18 GiB |
 | 48 GiB / automatic | 126.816 s | 13.013 s | 0 ms | 4.54 GiB | 41.31 GiB |
+| 512 MiB / capped 2 | 126.489 s | 20.453 s | 0.0404% | 0.194 GiB | 40.82 GiB |
 
 This baseline passed exact row/shape/aggregate checks and normal exit. It held
 96 payloads totaling 102,584,813,088 encoded bytes, with 37 host/59 disk handles
@@ -139,12 +140,20 @@ counters remained zero. All fixed limits
 and default checks remain unchanged. Smaller heaps and the authorized independent
 2 GiB, automatic-concurrency and 16-thread dimensions are in progress.
 
+512 MiB is the lowest heap tested, not a proven exact minimum. The intermediate
+8/4/2/1 GiB sizes were skipped after 16 GiB passed. Reduced heap does not reduce
+the configured native pool limits; RSS remains approximately 41 GiB.
+
 The first 2 GiB-target run exited normally but failed the required three-record
 shape: it still emitted six approximately 1 GiB records. GpuProject pre-splits
 at GPU pool/8 (1.875 GiB here), independently of PCBS. This outcome is retained
-as an invalid stress fixture. A separately named test will raise the existing
-test-only projection threshold to 3 GiB while keeping the 15 GiB device pool
-and host limits. This extra dimension must accompany any timing comparison.
+as an invalid stress fixture. A second fixture added the existing test-only
+3 GiB projection threshold, but also failed shape: direct RDD fill skipped SQL
+configuration propagation, so tasks still used the default. Both normal-exit
+failures remain in the evidence. V5 now sets/restores only that task-local key,
+checks its actual getter in every population task, and requires measured encoded
+records >95% of the 2 GiB target. The device pool and host limits remain fixed;
+this extra fixture dimension must accompany any timing comparison.
 
 Evidence: `/data/pcbs-oom/pcbs-gpu-generator`, including the oracle, frozen v4
 source/jar provenance and per-case results/raw logs/independent analysis. The
