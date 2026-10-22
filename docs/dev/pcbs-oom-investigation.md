@@ -62,6 +62,26 @@ incarnations, and bound obsolete successful versions in a live cache generation.
 No production edits, builds, new GPU jobs or external messages/PRs. The prior
 benchmark results remain unchanged. Architect acceptance is pending.
 
+## Narrowing the research spike (2026-10-22)
+
+READY FOR REVIEW: [recovery/store spike proposal](pcbs-shadow-recovery-spike.md).
+User challenged the breadth of the plan. Existing refcounts, stream adapters,
+primitive descriptor serialization and spill-store budgets should be reused.
+Source research identifies a candidate post-lock-release executor failure hook
+for acknowledged stale-partition invalidation before normal task retry. This
+could avoid requiring every copied descriptor to retain payload ownership.
+It is not runtime-proven; plain exceptions do not invalidate present metadata,
+and shuffle FetchFailed is not a generic cache recovery signal.
+
+Two proposed independent proofs: multi-JVM invalidation/retry/recompute plus
+driver event mapping; and existing store admission/native CPU input adapters
+with limits on/off. No production architecture or storage contract change is
+selected. Released behavior remains preserved; the shadow protocol is unreleased.
+MCP docker_exec-only confirmed for root and both workers. Root independently
+re-read decisive Spark/PCBS/spill code. Both workers reviewed the narrower
+proposal; the distinction between global host and retained-store budget tests
+was corrected. Document checks passed. No jobs/builds or production edits.
+
 ## Active shadow prototype and parallel research
 
 READY FOR REVIEW: local registry/native-cache proofs, reduced-heap/stress

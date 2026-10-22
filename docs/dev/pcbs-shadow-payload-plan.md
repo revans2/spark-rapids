@@ -3,6 +3,12 @@
 Status: READY FOR REVIEW — design proposal, not an approved production architecture.
 Prepared 2026-10-22 for issue #16362. No production implementation is included.
 
+Follow-up: the [narrow recovery/store spike](pcbs-shadow-recovery-spike.md)
+examines whether normal task retry after acknowledged cache invalidation can
+replace the stronger pre-fetch ownership requirement below. It also narrows
+CPU/serialization and host-budget work to adapters over existing mechanisms.
+That alternative is source-supported but not runtime-proven.
+
 ## Goal and evidence
 
 Keep large Parquet payloads out of Spark's Java cached objects while preserving
