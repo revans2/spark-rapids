@@ -671,6 +671,17 @@ independently of this period. Extra checks can nevertheless change reservations,
 cache behavior and GC; this sweep measures end-to-end reads, not isolated
 per-check CPU cost. All project operations/reviews remained MCP-only.
 
+Main screening complete: period1/reset1 and period2/reset1 PASS; periods4/8/16
+with reset1, and period1/reset100, all first-SQL heapOOM after accepted population.
+Six accepted JVMs independently audited; no timing is assigned to failures.
+All accepted cases fraction0.6, same cache residency/shape/resource settings.
+Root reran full analysis against raw logs and effective event settings.
+After confirming no active JVM, reset-range supervisor76742 started period1
+with reset2 then4. Passing settings still require two additional fresh JVMs
+each; generate randomized round-robin repeats only after reset screening.
+The aborted memory-fraction case is excluded and never retried. No production
+changes or external posting. Full sweep/report remains IN PROGRESS.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
