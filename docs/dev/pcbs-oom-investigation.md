@@ -916,6 +916,24 @@ allrawconfigs/source+artifacthashes/metrics/failures; stopfailedprototype
 beforeanylargercap. Onlyafter16success try32. MCPdocker_exec-only required
 onresume/handoff/checkpoint. Sourceexperiment remainsINPROGRESS.
 
+PCBS-only checkpoint: isolated16MiB build PASSED (383.661s), artifact
+/data/pcbs-oom/pcbs-only-sweep/rapids-cap16-cuda12.jar SHA256
+ba863f88d8470866bf1d55038e1d941faa5fe565b60d7bf3aae83066d0c2d83d.
+Known-value publicGPU row+columnar entry roundtrip PASSED: each1.2Mrows,
+3records, everyfield/roworder checked, effectiveglobal1GiB/default16/100.
+Worker independently checked rawmarkers/effectiveconfigs/artifactprovenance;
+lead read source, script and successful result.
+
+Targetedunit initialtest lifecycle failedbeforetests due missing spark355
+classified reactor dependency; valid=false/zeroXML. Preserved allrawfiles as
+unit-cap16-dependency-failure*, with relocationmetadata unit-cap16-retry.json.
+Root+worker verified parentPOM attachesclassifier atpackage. Retrying same
+CachedBatchWriterSuite selector throughpackage -pltests -am, no skips orPOM
+changes; supervisor96226. Acceptance requires positive executedXMLtestcount,
+zeroerrors/failures, rawsuccess andbefore/after sourceHEAD/SHA tiedtobuild.
+Timedbenchmark notstarted whilechecks outstanding. Stopanyfailedprototype
+beforelargercap. MCPdocker_exec-only confirmed atcheckpoint.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
