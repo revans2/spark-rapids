@@ -1003,6 +1003,43 @@ No8MiB test was needed; no larger PCBS-only cap is scheduled.
 MCP docker_exec-only confirmed throughout; required on every future resume,
 checkpoint and worker handoff. User/architect acceptance remains pending.
 
+## Whole-RDD cache ownership investigation
+
+READY FOR REVIEW: source investigation, not an implemented ownership design.
+User clarified the owner must be the entire cached RDD; data must survive
+memory-reference eviction and remain reloadable. Initial investigation focused
+too heavily on AutoCloseable. That hook describes memory-object cleanup, not
+the requested payload lifetime; the corrected record centers the whole RDD.
+
+Verified: explicit unpersist and ContextCleaner GC cleanup both reach
+SparkContext.unpersistRDD and post SparkListenerUnpersistRDD(rddId).
+Memory eviction does not post that event. A driver SparkListener can observe
+whole-RDD retirement; an ExecutorPlugin cannot directly receive the event or
+BlockManager's RemoveRdd RPC. Executor polling through PluginContext.ask can
+relay driver state; push needs a separate transport/internal RPC path.
+Existing event delivery is asynchronous and can drop on queue overflow.
+
+Spark persists a mapPartitions statistics wrapper after PCBS returns its RDD.
+Payload ownership must map to that persisted wrapper's ID, not blindly to the
+serializer-output ID. GPU scan exposes the actual cached RDD; CPU/filter/AQE
+population paths and race-free registration still need a design. Driver
+getPersistentRDDs is logical registration/reconciliation input, while storage
+stats and block locations report physical copies and may be stale.
+
+Cross-executor reads, replicas and migration serialize Spark cache blocks.
+A token-only payload needs independent remote lookup/transfer or self-contained
+transport bytes. Retiring an RDD needs active/in-flight read protection,
+generation handling, late-registration handling and executor coordination.
+Keeping payloads until whole-RDD retirement can retain otherwise unreachable
+payloads longer; it avoids relying on per-batch serialized-byte destruction.
+
+Evidence and open questions: docs/dev/pcbs-rdd-cache-ownership.md. Lead read
+decisive source; independent workers traced cleanup and remote paths and
+reviewed the report. Released Spark3.5.3/3.5.5 persistence and existingPCBS
+contracts remain unchanged. Proposed protocols are unimplemented; no runtime
+prototype or new benchmark claimed. MCP docker_exec-only confirmed throughout
+and required at every resume/checkpoint/delegation. No source/config changes.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
