@@ -824,6 +824,15 @@ PCBS-only code experiment remains conditional and has not started.
 Reportcurrent32/16(and8ifneeded)results alongside prior64/512 failures and
 the previous1GiB1/1 baseline, clearly distinguishing configurations.
 
+Ordering correction: user wants small first, then work upward;32MiB remains
+authorized after a smaller success. Lead unnecessarily launched32 first.
+Stopped supervisor85141/Java85144 andmonitor85143; verified allgone/GPUempty
+before cleanup of only that privatecache. small32-stopped.json marks
+ABORTED_EXCLUDED, no result. Retain logs/manifest, do not classify asOOM.
+Start16MiB/default now; ifPASS test32 next, ifFAIL test8. Repeats of a passing
+candidate still required for performance comparison. No old matrix resumes.
+MCP-only confirmed; conditionalPCBSfollow-up remains unstarted.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
