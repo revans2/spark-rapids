@@ -3,6 +3,30 @@
 Status: READY FOR REVIEW. Reproduction and controls verified; independent
 review completed. No production fix selected. Architect acceptance pending.
 
+## Current architecture priorities (read first)
+
+Short-term options must work with existing, UNMODIFIED Spark. Modifying Spark
+is the LAST RESORT, not a short-term solution: the user estimates4–5years for
+broad rollout. Include a Spark-change option when comparing approaches, clearly
+label its dependency and deployment horizon; do not omit it if it is the only
+known option, and do not promote it as satisfying the short-term constraint.
+
+Work as coordinator: delegate bounded discovery and keep full traces in worker
+notes; request compact findings/citations. Independently read decisive code and
+verify integrated conclusions without repeatedly importing entire source files.
+Preserve priorities here and in every relevant worker handoff after resets.
+All project actions remain MCP docker_exec-only.
+
+Current discussion: user proposes a shadow payload manager. Spark would retain
+small cached metadata/references; plugin-owned payloads would spill off-heap to
+disk, resolve locally/remotely across executors, and remain alive across Spark
+memory eviction. Whole-RDD retirement on the driver would coordinate shadow
+cleanup. This is an unimplemented architecture candidate, not final acceptance
+or authorization to change production behavior. Association with actual cached
+RDD IDs, remote recovery and in-flight ownership remain to be specified.
+Existing Spark/PCBS released contracts must be preserved. Original investigation
+scope and chronological evidence follow below.
+
 ## Scope and acceptance
 
 Reproduction only, timeboxed through tomorrow morning (America/Chicago; exact
@@ -1104,6 +1128,32 @@ Lead independently read construction/field/class declarations and previously
 verified RemoveRdd dispatch; worker checked construction order, virtual dispatch
 and matching3.5.3 code. Released contracts unchanged. MCP docker_exec-only
 confirmed; no source/config/runtime changes. Investigation READY FOR REVIEW.
+
+## Shadow payload-manager discussion checkpoint
+
+User's proposed separation is coherent in principle: Spark owns metadata
+partition blocks; a plugin store owns spillable payloads, local/remote lookup
+and lifetime until whole-RDD retirement. No runtime design has been implemented.
+Worker reviewed this proposal against the previously verified source; lead
+checked its claims against the decisive code already read.
+
+Replacement is difficult because construction is hardcoded and precedes plugin
+initialization. Directly subscribing to existing BlockManager RPCs also lacks
+a plugin API; this is a separate limitation from startup ordering. Driver
+onUnpersistRDD is an observation after removal request initiation/completion
+according to blocking mode, not interception of the executor RemoveRdd RPC.
+
+Unresolved: actual persisted wrapper RDD association; separate reader/transfer
+leases; late registrations and cleanup reconciliation; owner lookup/recovery
+when a payload executor disappears but Spark metadata remains. Metadata replica
+creation does not replicate plugin payloads automatically. Listener delivery
+alone is not a reliable cleanup acknowledgment. A Spark-change factory/lifecycle
+hook remains an explicitly labeled LAST RESORT alongside unmodified-Spark
+options, per the priority recorded at the top. No production option selected.
+
+MCP docker_exec-only confirmed by lead/worker. Documentation-only checkpoint;
+released contracts unchanged, proposed architecture unimplemented/unreleased.
+READY FOR REVIEW; no implementation or runtime verification claimed.
 
 ## Review and handoff
 
