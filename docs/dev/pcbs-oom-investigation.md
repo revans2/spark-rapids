@@ -62,6 +62,28 @@ incarnations, and bound obsolete successful versions in a live cache generation.
 No production edits, builds, new GPU jobs or external messages/PRs. The prior
 benchmark results remain unchanged. Architect acceptance is pending.
 
+## Candidate RDD lifecycle override (2026-10-22)
+
+Source candidate, NOT compile/runtime-proven: user asks whether RDD persist and
+unpersist can be overridden. Spark3.5.5 public persist(level), persist(), cache()
+and unpersist(blocking) are non-final. Overriding only the PCBS producer misses
+the later persisted statistics wrapper. However mapPartitionsInternal (RDD888)
+is also non-final, private[spark], and normally constructs MapPartitionsRDD.
+A producer subclass in the org.apache.spark namespace could override that
+factory to return a MapPartitionsRDD subclass preserving Spark's supplied
+statistics function and partitioning flag, with lifecycle overrides on the
+actual persisted wrapper. This is a concrete stock-Spark proof candidate;
+no reflection or Spark source modification has been selected.
+
+Explicit builder clearCache calls virtual RDD.unpersist, but ContextCleaner
+calls SparkContext.unpersistRDD directly (ContextCleaner225), bypassing the
+override. Driver unpersist observation/reconciliation remains necessary for
+that path. Do not claim this mechanism catches block eviction, migration or
+all cleanup. Preserve released statistics/lineage/storage semantics; the new
+subclasses are unreleased. Root and worker use MCP docker_exec only and have
+independently read decisive code. No production edits, compile or runtime jobs.
+Prefer recovery WITHOUT task failure; task failure remains a fallback.
+
 ## Narrowing the research spike (2026-10-22)
 
 READY FOR REVIEW: [recovery/store spike proposal](pcbs-shadow-recovery-spike.md).
