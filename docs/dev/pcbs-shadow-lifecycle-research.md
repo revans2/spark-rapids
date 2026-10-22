@@ -215,6 +215,59 @@ without deleting the winning attempt.
 
 ## Ownership and retirement
 
+### Reader protection before descriptor lookup
+
+Spark can retain an independent serialized copy before any shadow lookup or
+descriptor object exists. In the normal remote path,
+BlockTransferService.fetchBlockSync (:85–103) copies incoming bytes into a
+requester-owned NioManagedBuffer. BlockManager (:1212–1218) explicitly checks
+that fetched data is not a BlockManagerManagedBuffer. getRemoteValues
+(:1060–1065) then returns a lazy deserialization iterator, without a local
+block read lock. SerializerManager (:204–213) and Serializer.asIterator
+(:165–178) defer reading individual objects until iteration.
+
+The source-side read lock protects the transfer, not later decode:
+MessageEncoder (:88–91) hands buffer ownership to MessageWithHeader, whose
+deallocate (:131–135) releases it; BlockManagerManagedBuffer.release
+(:61–66) unlocks the source block. Thus the receiver can hold valid copied
+descriptor bytes, pause before readObject, and resume after unpersist has
+removed the source cache and a shadow-retirement protocol has deleted the
+payload. Original self-contained PCBS bytes would still contain that payload;
+an ID-only copy does not. This is a source-supported race, not a runtime test.
+
+A lease acquired only in decoder lookup is too late for that interval.
+Acquiring it in custom readObject moves protection earlier but still starts
+after the serialized copy arrived. A transient object lease with Cleaner
+fallback can protect a live descriptor object, but does not track serialized
+copies or guarantee prompt cleanup. Java readObject also does not cover every
+supported serializer. A transfer/serialized-copy handoff would need its own
+acquire/install acknowledgments and cleanup of discarded, never-deserialized
+copies; custom writeObject alone has no callback when Spark drops raw bytes.
+
+A conservative task/namespace retention interval is another stock-Spark
+candidate. Task.scala:138 invokes executor-plugin onTaskStart before
+runTaskWithListeners (:141); normal ResultTask RDD deserialization and cache
+iteration occur later (:85–93). A synchronous admission there could precede
+normal cache fetch. However ExecutorPlugin.java:68–70 explicitly suppresses
+hook exceptions: throwing from that callback alone does not stop the task.
+Any candidate needs explicit admission state and fail-closed use checks,
+coverage for required plugins/read paths, and retirement/admission ordering.
+
+Asynchronous JobStart/TaskStart listeners are not a prefetch fence.
+DAGScheduler (:1374–1377) posts JobStart and proceeds to submit the stage;
+listener delivery can lag or drop. JobEnd is not proof all operations stopped:
+failure cleanup requests cancellation and posts JobEnd without joining every
+task (:2813–2858); TaskSetManager (:579–581) separately tracks zombie tasks
+until runningTasks becomes zero. Active transfers, canceled/speculative
+attempts, executor loss and objects retained beyond a task need explicit
+coverage. Coarse retention can delay reclamation substantially. A TTL or
+missed heartbeat alone does not prove a paused reader is finished.
+
+These are alternative proof obligations, not a selected lease protocol or a
+claim that stock Spark cannot support one. Full source trace:
+ /data/pcbs-oom/ownership-research/cleanup/reader-protection-gap.md.
+
+
 The minimum separate ownership states are cache retention and active operation
 retention. Dropping a Java metadata wrapper or evicting Spark's memory copy is
 not whole-RDD retirement: its serialized disk reference may be read later.

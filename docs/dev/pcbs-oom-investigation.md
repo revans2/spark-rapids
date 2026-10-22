@@ -97,9 +97,24 @@ each encoded 1.2M ordered four-Long rows into one 19,203,662-byte payload and a
 127-byte serialized descriptor. DISK_ONLY reload and explicit Java serialization
 preserved IDs, rows and payload length; all decoded values/order passed. Root
 independently read the check source, raw markers and provenance result. GPU was
-released afterward. Large workload and heap-free GPU path remain unverified.
+released afterward. The first large workload subsequently PASSED as below;
+the heap-free GPU path remains unverified.
 Evidence: /data/pcbs-oom/pcbs-shadow-sweep/entry-shadow-array-{command,result}.json
 and entry-shadow-array.log. All project actions use MCP docker_exec only.
+
+First large registry proof PASSED: original 1 GiB/six-record layout, 48 GiB
+heap, local[8], unroll/reset 16/100. Fill 246.403 s; warmup 81.244 s; measured
+reads 74.095/73.939/76.581 s. All 801,279,744 rows/16-column aggregate checks
+passed, five checkpoints preserved 96 payloads/102,579,664,416 bytes, and the JVM
+exited 0 without heap OOM. Spark retained 4,992 bytes of references; shadow store
+had 39 host/57 disk payloads after fill and 37 host/59 disk after reads. Root
+independently verified raw evidence and unchanged artifact hashes. Full report:
+pcbs-shadow-payload-proof.md; evidence stage1-independent-verification.json.
+Read GC 3.90%; sampled heap peak 35.15 GiB is occupancy, not a live-set estimate.
+735 recoverable pinned-pool capacity messages were preserved, not tuned away.
+Stage 2 native GPU writer/reader is now authorized and IN PROGRESS in the isolated
+worktree. Original artifacts remain frozen. GPU tests remain serialized with
+builds; all project operations remain MCP docker_exec-only.
 
 Clarified accounting contract: SQL cache accumulators retain exact rows and
 encoded Parquet payload bytes for SQL/AQE statistics. BlockManager separately
@@ -122,6 +137,12 @@ producer. Existing AQE preparation runs before cache-stage submission. This
 avoids arbitrary transitive ancestry for that SQL path, but eager construction,
 namespace binding, CPU/direct-RDD bypasses and publication timing need runtime
 proof. Metadata research records this option and its independent focused review.
+Source review also found a pre-lookup reader race: remote Spark cache bytes can
+already be copied into the receiver before lazy descriptor deserialization.
+After source transfer releases its block lock, unpersist could delete a hidden
+payload while that copy still awaits decoding. Lookup/readObject leases alone
+do not cover the interval. Lifecycle research records the race and unproven
+coarse task-admission/transfer-handoff alternatives; TTL alone is not a proof.
 
 ## Scope and acceptance
 
