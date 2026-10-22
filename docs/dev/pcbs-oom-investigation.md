@@ -765,6 +765,14 @@ smoke JVM ended. Retain negative default64 result; no read timing assigned.
 Only current external runner/analyzer adapted; smoke validates actual splits.
 MCP docker_exec-only reaffirmed for root and worker; no resource knobs changed.
 
+Discussion checkpoint: user requested back-of-envelope memory math before
+continuing. Supervisor84071 SIGSTOP verifiedTs; current512/default JVM84081
+allowed tofinish, no subsequent queued launches. Worker instructed hold,
+MCP-only confirmed. discussion-pause.json records resume/timing boundary.
+Current phase timings remain usable; supervisor wall_s includes pause and
+must not be compared. Resume queued work after discussion indicates continue.
+No PCBS experiment started. Default64 failed read despite successful fill.
+
 User follow-up: current sweep changes only global batchSizeBytes, not PCBS
 code. Finish it first. User wants a subsequent PCBS-only splitting experiment
 only if the smaller-target approach works without crashes. Keep global GPU
