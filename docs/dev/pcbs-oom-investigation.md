@@ -608,11 +608,14 @@ closure deserialization. Normal task execution can subsequently access cached
 blocks, and changes to cache behavior/GC can affect application performance
 indirectly. Spark3.5.3/3.5.5 share this code. No production changes.
 
-Screening evidence: /data/pcbs-oom/unroll-sweep, supervisor71952.
+Screening evidence: /data/pcbs-oom/unroll-sweep; original supervisor71952 was
+stopped. Current approved screen supervisor74128 runs screen-approved.
 Fresh JVMs retain exact same95.535GiBencoded cache,16partitions,sixrecords each,
 48gheap/local8,GPU2fixed15g,host40g,pinned2g,ParallelGC4,no harness GC.
 Source/benchmark/plugin hashes unchanged. Main periods1/2/4/8/16,reset1,
-memoryfraction0.6. Contrast period1/reset100/fraction0.6. Memory fraction is fixed0.6 for all
+memoryfraction0.6. Reset comparisons use period1 with reset2/4/100 (reset1 is in main sweep).
+Reset2/4 are queued under reset-range-jobs.json after the resumed main screen.
+Memory fraction is fixed0.6 for all
 accepted cells. Original interleaved plan in screen-jobs.json included an
 unauthorized fraction0.4 comparison; see scope correction below. Remaining
 approved cells are in screen-approved-jobs.json.
@@ -648,6 +651,25 @@ period1/reset1PASS; period4/reset1heapOOM. Resume remaining periods2/8/16reset1
 and period1/reset100 under screen-approved. Runner now asserts fraction==0.6
 and sets the Spark property literally to0.6. No other parameter experiments
 without prior discussion. Worker notified; MCP-only requirement reaffirmed.
+
+Checkpoint: approved p1/reset1 and p2/reset1 both passed warmup+3scans; medians
+37.383596457s and39.628477960s, measured GC24.703% and28.953%. p4/reset1 failed
+JavaheapOOM on firstSQLscan. Allfraction0.6, exact96records, totalencoded
+102,579,664,416bytes, same23.884GiBmemory/71.651GiBdisk. Rootanalysis and
+independentworker verified raw events, exact scan/storage iteration IDs,
+SparkEnvironmentUpdate effective settings/JVMflags, source/jar/pluginhashes.
+These are single screening JVMs, not final performance estimates. Current
+p1/reset100 screen follows; p8/p16reset1 remain pending. reset2/4 atperiod1
+queued for the same two-parameter sweep; no resource or other settings vary.
+
+Root independently read Executor task deserialization, ResultTask and
+ShuffleMapTask closure deserialization. None consults the unroll period.
+Root sha256 comparison confirms upstreamSpark3.5.3/3.5.5MemoryStore files
+identical (57cf599b18d239c079cea63c8a39b3cebafb39dc67e2988e93758a74a4269e8a).
+SizeTracker.estimateSize is O(1); its object-size sampling happens on updates
+independently of this period. Extra checks can nevertheless change reservations,
+cache behavior and GC; this sweep measures end-to-end reads, not isolated
+per-check CPU cost. All project operations/reviews remained MCP-only.
 
 ## Review and handoff
 
