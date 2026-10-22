@@ -73,6 +73,19 @@ All use MCP docker_exec ONLY and confirm at handoff/checkpoint/resume.
 No production fix, new public configuration, Spark patch, external post or PR
 is authorized. Any Spark-change option remains explicitly labeled LAST RESORT.
 
+### Conditional stress dimensions
+
+User additionally authorized on 2026-10-22, only after the first proof passes:
+compare a 2 GiB global batch target, removal of explicit GPU concurrency caps,
+and local[16]. Change dimensions independently before combining them. Keep
+roughly 6 GiB per cache partition; use 32 partitions for two waves at 16 threads.
+Measure actual emitted batches and effective concurrency, not just targets.
+Keep the 40 GiB host off-heap limit ENABLED, the 2 GiB pinned pool and 15 GiB GPU
+pool throughout; spill payloads to disk rather than allow unbounded native
+retention. Check scratch capacity before each fresh JVM and preserve failures.
+Reduced-heap testing remains conditional on the heap-free GPU path passing.
+No memory-fraction change or production-default change is authorized.
+
 ### Shadow proof checkpoints
 
 On 2026-10-22, isolated prototype 98e5bcc897 built successfully; frozen artifact
