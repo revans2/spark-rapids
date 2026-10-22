@@ -26,6 +26,20 @@ candidate. SQL cache plan reuse can remain. The custom actual statistics-wrapper
 RDD lifecycle/compute interception is a concrete source candidate, not a tested
 implementation. Prefer recovery WITHOUT task failure; task retry is a fallback.
 
+Latest proposed refinement: keep genuine small scheduler tokens under the actual
+owner's RDDBlockIds in regular BlockManager, while own custom RDD compute serves
+all data through the native cache manager. DAGScheduler requires BOTH a non-NONE
+getStorageLevel result and regular BM locations. The virtual getter can report
+the requested level without setting RDD's internal field through super.persist,
+so final iterator can still bypass regular data caching. Tokens must represent
+committed, resolvable partitions; native host-to-disk spill is not eviction.
+Token removal and payload removal need version-aware coordination; ordinary
+Spark marker replication/decommission does not automatically copy native data.
+This is an uncompiled stock-Spark source candidate, not a selected production
+protocol or permission to implement. Independently read by root and delegated
+MCP-only audit; no runtime proof. A real-shuffle test must distinguish scheduler
+cache awareness from a local no-shuffle cache-hit benchmark.
+
 Bypassing super.persist leaves RDD's internal storage level NONE, so its final
 iterator calls compute instead of Spark BlockManager.getOrCompute. Own compute
 can implement local/remote native-cache lookup and parent computation on a miss,
