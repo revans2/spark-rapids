@@ -934,6 +934,24 @@ zeroerrors/failures, rawsuccess andbefore/after sourceHEAD/SHA tiedtobuild.
 Timedbenchmark notstarted whilechecks outstanding. Stopanyfailedprototype
 beforelargercap. MCPdocker_exec-only confirmed atcheckpoint.
 
+PCBS-only16MiB performance checkpoint READY FOR REVIEW:
+Three of three fresh JVMs passed; median fill273.718999901s, median read
+45.197849639s, median readGC8.8002816008%, maxpostFullGC31.14453125GiB.
+Actual390records/partition, largest16,697,307bytes, encoded102,588,907,584bytes.
+All four scans/JVM returned exact801,279,744rows. Targeted17tests and both
+known-value writerentry checks passed. Root reran analysis+rawchecker and
+worker independently audited evidence. Prototype verificationcommit97cd111bae.
+
+User-authorized upward32MiB follow-up now IN PROGRESS, prototype source
+b65451d391: only16->32 budgetconstant plustracker; global1GiB/default16/100,
+fraction0.6/resources/data unchanged. Frozenpcbs-source-cap32.scala; build
+supervisor100154, no concurrentbenchmark. Entry/unit checks mustpassbefore
+three fullJVMs. Stopfailedprototype; no64MiBprototype scheduled.
+ExistingCPU/API/format/ownership contracts preserved; isolatedchangedlayout
+is not a productiondefaultdecision. EageroutputList/whole-rowmaterialization
+remain. Actualscanplan has no coalescer beforepartialaggregate. MCPdocker_exec
+only confirmed and required onresume/delegation/checkpoints.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
