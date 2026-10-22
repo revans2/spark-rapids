@@ -595,6 +595,46 @@ experiment is authorized. Clarified that bounded serialization chunks meant
 bytes within one CachedBatch object, not fragments as separate RDD records;
 the latter would introduce ordering/predicate concerns and is not proposed.
 
+## Follow-up: unroll-period performance sweep
+
+Status IN PROGRESS. User requested scope verification (including task Java
+deserialization), a range of periods, comparison with other passing settings,
+and numbers suitable for the issue/Slack. Do not post externally.
+
+Lead and worker verified sole runtime lookup of UNROLL_MEMORY_CHECK_PERIOD in
+MemoryStore.putIterator. It governs both putIteratorAsValues and
+putIteratorAsBytes, not Executor task-envelope or ResultTask/ShuffleMapTask
+closure deserialization. Normal task execution can subsequently access cached
+blocks, and changes to cache behavior/GC can affect application performance
+indirectly. Spark3.5.3/3.5.5 share this code. No production changes.
+
+Screening evidence: /data/pcbs-oom/unroll-sweep, supervisor71952.
+Fresh JVMs retain exact same95.535GiBencoded cache,16partitions,sixrecords each,
+48gheap/local8,GPU2fixed15g,host40g,pinned2g,ParallelGC4,no harness GC.
+Source/benchmark/plugin hashes unchanged. Main periods1/2/4/8/16,reset1,
+memoryfraction0.6. Contrast period1/reset100/fraction0.6 and
+period16/reset1/fraction0.4. Predeclared interleaved order in screen-jobs.json.
+Periods8/16 have identical check points for six records: first and final;
+period4 checks records1/5,period2 checks1/3/5,period1 everyrecord.
+
+One warmup plus3timed full SQL scans per fresh JVM. Screen then repeat each
+passing setting twice in fresh JVMs, shuffled per round with fixed seed16362.
+Aggregate medians of per-JVM medians; scans within one JVM are correlated.
+Retain failures in later repeats, do not silently select only passing runs.
+Fraction0.4 is a separate headroom/residency comparison, not an isolated
+check-frequency measurement. Absolute read time includes disk/cache/GC changes.
+
+Acceptance: exact16unique cachepartitions/96records/measured batchsizes,
+801,279,744rows in everySQLscan, finite repeatable sums,all5storagecheckpoints,
+exit0+complete or explicit postpopulation JavaheapOOM. Park unexpected errors,
+population OOM, wrongshape,timeoutorinsufficientresources. Diagnostic heap dumps
+disabled for this sweep because four original dumps already establish the path;
+preserve JVM/GC/eventlogs,telemetry,commands,hashes,exitcodes. Timeout1800s/cell,
+scratchfreeguard140GiB; only one JVM at a time,remove only own scratchcache.
+MCP docker_exec-only for ALL work/reviews; repeat at handoffs/checkpoints.
+Existing released serializer/config contracts remain unchanged. Results and
+ready-to-paste report pending; no claims of statistical OOM probability.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
