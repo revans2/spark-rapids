@@ -1,7 +1,7 @@
 # PCBS heap OOM investigation (#16362)
 
-Status: READY FOR REVIEW — executable scheduler-token research, newer-version
-audit and upstream storage API proposal verified. Prior reproduction/prototype
+Status: READY FOR REVIEW — bounded BlockManager codec/native lifetime/recovery
+research, scheduler-token research, newer-version audit and upstream proposal verified. Prior reproduction/prototype
 results remain READY FOR REVIEW. Production implementation and architect
 acceptance are pending.
 
@@ -21,7 +21,9 @@ All project actions remain MCP docker_exec-only.
 
 ## Active BlockManager codec integration spike (2026-10-22)
 
-IN PROGRESS. Architect authorizes starting the focused research spike, including
+READY FOR REVIEW for the bounded mechanisms documented below. Full native
+backend implementation and architect acceptance remain pending. Architect
+authorized the focused research spike, including
 isolated Spark research source overlays. This does not authorize production
 Spark/plugin changes, public configuration, PRs or external posting. The earlier
 no-Spark-patch wording below describes the previous token spike only.
@@ -56,6 +58,51 @@ Native cap caution: direct factory uses trackNoSpill; enabled RAPIDS total host
 limits are required for the bounded native fixture. Full native residency/status
 integration remains distinct from AutoCloseable lifetime proof. Both workers
 confirm MCP-only at checkpoint; no production changes or Spark pool adoption.
+
+Verified mechanism checkpoint: root independently compiled/ran the bounded
+heap-codec fixture on Spark 3.5.5 and 4.0.1 (44 successful tasks each) and native
+lifetime fixture on 3.5.5 (4 successful tasks). All used two executor JVMs and
+one normal ApplicationEnd, with zero unexpected task failures. Separate root
+evidence audit rechecked 249/282/250 source/runtime/artifact hashes. Reviewed
+research code and [results](pcbs-blockmanager-codec-spike.md) are READY FOR REVIEW.
+No production files changed; tiny Spark source overlays live only in disposable
+research outputs. Native uses actual RAPIDS SpillableHostBuffer, 64 MiB HostAlloc
+cap and no Spark OFF_HEAP. Balanced native owners, payload stores empty and spill
+files deleted; only framework bounce memory remains until explicit shutdown.
+
+Scope qualifications remain explicit: no full native backend/accounting/status,
+bounded large transfers, native failure/admission/cancellation coverage or
+production PCBS/SQL native pipeline. Primary blocking-reader test is local
+removeRdd. Replica reads have no active task context but executors also produced
+other partitions. Full current/default compatibility is a required contract,
+not inferred solely from the small fixture. Source-reviewed newer Spark than
+4.0.1 is not runtime tested. Separate genuine recovery/decommission extension
+has now passed independent root runs and focused peer review as recorded below.
+
+Recovery verification finding: first independent root recovery run at
+/data/pcbs-oom/blockmanager-codec-spike/root-recovery355 FAILED the required
+fetch-failure-path assertion. It removed four physical shuffle files and returned
+correct rows but recorded no FetchFailed (10 successful tasks). Worker success
+is therefore not accepted as recovery proof yet. Shutdown executor failures
+followed the failed assertion; they are not the initial cause. Both base jars
+were checked and contain no stale recovery classes. Worker is investigating
+the fault-injection preconditions without weakening acceptance. Root and worker
+then identified a fixture bug: executor-side code forwarded addressless
+spark-client storage endpoint refs, which can resolve on the wrong connection.
+NettyRpcEnv.scala around 520 explicitly prohibits sharing these refs with third
+parties; root read that contract and the client rebinding/routing implementation.
+The corrected fixture uses a routable driver fault-injection endpoint to call
+existing master.removeRdd(blocking=true), checks all locations empty, and only
+then permits parent reads. This is test control, not a new recovery protocol.
+The repaired root run passed with one genuine FetchFailed and thirteen successful
+tasks, plus exact block migration. Final source-guard root repeat also PASSED at
+/data/pcbs-oom/blockmanager-codec-spike/root-recovery-final355; source/runner
+snapshots match the committed versions. Root independently audited final raw
+worker gates, task events, physical deletion and input/artifact hashes. Focused
+peer review found no remaining blocker within scope. This extension is READY
+FOR REVIEW, not architect-accepted DONE.
+Retain failed evidence; do not infer Spark recovery instability from this test
+bug. Primary/native independent passes remain valid. MCP-only throughout.
 
 ## Accepted upstream revision and next proof (2026-10-22)
 
@@ -96,7 +143,8 @@ Cover serialized
 unroll, partial admission, disk, multi-JVM remote/replica context, mixed caches,
 existing recovery and blocking-reader cleanup. A core-hook prototype belongs
 to isolated long-term Spark research, not the unmodified-Spark short-term path.
-User asked which further proofs are needed; no new Spark prototype is started.
+This was the proposed next proof before the architect authorized the active
+spike above; bounded compiled/runtime results are now linked there.
 
 Two focused peer reviews verified the narrower revision after a historical
 backend-override wording correction. Evidence links, prior art, a reuse diagram

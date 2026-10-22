@@ -269,8 +269,12 @@ semantics. Explicitly measure and distinguish small control/staging allocations.
 If this needs more than existing storage/disposal hooks, demonstrate the missing
 property before proposing a native-entry/store extension.
 
-No new prototype in this section has been run. Existing large PCBS and token
-proofs remain useful controls and need not be repeated wholesale.
+The bounded [BlockManager codec spike](pcbs-blockmanager-codec-spike.md) now
+passes on Spark 3.5.5 and 4.0.1; a separate RAPIDS native lifetime fixture passes
+on 3.5.5. These establish the recorded codec/ownership mechanisms, not the full
+native storage API or all criteria above. Full accounting, bounded transfers
+and native failure paths remain open. Existing large PCBS and token proofs
+remain useful controls and need not be repeated wholesale.
 
 ## Upstream plan and decisions
 
@@ -305,6 +309,8 @@ obsolete sketches can be replaced directly without compatibility adapters.
 The previous driver/provider commit protocol and Deferred task mechanism are
 removed from this proposal, not retained as alternate requirements.
 
-This revision is source-verified and reviewable, not compiled Spark integration.
-The companion [version audit and token results](pcbs-token-cache-spike.md)
-remain qualified: later versions were source-inspected, not runtime-tested.
+The API remains a proposal. Bounded compiled research overlays and native
+lifetime fixtures are recorded separately; they do not establish production
+integration or a complete native backend. The companion
+[version audit and token results](pcbs-token-cache-spike.md) retain their own
+scope; the newer codec runtime results cover 3.5.5 and 4.0.1 only.

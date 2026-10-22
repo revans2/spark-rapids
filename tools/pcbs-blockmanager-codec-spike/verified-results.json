@@ -1,0 +1,53 @@
+{
+  "valid": true,
+  "runs": [
+    {
+      "directory": "/data/pcbs-oom/blockmanager-codec-spike/root-acceptance355",
+      "spark_version": "3.5.5",
+      "valid": true,
+      "kind": "heap codec",
+      "verified_hashes": 249,
+      "artifact_sha256": "1e22c54a5eb459b2c75e585ba220c0cb2631b60b587b4e3f4b28e29ae4a76fa5",
+      "task_ends": 44,
+      "executor_jvms": 2,
+      "application_ends": 1,
+      "task_failures": {}
+    },
+    {
+      "directory": "/data/pcbs-oom/blockmanager-codec-spike/root-acceptance401/run",
+      "spark_version": "4.0.1",
+      "valid": true,
+      "kind": "heap codec",
+      "verified_hashes": 282,
+      "artifact_sha256": "ab1618319ea9b3e7c627ca9726758346cbf13f610cf72243307d04a1cba8e18e",
+      "task_ends": 44,
+      "executor_jvms": 2,
+      "application_ends": 1,
+      "task_failures": {}
+    },
+    {
+      "directory": "/data/pcbs-oom/blockmanager-native-spike/root-final-overlay",
+      "spark_version": "3.5.5",
+      "valid": true,
+      "kind": "native lifetime",
+      "verified_hashes": 250,
+      "artifact_sha256": "f77b2a339df6c17bc391fc18795d7dde8fffb26fa8cbca9a2e6734dfb4a232c9",
+      "task_ends": 4,
+      "executor_jvms": 2,
+      "application_ends": 1,
+      "task_failures": {}
+    },
+    {
+      "directory": "/data/pcbs-oom/blockmanager-codec-spike/root-recovery-final355",
+      "spark_version": "3.5.5",
+      "valid": true,
+      "kind": "genuine recovery and BlockManager migration",
+      "verified_hashes": 8,
+      "task_end_reasons": {
+        "Success": 13,
+        "FetchFailed": 1
+      },
+      "application_ends": 1
+    }
+  ]
+}
