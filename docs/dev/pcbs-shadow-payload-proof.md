@@ -98,13 +98,43 @@ This is **not an end-to-end zero-heap payload path**. Source audit found:
   encryption checks; neither was changed for these comparisons.
 - Registry counters prove the PCBS payload-array paths were avoided, not that
   all components avoided heap. Significant temporary allocation remains during
-  population. Per-row index boxing is a source-level possibility, not measured
-  allocation attribution. Heap peaks are occupancy, not retained payload size.
+  population. An untimed generation-only JFR probe subsequently attributed most
+  weighted allocation samples to boxed loop indices in GpuRand (see below).
+  Heap peaks are occupancy, not retained payload size.
 
-These bounded spill buffers differ from batch-sized retained arrays, so a
-smaller-heap sweep remains useful. A 16 GiB control is running with the original
-generator and settings. A separate GPU-hash generator is being prepared to test
-GPU-only value generation; it changes the dataset and needs a separate baseline.
+These bounded spill buffers differ from batch-sized retained arrays. Reducing
+only heap to 16 GiB also passed: fill 215.200 s, median read 20.356 s, read GC
+0.0098%, maximum sampled heap occupancy 5.38 GiB and RSS 45.95 GiB. Row layout,
+payload totals, native routing, aggregates and JVM exit passed independent checks.
+
+The untimed JFR probe generated and aggregated six source partitions without
+caching. All 1,239 Integer samples had the same allocation chain through
+Integer.valueOf, Scala Range.foreach and GpuRand.doColumnarEval. Their sample
+weights were 12.094 GiB of 13.144 GiB total. These weights are estimates, not an
+exact allocation census or attribution of all cache-fill allocation. No task-
+reported Spark or RAPIDS spill occurred in this probe; background activity is
+not excluded by task metrics.
+
+## GPU-generated workload and stress sweep
+
+A separate fixture uses salted xxhash64, a 53-bit mask, cast and division to
+produce sixteen Double columns. Its oracle verified 160,000 CPU/GPU values by
+raw bits, GPU-only computational expressions and 128 native bytes per row.
+The dataset and generation cost differ from rand, requiring a new baseline.
+
+| Heap | Fill | Median full read | Read GC | Peak sampled heap | Peak RSS |
+|---|---:|---:|---:|---:|---:|
+| 48 GiB | 125.243 s | 20.486 s | 0 ms | 4.75 GiB | 42.21 GiB |
+
+This baseline passed exact row/shape/aggregate checks and normal exit. It held
+96 payloads totaling 102,584,813,088 encoded bytes, with 37 host/59 disk handles
+after reads. PCBS registry array put/get counters remained zero. All fixed limits
+and default checks remain unchanged. Smaller heaps and the authorized independent
+2 GiB, automatic-concurrency and 16-thread dimensions are in progress.
+
+Evidence: `/data/pcbs-oom/pcbs-gpu-generator`, including the oracle, frozen v4
+source/jar provenance and per-case results/raw logs/independent analysis. The
+allocation probe is under `/data/pcbs-oom/generation-allocation-probe`.
 Literal zero-heap compressed spill remains an unresolved implementation/design
 question, rather than a completed claim.
 

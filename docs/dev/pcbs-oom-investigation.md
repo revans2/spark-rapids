@@ -142,12 +142,30 @@ buffers. No compression/encryption/default change was made. The large temporary
 allocation during fill is not yet attributed by an allocation profile. A raw
 native file path under unchanged compression settings is not established.
 
-Current active control: native-g1-slots8-capped2-heap16384m, supervisor 137248,
-under /data/pcbs-oom/pcbs-shadow-native/cases, fresh JVM, only heap changed to
-16 GiB, otherwise original dataset/default checks/native limits unchanged.
-Separate benchmark v4 GPU-hash generation is authorized as implementation of
-the user's full-GPU-compute experiment, prepared under pcbs-gpu-generator; it
-changes the dataset, needs its own baseline and must preserve all fixed limits.
+The original-generator 16 GiB control PASSED: fill 215.200 s, measured reads
+20.078/20.918/20.356 s (median 20.356 s), read GC 0.0098%, sampled heap peak
+5.38 GiB and RSS peak 45.95 GiB. Independent raw-event analysis found no audit
+issues; exact rows, original six-record layout, payload totals, native bulk
+routing and normal JVM exit passed. Evidence: native-g1-slots8-capped2-heap16384m
+under /data/pcbs-oom/pcbs-shadow-native/cases.
+
+A separate untimed generation-only JFR probe PASSED without caching. Its
+weighted allocation samples predominantly point to Integer.valueOf through
+Scala Range.foreach in GpuRand. These are sampled temporary allocations, not
+an exact allocation census or retained-cache bytes. Recorded stacks and compact
+summary are under /data/pcbs-oom/generation-allocation-probe/gpu-rand-trial0.
+
+Benchmark v4 replaces rand with salted GPU xxhash64/mask/cast/divide expressions.
+The runtime oracle PASSED: 160,000 CPU/GPU Double raw-bit comparisons, GPU-only
+computational expressions, 128 native bytes/row without validity buffers.
+This changes the dataset and fill cost, so v4 requires a separate baseline.
+The GPU-generated 48 GiB baseline PASSED: fill 125.243 s, median read 20.486 s,
+read GC 0 ms, sampled heap peak 4.75 GiB and RSS peak 42.21 GiB. Its 96 payloads
+totaled 102,584,813,088 encoded bytes; native bulk and independent raw-event
+checks passed with normal JVM exit. Current case is the corresponding 16 GiB
+heap control, supervisor 141039, under /data/pcbs-oom/pcbs-gpu-generator. All
+fixed native limits and unroll/reset/fraction settings are preserved. Subsequent
+heap/stress cases stay gated on verified predecessor results; root owns launches.
 Literal zero-heap compressed spill remains open. GPU jobs/builds/tests stay
 serialized; MCP docker_exec-only confirmed by workers at this checkpoint.
 
