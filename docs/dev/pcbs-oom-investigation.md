@@ -46,6 +46,17 @@ Park only for a genuine architectural conflict or missing prerequisite after
 reasonable investigation; report incomplete criteria explicitly. Verified
 research deliverables are READY FOR REVIEW, never architect-accepted DONE.
 
+Source-audit checkpoint: [codec spike report](pcbs-blockmanager-codec-spike.md)
+records completed independent transfer/native audits and root decisive-source
+inspection. Existing ClassTag propagation supports a temporary research carrier
+without a new directory or wire field. Actual Java metadata roundtrip and
+multi-JVM paths still need runtime proof. Root read selector, SQL wrapper,
+serialized unroll, block local-read/remove and RAPIDS factory/materialization.
+Native cap caution: direct factory uses trackNoSpill; enabled RAPIDS total host
+limits are required for the bounded native fixture. Full native residency/status
+integration remains distinct from AutoCloseable lifetime proof. Both workers
+confirm MCP-only at checkpoint; no production changes or Spark pool adoption.
+
 ## Accepted upstream revision and next proof (2026-10-22)
 
 READY FOR REVIEW: [revised proposal](pcbs-cache-storage-api-proposal.md).
