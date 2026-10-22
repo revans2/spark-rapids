@@ -115,6 +115,13 @@ code. These are source findings, not runtime distributed correctness evidence.
 The prototype also received an independent source/compiled-field review with no
 in-scope defect found. Production owner association, transport, recovery and
 retirement remain unimplemented; no architecture has been selected.
+A follow-up source review found an alternative owner-registration candidate:
+observe InMemoryTableScanExec.relation during driver plan preparation before
+GPU-only gates, then bind its actual cachedColumnBuffers wrapper and direct
+producer. Existing AQE preparation runs before cache-stage submission. This
+avoids arbitrary transitive ancestry for that SQL path, but eager construction,
+namespace binding, CPU/direct-RDD bypasses and publication timing need runtime
+proof. Metadata research records this option and its independent focused review.
 
 ## Scope and acceptance
 

@@ -45,6 +45,52 @@ PCBS also uses sizeInBytes==0 to recognize a zero-column encoded batch, and numR
 
 Spark's physical size estimation is separate: SizeEstimator:219–225 recognizes its internal KnownSizeEstimation interface or traverses object fields. Merely implementing CachedBatch.sizeInBytes does not make that value the physical heap estimate. This observation does not select a new accounting policy or recommend changing a Spark API.
 
+## Driver plan-preparation registration candidate
+
+An existing driver plan-preparation point can observe the actual cache relation
+before its raw RDD is populated. This is a concrete alternative to choosing an
+owner by transitive producer ancestry; it remains an unimplemented candidate.
+
+SQLExecPlugin installs columnar and AQE query-stage preparation rules (:29–32).
+For nonadaptive SQL, QueryExecution:436–460 and Columnar:533–537 run the
+pre-columnar rule before execution. For AQE, AdaptiveSparkPlanExec:113–133,
+204–211 runs query-stage preparation before createQueryStages (:277).
+TableCacheQueryStageExec later calls baseCacheRDD and submitJob (:293–300).
+
+The existing GpuQueryStagePrepOverrides invokes GpuOverrides conversion and
+discards its returned plan (GpuOverrides:1267–1280). Consequently,
+InMemoryTableScanMeta.convertToGpu (:71–72) can run during early AQE
+preparation; this driver callback is **not** GPU decoding. It has the actual
+InMemoryRelation. However GPU-ineligible nodes choose convertToCpu
+(RapidsMeta:888–891), and disabled GPU/explain-only or whole-plan fallback can
+bypass GPU conversion (GpuOverrides:1297–1317,1429–1438). A candidate intended
+to cover CPU scans would observe CPU InMemoryTableScanExec.relation in the
+existing preparation rule **before** those GPU-only gates.
+
+Reading relation.cacheBuilder.cachedColumnBuffers (:220–228) returns the actual
+persisted statistics wrapper after constructing it (:266–296). Its direct
+producer dependency is the serializer-output RDD (RDD.mapPartitionsInternal:
+888–894; MapPartitionsRDD:49–52). This supplies the actual owner ID without
+choosing an arbitrary persisted descendant. Binding a namespace to that exact
+producer invocation, handling shared builders idempotently, and the publication
+fence remain implementation proofs.
+
+These methods construct/persist the target cache RDD graph rather than consume
+its partition iterator. They are not side-effect-free: construction invokes
+the producer plan's execute/executeColumnar; adaptive producer construction can
+run upstream stages. Earlier construction can change timing and requires
+plan/materialization verification. Direct serializer use, raw cachedRDD actions
+before any SQL cache-scan preparation, and configurations without the SQL
+extensions are not covered by this candidate. Ordinary nonlazy CACHE TABLE
+uses a SQL Dataset count (CacheTableExec:61–63), while a raw cachedRDD.count
+need not invoke another SQL scan-preparation callback.
+
+This ordering was inspected in Spark 3.5.5/current plugin; no runtime or universal
+cross-version guarantee is claimed. Full evidence:
+ /data/pcbs-oom/ownership-research/cleanup/plan-preparation-registration.md.
+The candidate does not solve retirement generations, remote payload ownership
+or recovery and does not select a production architecture.
+
 ## Version comparison and coverage
 
 | Version | Independently inspected evidence | Result and boundary |
