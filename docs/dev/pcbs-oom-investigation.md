@@ -116,6 +116,19 @@ Stage 2 native GPU writer/reader is now authorized and IN PROGRESS in the isolat
 worktree. Original artifacts remain frozen. GPU tests remain serialized with
 builds; all project operations remain MCP docker_exec-only.
 
+Native source d247fe7a6e built successfully into frozen artifact
+/data/pcbs-oom/pcbs-shadow-native/rapids-shadow-native-cuda12.jar, SHA256
+8259c4448e24899d6f145a2fee256a5cb1c658d0bce0686e221c56a272ebd267.
+Root and peer reviewed the consumer ownership/copy/publication and read-retry
+code. Fresh-JVM native functional checks PASSED (17.793 s): GPU row/columnar
+writers and forced CPU row writer after GPU initialization, exact 1.2M ordered
+four-Long rows through GPU and CPU decoders, Java/DISK_ONLY descriptor reload,
+and unpublished callback-buffer cleanup/rejection/refcount checks. GPU decode
+left array-get counters unchanged; CPU fallback deliberately used arrays.
+Root read the check source/raw markers and verified normal exit and immutable
+hashes. Versioned v3 native-path diagnostic benchmark compiled successfully;
+full native large workload and reduced-heap/stress cases remain unverified.
+
 Clarified accounting contract: SQL cache accumulators retain exact rows and
 encoded Parquet payload bytes for SQL/AQE statistics. BlockManager separately
 reports physical Spark reference-object memory/serialized disk sizes; these are
