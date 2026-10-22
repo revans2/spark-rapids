@@ -753,6 +753,13 @@ Deliver build/read medians, GC/heap, measured batch sizes, retained OOMs and
 limitations; independently review and commit tracker/report together.
 Prior1GiB fill medians were249.370s at1/1,250.435s at1/2 and249.901s at2/1.
 
+User follow-up: current sweep changes only global batchSizeBytes, not PCBS
+code. Finish it first. User wants a subsequent PCBS-only splitting experiment
+only if the smaller-target approach works without crashes. Keep global GPU
+batch target at1GiB for that comparison; do not mix it into current results.
+That conditional follow-up has not started; evaluate this sweep before choosing
+the minimal implementation/test boundary. No new user-facing config authorized.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
