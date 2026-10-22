@@ -833,6 +833,17 @@ Start16MiB/default now; ifPASS test32 next, ifFAIL test8. Repeats of a passing
 candidate still required for performance comparison. No old matrix resumes.
 MCP-only confirmed; conditionalPCBSfollow-up remains unstarted.
 
+16MiB first completion: default16/100PASS exit0, fill271.168204198s,
+median timedread44.989283228s, fillGC2.510%, readGC9.270%. Four exact
+801,279,744row scans;402records/partition, full16,697,307bytearrays.
+Total102,589,204,992encodedbytes; maxsampledoccupied41.509GiB,
+maxpostFullGC31.083GiB (occupancy, not dominatedretainedsize).
+Root analyzer+separateworkerchecker both passed all3completedcases after
+root read actualshape/effectiveconfig checks. Started32upward supervisor86529
+only after16JVM completed. 8MiB not needed at this stage. 16MiB still requires
+twofresh repeats; no reliability claim from oneJVM. ConditionalPCBS experiment
+still unstarted. Allprojectoperations remainedMCPdocker_exec-only.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
