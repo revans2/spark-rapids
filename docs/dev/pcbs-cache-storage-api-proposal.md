@@ -129,6 +129,15 @@ for example, an optional codec descriptor in existing block-transfer metadata,
 or a self-describing stream envelope with an installed dispatcher. Neither is
 selected yet. A task thread-local or ClassTag alone is insufficient.
 
+Confidence F found a cleanup gap in the unreleased overlay: after first-action
+take(1) or an injected decode exception, exact later reads passed, but one read
+stream in each case lacked a successful close notification after the actions.
+The snapshot precedes shutdown; this does not establish a permanent leak.
+The existing iterator closes on EOF, which is insufficient for this contract.
+Open decision: must the codec register task-completion/exception cleanup, or
+must the proposed integration guarantee it? No remedy has been implemented.
+Evidence and reproducible probe: [confidence results](pcbs-blockmanager-codec-spike.md#confidence-handoff-results).
+
 Codec context must remain available for deferred eviction and existing readers.
 Attach it to normal block/transfer ownership rather than retaining an RDD
 strongly or inventing a separate payload-lifetime directory.

@@ -56,8 +56,10 @@ production change; never weaken acceptance. Other independent work may proceed.
   Worker and independent root runs agree; decisive code and raw evidence
   inspected, inputs rehashed; focused peer review passed. Evidence:
   /data/pcbs-oom/blockmanager-codec-confidence/B/root420/. MCP docker_exec-only checkpoint confirmed.
-- F: IN PROGRESS; actual first-action partial read and once-injected decode
-  failure in separate JVMs, unchanged cleanup behavior; park real lifecycle gaps.
+- F: PARKED. PARKED: both first-action take(1) and once-injected decode failure returned exact later data and complete cache blocks, but each had one read stream without a successful close notification after completed actions. Snapshot precedes shutdown; no permanent leak is claimed. Decide codec versus integration cleanup ownership before a remedy.
+  Worker and independent root runs agree; decisive code and raw evidence
+  inspected, inputs rehashed; focused peer review passed. Evidence:
+  /data/pcbs-oom/blockmanager-codec-confidence/F/root-verification/. MCP docker_exec-only checkpoint confirmed.
 - G: IN PROGRESS; actual driver SQL unpersist(blocking=true) against a paused
   executor reader. All workers confirm MCP docker_exec-only at checkpoint.
 - A: NOT STARTED; last, after lower-risk confidence work.

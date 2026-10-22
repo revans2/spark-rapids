@@ -139,6 +139,49 @@
         "compiler_errors": false
       },
       "scope": "Exact Spark 4.2.0 revision 32f7299601108917fb01920a54e084595b7b3bf8 compiled independently; 188 hashes; partition-keyed statistics code preserved. Runtime PARKED: exact RoaringBitmap 1.6.10 and flatbuffers-java 25.2.10 unavailable; no substitutes."
+    },
+    "F": {
+      "status": "PARKED",
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/F/root-verification",
+      "checked": {
+        "valid": false,
+        "evidence_verified": true,
+        "status": "PARKED",
+        "measurement": "successful close notification after actions, snapshot before shutdown",
+        "cases": {
+          "partial": {
+            "behavior_valid": true,
+            "ownership_pass": false,
+            "unclosed_notifications": 1,
+            "reasons": {
+              "Success": 3
+            },
+            "event_files": {
+              "/data/pcbs-oom/blockmanager-codec-confidence/F/root-verification/partial/events/app-20261022185716-0000": "78153886967dfc75dd232bf7fb1d415bd02483788acee2e48c204601901b0b44"
+            },
+            "run_log_sha256": "05f9ec41a932aae62880990226f411273e628eca25ee38d4da714f761b168458",
+            "manifest_sha256": "ae8cbdd33540ba9c19e3e3f37372e07c5a9be4ff2812e41644a89657aed36f4c",
+            "result_sha256": "27d111460de87501a14a288a7237247f850ebc68b8ac33d8d775fd5c51b90afd"
+          },
+          "failure": {
+            "behavior_valid": true,
+            "ownership_pass": false,
+            "unclosed_notifications": 1,
+            "reasons": {
+              "Success": 4,
+              "ExceptionFailure": 1
+            },
+            "event_files": {
+              "/data/pcbs-oom/blockmanager-codec-confidence/F/root-verification/failure/events/app-20261022185725-0000": "8de635ba9d2146f6ac55609d24b1029709a7c571f42fcad8a43599880204cad0"
+            },
+            "run_log_sha256": "5b7aa702acfa1d1b4113642638dee23d38ca264ef168ae8816e0a8bdf947f1e0",
+            "manifest_sha256": "7c7f364bf1c1cfa2ef9f1348262dda10fa92f12b1947c5c8cfe5e9383d9a4c84",
+            "result_sha256": "271369a0be0f4c0970a0bdca7390422aade59f49b1001b4835c7527d5f4c2fc7"
+          }
+        },
+        "runtime_hashes_verified": 243
+      },
+      "scope": "PARKED: both first-action take(1) and once-injected decode failure returned exact later data and complete cache blocks, but each had one read stream without a successful close notification after completed actions. Snapshot precedes shutdown; no permanent leak is claimed. Decide codec versus integration cleanup ownership before a remedy."
     }
   }
 }
