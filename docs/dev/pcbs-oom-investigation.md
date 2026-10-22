@@ -5,6 +5,50 @@ research, scheduler-token research, newer-version audit and upstream proposal ve
 results remain READY FOR REVIEW. Production implementation and architect
 acceptance are pending.
 
+## Confidence handoff (2026-10-22)
+
+IN PROGRESS. Contradiction check before edits: the prior proposal and tracker
+sometimes implied native integration was a required next stage and excluded
+charging native size against Spark accounting. The architect now explicitly
+makes native payload storage OPTIONAL (nice-to-have), independent of the codec
+goal. Accounting choices remain open, not selected. Existing allocation checks
+prove rejection of a single over-limit request, not pressure admission. Correct
+those claims; the proposal remains READY FOR REVIEW, not accepted.
+
+Release classification unchanged: existing Spark cache, serializer and
+StorageLevel behavior is RELEASED and unchanged by default. The overlay,
+ClassTag carrier, fixtures and proposal are UNRELEASED; change them directly
+without compatibility code. More native implementation, production Spark/plugin
+changes, public config and external posting are out of scope. Measuring the
+existing native fixture's recorded size is explicitly authorized documentation
+evidence only. Native research must not block any codec work.
+
+Order/acceptance: document fixes first; confidence E (Kryo/compression/encryption),
+C (4.0.1 recovery/migration), D (clean replica receiver); then B (upstream target),
+F (partial consumption/decode failure), G (distributed blocking SQL unpersist);
+A (controlled heap/GC/fill/read comparison) last. Every case needs a fresh output,
+result/verifier JSON and tracker entry. E/C/D delegated independently; root owns
+docs/tracker, decisive reads, independent verification and signed task commits.
+All project operations remain MCP docker_exec-only; require confirmation at
+every worker handoff/checkpoint. Park/report any non-fixture failure or proposed
+production change; never weaken acceptance. Other independent work may proceed.
+
+- Document fixes: IN PROGRESS.
+- E: IN PROGRESS (codec worker).
+- C: IN PROGRESS (version/recovery worker).
+- D: IN PROGRESS (clean receiver worker).
+- B, F, G: NOT STARTED; depend on first batch.
+- A: NOT STARTED; last, after lower-risk confidence work.
+
+Architect reports independent reproduction of 81347f8ae9 at
+/data/pcbs-oom/blockmanager-codec-spike/architect-rerun355,
+/data/pcbs-oom/blockmanager-codec-spike/architect-recovery355 and
+/data/pcbs-oom/blockmanager-native-spike/architect-rerun. Supplied
+architect-rechecked-results.json was inspected: it records valid root evidence
+paths, so it is not by itself an audit of those differently named architect runs.
+Keep that attribution separate; inspect their raw result files before claiming
+independent verification of those paths.
+
 ## Current architecture priorities (read first)
 
 Short-term options must work with existing, UNMODIFIED Spark. Modifying Spark
