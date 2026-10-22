@@ -713,6 +713,46 @@ rows: [sweep report](pcbs-unroll-period-sweep.md) and
 [CSV](pcbs-unroll-period-sweep.csv). Architect acceptance remains pending.
 The earlier IN PROGRESS checkpoints above are superseded by this result.
 
+## Batch-size performance sweep (IN PROGRESS)
+
+User authorized 64, 128, 256, 512 MiB and 1 GiB batch targets, comparing cache
+build time and cache read time on the same large workload. Two explicit
+profiles: default unroll16/reset100 and frequent-check unroll1/reset1.
+No other tuning knobs vary. Memory fraction stays 0.6, heap48g, local[8],
+GPU concurrency2/max2, fixed15g GPU pool, host40g/pinned2g; same plugin,
+benchmark source/jar and 801,279,744 rows/16 Double columns. Sixteen cached
+partitions from96source partitions preserve the input across targets.
+Actual encoded size/counts are measured, not inferred from the target.
+
+Released PCBS/configuration behavior is preserved without production changes.
+Existing standalone diagnostic remains UNRELEASED; adapt its external runner
+and validation rather than replace the Scala benchmark. MCP docker_exec-only
+for every operation and worker; confirm at handoffs/checkpoints. All prior
+experiments/evidence remain immutable and unrelated files remain untouched.
+
+Population stays sequential per partition for direct comparison with the
+previous sweep. It measures generation+encoding+cache storage+job overhead,
+not parallel customer cache-build throughput. Read timing is a fresh all-column
+SQL sum, one warmup plus three timed full scans per fresh JVM, natural GC.
+Record fill time even when a subsequent read OOMs; no read-time estimate for
+failed JVMs. Start with all ten profile/size cells, then two fresh repeats per
+initially passing cell in shuffled rounds, keeping any later failures.
+The64MiB case may have six tiny8row tails from existing source partitioning:
+expected102records/partition versus48/24/12/6 at larger targets. Do not change
+the dataset to hide that rounding; audit actual batch rows and bytes.
+
+Evidence/commands/logs/GC/telemetry and manifest under
+/data/pcbs-oom/batch-size-sweep. Runner timeout1800s/cell, free disk140GiB
+guard, one JVM at a time, cleanup only its own cache after exit. OOM heap dumps
+remain disabled; previous failure dumps retained. Park unexpected errors,
+wrong shape/row counts, population OOM or unavailable resources. No production
+fix, new configuration definitions or external posting. Smoke smallest target
+before full sweep, independently validate effective configs/artifact hashes,
+all16population partitions, exact scan rows and five storage checkpoints.
+Deliver build/read medians, GC/heap, measured batch sizes, retained OOMs and
+limitations; independently review and commit tracker/report together.
+Prior1GiB fill medians were249.370s at1/1,250.435s at1/2 and249.901s at2/1.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
