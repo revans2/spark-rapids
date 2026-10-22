@@ -213,14 +213,25 @@ was 182.749 s versus baseline 29.728 s; GPU utilization averaged 9.6% versus40%.
 This is open/read/decompression/copy time, not proof of physical disk misses.
 One additional 1 GiB write and no registry retry inflation argue against a
 rewrite storm. Page-cache pressure remains a hypothesis pending IO evidence.
-Current case is gpuhash-g2-project3g-taskconf-slots8-capped2-heap49152m, supervisor
-148160, under /data/pcbs-oom/pcbs-gpu-generator. First partition now VERIFIED:
-three 16,693,328-row payloads of 2,137,181,644 bytes each, actual executor getter
-3 GiB. Full fill/reads remain IN PROGRESS. Next combined stress, conditional on
-this independent case passing, uses local[16]/32 partitions, 2 GiB target,
-automatic GPU concurrency and the already-passing 512 MiB heap. The combined
-48 GiB variant is not implied tested. All fixed native limits/default checks
-remain unchanged. Root owns launches; workers reconfirmed MCP docker_exec-only.
+The actual 2 GiB-record local[8]/48 GiB/capped2 case PASSED: 48 payloads of
+2,137,181,644 encoded bytes each; total 102,584,718,912 bytes. Fill 161.977 s,
+warmup 34.619 s, measured reads 34.361/34.748/33.942 s, read GC 0 ms, sampled
+heap peak 5.34 GiB/RSS 41.85 GiB. All task getter, strict row/encoded-byte,
+native-counter, query and independent raw checks passed; normal exit/no audit
+issues. Spark reference storage was 2,688 bytes. Source/plugin remained frozen.
+Late-start process IO sampling found zero kernel-accounted storage-read bytes
+in the measured-read sampled subwindows (84.4/95.0/97.2% coverage), despite
+approximately 55–61 GiB logical rchar deltas. These are partial process-wide
+windows, not exact payload-only/full-phase totals; cold storage reads are not
+supported as the cause of this case's slowdown.
+Current combined case is gpuhash-g2-project3g-taskconf-slots16-automatic-heap512m,
+supervisor 149011, under /data/pcbs-oom/pcbs-gpu-generator, using local[16],
+32 partitions, 2 GiB target, automatic GPU concurrency and 512 MiB heap. First
+partition verified three original large records; full fill/reads IN PROGRESS.
+Stock task-thread sampler149029 and IO sampler149080 retain errors/coverage.
+The combined 48 GiB variant and intermediate heaps are not implied tested.
+All fixed native limits/default checks remain unchanged. Root owns launches;
+workers reconfirmed MCP docker_exec-only.
 Literal zero-heap compressed spill remains open. GPU jobs/builds/tests stay
 serialized; MCP docker_exec-only confirmed by workers at this checkpoint.
 

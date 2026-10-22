@@ -137,9 +137,9 @@ plugin-prefixed concurrency overrides were absent from effective configuration;
 read-stage GPU admission high-watermarks were 7 versus 2 when capped. This is
 semaphore admission, not simultaneous kernels. PCBS registry array put/get
 counters remained zero. All fixed limits
-and default checks remain unchanged. The independent 2 GiB-record case and
-combined stress case remain in progress; the heap, automatic-concurrency and
-16-thread controls have passed as recorded here.
+and default checks remain unchanged. The heap, automatic-concurrency, 16-thread
+and actual 2 GiB-record controls have passed. The combined stress remains in
+progress.
 
 512 MiB is the lowest heap tested, not a proven exact minimum. The intermediate
 8/4/2/1 GiB sizes were skipped after 16 GiB passed. Reduced heap does not reduce
@@ -155,6 +155,22 @@ failures remain in the evidence. V5 now sets/restores only that task-local key,
 checks its actual getter in every population task, and requires measured encoded
 records >95% of the 2 GiB target. The device pool and host limits remain fixed;
 this extra fixture dimension must accompany any timing comparison.
+
+The revised 2 GiB-record case PASSED all checks and normal JVM exit. Each of
+48 records measured 2,137,181,644 encoded bytes (about 1.99 GiB), totaling
+102,584,718,912 bytes. Fill was 161.977 s; measured reads were
+34.361/34.748/33.942 s (median 34.361 s), read GC 0 ms, sampled heap peak
+5.34 GiB/RSS 41.85 GiB. Native array counters stayed zero, and all 16 actual
+executor threshold checks passed. Root independently ran the strict large-record
+and raw-event checks, with no audit issues. This case is slower than the 1 GiB
+control in this fixture; the projection threshold/source boundary adaptation
+must remain visible in the comparison.
+
+Process IO sampling began late, so coverage is explicitly partial. During
+95.0% and 97.2% sampled subwindows of the last two measured reads, logical read
+counters advanced by approximately 60–61 GiB while kernel-accounted storage
+read bytes stayed zero. This does not measure exact whole-phase or payload-only
+IO; it does not support cold storage reads as the cause of this case's slowdown.
 
 The independent 16-thread case also PASSED with 32 cache partitions and twice
 the data (205,169,626,176 encoded bytes): fill 300.317 s, warmup 104.013 s,
