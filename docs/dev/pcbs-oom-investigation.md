@@ -19,15 +19,57 @@ verify integrated conclusions without repeatedly importing entire source files.
 Preserve priorities here and in every relevant worker handoff after resets.
 All project actions remain MCP docker_exec-only.
 
-Latest architect clarification: explore bypassing existing RDD persist/unpersist
+## Accepted upstream revision and next proof (2026-10-22)
+
+READY FOR REVIEW: [revised proposal](pcbs-cache-storage-api-proposal.md).
+Architect clarified priority: bypass generic Java object serialization/
+deserialization for SQL cache data first; avoiding heap is secondary and
+heap-backed payloads are acceptable for the first proof. Reuse the existing
+BlockManager wherever possible. Match existing compute-on-miss and genuine
+shuffle-fetch recovery; do not introduce a Deferred/resubmit task protocol.
+
+Independent review accepted: reuse existing block write/read locks, completed
+put/status publication, blocking removal and canonical locations. The prior
+provider-owned directory, parallel commit/fence protocol and weakened blocking
+unpersist recommendation are removed from the unshipped proposal. They need no
+compatibility scaffolding. Existing released storage/serialization/lifecycle
+behavior stays the default; no production code or new public config changed.
+
+Bounded MCP-only source audits traced per-cache codec context through
+SerializerManager, MemoryStore.SerializedValuesHolder, disk/remote IO and
+replica reception. Root independently read those decisive paths, BM put/remove
+locks and historical commits/code. Source evidence supports a narrow optional
+per-cache serializer/codec association; no integration prototype is claimed.
+Small control metadata is distinct from bulk cache payload serialization.
+
+ExternalBlockStore history: SPARK-12667/ad1503f92e1 removed the rarely used API
+in favor of standard filesystem interfaces; SPARK-13992/e41acb75732 added native
+serialized OFF_HEAP afterward. The default value helpers and shipped Tachyon
+backend still used BlockManager serialization; existing native placement is
+not itself a generic-serialization bypass.
+
+Next proposed proof: one real BlockManager-integrated codec prototype, first
+allowing heap values, then optional native/direct storage. Cover serialized
+unroll, partial admission, disk, multi-JVM remote/replica context, mixed caches,
+existing recovery and blocking-reader cleanup. A core-hook prototype belongs
+to isolated long-term Spark research, not the unmodified-Spark short-term path.
+User asked which further proofs are needed; no new Spark prototype is started.
+
+Two focused peer reviews verified the narrower revision after a historical
+backend-override wording correction. Evidence links, prior art, a reuse diagram
+and numbered rules replace the earlier dense API sketch. No search-result-only
+adjacent proposals remain. MCP docker_exec-only continues at all handoffs and
+checkpoints. Document checks passed; no builds/jobs/production changes.
+
+Earlier short-term architect exploration: bypass existing RDD persist/unpersist
 storage entirely, using our own BlockManager-equivalent for partition lookup,
 native/disk retention, remote retrieval and cache-miss recomputation. The intended
 payload path avoids heap (network staging may be acceptable). Do not assume
 Spark must continue storing descriptors: that was the earlier split-store
 candidate. SQL cache plan reuse can remain. The custom actual statistics-wrapper
 RDD lifecycle/compute interception has passed the local research fixture on
-Spark3.5.5 and4.0.1; it is not production implementation. Prefer recovery WITHOUT
-task failure; task retry is a fallback.
+Spark3.5.5 and4.0.1; it is not production implementation. The newer accepted
+upstream direction above preserves existing recovery, including genuine retry.
 
 ## Active scheduler-token research spike (2026-10-22)
 
@@ -84,9 +126,10 @@ changes the wrapper factory to mapPartitionsWithIndexInternal. No GPU jobs,
 production sources or Spark sources changed.
 The upstream proposal keeps Spark lifecycle/locations/recovery authoritative
 and adds backend storage/lease/transfer contracts honoring StorageLevel.
-API names are illustrative and unaccepted. Commit-before-visibility ordering
-and nonblocking scheduler defer/resubmit are explicit. No external posts, PRs
-or community approval.
+The initial draft's new commit protocol and scheduler defer/resubmit were
+subsequently rejected in review and removed; the accepted revision above
+reuses BlockManager and existing recovery. No external posts, PRs or community
+approval.
 
 Latest proposed refinement: keep genuine small scheduler tokens under the actual
 owner's RDDBlockIds in regular BlockManager, while own custom RDD compute serves
