@@ -1040,6 +1040,50 @@ contracts remain unchanged. Proposed protocols are unimplemented; no runtime
 prototype or new benchmark claimed. MCP docker_exec-only confirmed throughout
 and required at every resume/checkpoint/delegation. No source/config changes.
 
+## Existing RDD and BlockManager mechanism trace
+
+READY FOR REVIEW: user requested identity/mapping/synchronization mechanics
+before extension-point or ownership-design proposals. Earlier driver-listener
+suggestions are exploratory, not a selected architecture. This follow-up
+documents the existing flow only.
+
+Coordinated independent tasks: spark_cache_trace traced identity and task
+serialization; heap_review traced registration, reports, driver maps, local
+disk metadata, removal and recovery. Full notes persist under
+/data/pcbs-oom/ownership-research/cleanup/identity-flow.md and
+/data/pcbs-oom/ownership-research/remote/registration-removal-mechanics.md.
+pcbs_only_plan assembled docs/dev/pcbs-rdd-block-manager-flow.md with a
+mapping table and sequence diagram. A separate focused review found no
+material findings. Lead independently read the decisive source and report.
+
+Verified mechanism: driver allocates RDD.id during construction, persist
+registers that existing ID, and task serialization carries it to executors.
+RDD.getOrCompute constructs RDDBlockId(rddId,partition.index). Local
+BlockInfoManager metadata/write lock precedes producing/storing partition
+records. Each partition block can contain many PCBS batches.
+
+Executor BlockManager registration supplies its identity and storage RPC
+endpoint. Successful local puts synchronously report UpdateBlockInfo; the
+driver records per-manager status and BlockId-to-locations. This physical
+directory is separate from persistentRdds. The driver does not broadcast the
+entire location directory to all executors.
+
+Whole-RDD RemoveRdd clears matching driver metadata and fans out to ALL
+registered BlockManagers. Each scans local BlockInfoManager keys for the RDD
+and removes matching memory, disk and metadata entries. Disk-backed eviction
+keeps that local metadata; filenames derive from block names, so deletion
+requires no PCBS deserialization. Replies follow local removal-body execution;
+blocking waits aggregate futures, subject to documented failure handling.
+Updates/re-registration/executor loss maintain the directory; they are not a
+global transaction or a guarantee that every executor has identical state.
+
+Source evidence is upstream release tag v3.5.5, with relevant v3.5.3 identity
+paths compared by workers. Released persistence/PCBS contracts unchanged;
+the new report is investigation documentation. No implementation, extension,
+new configuration, runtime RPC trace or failure-injection result claimed.
+MCP docker_exec-only confirmed by every worker and lead, and required at all
+future resume/handoff/checkpoints. Only documentation/tracker files changed.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
