@@ -62,6 +62,59 @@ The next GPU path will remove the intermediate Java payload arrays with all
 resource limits preserved. Neither this timing nor a later local result is a
 customer MERGE performance prediction.
 
+## Native PCBS control: same generator and data layout
+
+The native cache-path source `d247fe7a6e` passed the same large workload in
+one fresh JVM with all settings above unchanged. Consumer callbacks now copy
+valid native ranges into a spillable host buffer; the GPU reader uses cuDF's
+HostMemoryBuffer overload. The descriptor still has three primitive fields.
+
+| Measurement | Native PCBS control |
+|---|---:|
+| Sequential cache population | 214.977 s |
+| Warmup full SQL read | 21.591 s |
+| Three measured full SQL reads | 20.929 / 20.632 / 20.116 s |
+| Median measured read | 20.632 s |
+| GC time during measured reads | 0 ms |
+| Maximum sampled heap occupancy | 16.02 GiB |
+| Maximum sampled whole-process RSS | 56.71 GiB |
+
+All rows, aggregate checks, six-record partition shapes and 95.535 GiB total
+encoded bytes passed. Array put/get calls and bytes at the PCBS registry were
+zero at all five checkpoints. Native puts were exactly 96 records; native read
+attempts were exactly 384, corresponding to four complete reads. Spark retained
+4,992 bytes of references. Host/disk handles were 38/58 after fill and 37/59 after
+reads. The JVM exited normally. Root reran an independently prepared analyzer
+against raw events, including native counter validation, with no audit issues.
+
+This is **not an end-to-end zero-heap payload path**. Source audit found:
+
+- GpuRand generates primitive doubles on the CPU into native HostColumnVector
+  storage before copying to the GPU. GpuRange itself uses a native sequence.
+- SpillOutputChannel uses reusable 8 KiB Java staging arrays; default compressed
+  spill additionally uses reusable LZ4 block arrays (32 KiB block setting).
+- Eliminating the channel staging alone would not remove codec heap traffic.
+  A raw-channel experiment requires different compression settings and explicit
+  encryption checks; neither was changed for these comparisons.
+- Registry counters prove the PCBS payload-array paths were avoided, not that
+  all components avoided heap. Significant temporary allocation remains during
+  population. Per-row index boxing is a source-level possibility, not measured
+  allocation attribution. Heap peaks are occupancy, not retained payload size.
+
+These bounded spill buffers differ from batch-sized retained arrays, so a
+smaller-heap sweep remains useful. A 16 GiB control is running with the original
+generator and settings. A separate GPU-hash generator is being prepared to test
+GPU-only value generation; it changes the dataset and needs a separate baseline.
+Literal zero-heap compressed spill remains an unresolved implementation/design
+question, rather than a completed claim.
+
+Native evidence: `/data/pcbs-oom/pcbs-shadow-native`, including frozen build and
+artifact hashes, `entry-native-result.json`, v3 benchmark diff/provenance,
+`cases/native-g1-slots8-capped2-heap49152m/{result,independent-analysis}.json`,
+raw logs, event metrics and process-memory samples. Full source audit notes are
+under `/data/pcbs-oom/ownership-research/design/` and the generator notes under
+`/data/pcbs-oom/pcbs-shadow-sweep/`.
+
 ## Serialization and correctness checks
 
 A separate fresh-JVM check tested both row and GPU-columnar writer entries.

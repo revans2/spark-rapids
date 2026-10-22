@@ -127,7 +127,29 @@ and unpublished callback-buffer cleanup/rejection/refcount checks. GPU decode
 left array-get counters unchanged; CPU fallback deliberately used arrays.
 Root read the check source/raw markers and verified normal exit and immutable
 hashes. Versioned v3 native-path diagnostic benchmark compiled successfully;
-full native large workload and reduced-heap/stress cases remain unverified.
+the native large cache-path workload subsequently PASSED: fill 214.977 s,
+warmup 21.591 s, measured reads 20.929/20.632/20.116 s; all native bulk counters,
+96 original-sized records, exact rows and aggregates passed, normal exit, no
+audit issues in independent raw-event analysis. Read GC was 0 ms; sampled heap
+peak 16.02 GiB and whole-process RSS peak 56.71 GiB. Source/artifact unchanged.
+Evidence cases/native-g1-slots8-capped2-heap49152m/{result,independent-analysis}.json.
+
+IMPORTANT QUALIFICATION: this is native PCBS write/read, not literal end-to-end
+zero heap. Source audit found GpuRand CPU-generates doubles into native storage,
+and existing spill I/O stages payload through reusable 8 KiB Java buffers plus
+default LZ4 block arrays (32 KiB blocks). Registry counters do not cover those
+buffers. No compression/encryption/default change was made. The large temporary
+allocation during fill is not yet attributed by an allocation profile. A raw
+native file path under unchanged compression settings is not established.
+
+Current active control: native-g1-slots8-capped2-heap16384m, supervisor 137248,
+under /data/pcbs-oom/pcbs-shadow-native/cases, fresh JVM, only heap changed to
+16 GiB, otherwise original dataset/default checks/native limits unchanged.
+Separate benchmark v4 GPU-hash generation is authorized as implementation of
+the user's full-GPU-compute experiment, prepared under pcbs-gpu-generator; it
+changes the dataset, needs its own baseline and must preserve all fixed limits.
+Literal zero-heap compressed spill remains open. GPU jobs/builds/tests stay
+serialized; MCP docker_exec-only confirmed by workers at this checkpoint.
 
 Clarified accounting contract: SQL cache accumulators retain exact rows and
 encoded Parquet payload bytes for SQL/AQE statistics. BlockManager separately
