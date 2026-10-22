@@ -73,6 +73,36 @@ All use MCP docker_exec ONLY and confirm at handoff/checkpoint/resume.
 No production fix, new public configuration, Spark patch, external post or PR
 is authorized. Any Spark-change option remains explicitly labeled LAST RESORT.
 
+### Shadow proof checkpoints
+
+On 2026-10-22, isolated prototype 98e5bcc897 built successfully; frozen artifact
+/data/pcbs-oom/pcbs-shadow-sweep/rapids-shadow-array-cuda12.jar has SHA256
+75c3de6df31cd7d37b0095db7638e15d3380aa6ec2a8a9abdb079292eb5d373d.
+Build used package -DskipTests for artifact creation, not a test-pass claim.
+Fresh-JVM functional checks passed for row and GPU-columnar writer entrypoints:
+each encoded 1.2M ordered four-Long rows into one 19,203,662-byte payload and a
+127-byte serialized descriptor. DISK_ONLY reload and explicit Java serialization
+preserved IDs, rows and payload length; all decoded values/order passed. Root
+independently read the check source, raw markers and provenance result. GPU was
+released afterward. Large workload and heap-free GPU path remain unverified.
+Evidence: /data/pcbs-oom/pcbs-shadow-sweep/entry-shadow-array-{command,result}.json
+and entry-shadow-array.log. All project actions use MCP docker_exec only.
+
+Clarified accounting contract: SQL cache accumulators retain exact rows and
+encoded Parquet payload bytes for SQL/AQE statistics. BlockManager separately
+reports physical Spark reference-object memory/serialized disk sizes; these are
+not the SQL cache relation-size input to AQE. Shadow resources need separate
+accounting. No attempt to override BlockManager size is selected.
+
+Parallel design research is READY FOR REVIEW in pcbs-shadow-metadata-research.md
+and pcbs-shadow-lifecycle-research.md. Independent focused reviews confirmed the
+SQL-statistics/storage distinction and qualified lifecycle source claims. Root
+read the decisive cache wrapper, persistence, unpersist, payload-store and reader
+code. These are source findings, not runtime distributed correctness evidence.
+The prototype also received an independent source/compiled-field review with no
+in-scope defect found. Production owner association, transport, recovery and
+retirement remain unimplemented; no architecture has been selected.
+
 ## Scope and acceptance
 
 Reproduction only, timeboxed through tomorrow morning (America/Chicago; exact
