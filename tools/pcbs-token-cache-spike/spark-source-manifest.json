@@ -1,0 +1,453 @@
+{
+  "observed_UTC": "2026-10-22T16:01:24.573525+00:00",
+  "latest_stable_tags_by_line": {
+    "4.0": "4.0.4",
+    "4.1": "4.1.3",
+    "4.2": "4.2.0"
+  },
+  "revisions": {
+    "4.0.1": {
+      "commit": "29434ea766b0fc3c3bf6eaadb43a8f931133649e",
+      "reference": "v4.0.1",
+      "kind": "stable tag"
+    },
+    "4.0.4": {
+      "commit": "c7d67e3f5d4c9d88a480367b44fc54d26adf99ab",
+      "reference": "v4.0.4",
+      "kind": "stable tag"
+    },
+    "4.1.3": {
+      "commit": "77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989",
+      "reference": "v4.1.3",
+      "kind": "stable tag"
+    },
+    "4.2.0": {
+      "commit": "32f7299601108917fb01920a54e084595b7b3bf8",
+      "reference": "v4.2.0",
+      "kind": "stable tag"
+    },
+    "master": {
+      "commit": "67b62cb4081eda45933e76797a7730596dc50369",
+      "reference": "master",
+      "kind": "development branch snapshot"
+    }
+  },
+  "files": [
+    {
+      "version": "4.0.1",
+      "path": "pom.xml",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/pom.xml",
+      "bytes": 134680,
+      "sha256": "a2adae081908f71e2a4601036819a9e6abeefc6eadc628c8171c3ddf194a1a5a"
+    },
+    {
+      "version": "4.0.1",
+      "path": "core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "bytes": 92086,
+      "sha256": "967e7e23da938d8a2a9393478a3cbabbd7e2815231354d0e5969f799f95f9b53"
+    },
+    {
+      "version": "4.0.1",
+      "path": "core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "bytes": 3007,
+      "sha256": "9920a0270498e6ab8babd07ea5452c255fcdfbcdc9b42bb5f7be8dd2e1903f57"
+    },
+    {
+      "version": "4.0.1",
+      "path": "core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "bytes": 148457,
+      "sha256": "42d8c419929fde53063d9724a3e506479e91bd884111dab3fa4ede7ba60645ee"
+    },
+    {
+      "version": "4.0.1",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "bytes": 17946,
+      "sha256": "921b3eea6f20b8f22f02c0d225df10e18ba246b6fc2d7f76e5103631d1801b3e"
+    },
+    {
+      "version": "4.0.1",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "error": "<HTTPError 404: 'Not Found'>"
+    },
+    {
+      "version": "4.0.1",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "bytes": 12130,
+      "sha256": "b8af805ce45c4436c9b5bd9172e389f93603782d8358e31e9154d39aebb3885f"
+    },
+    {
+      "version": "4.0.1",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "bytes": 93111,
+      "sha256": "d9dba47e841b873048d3583ea90a5c98bbe4dd3cae2d2d9df337f43378b86afe"
+    },
+    {
+      "version": "4.0.1",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "bytes": 49289,
+      "sha256": "fd587b611df0d497450d57bf41b00f52e019aa4016274c099323fc82846c312f"
+    },
+    {
+      "version": "4.0.1",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "bytes": 21242,
+      "sha256": "77c844028d11b1ae7ae8315433d777d868c375ade36cb55d1a966332586f4cec"
+    },
+    {
+      "version": "4.0.1",
+      "path": "core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "bytes": 13105,
+      "sha256": "b86664aadc1c294fddaf66451155af37c027f0a640ac5606cc150bda33588c9c"
+    },
+    {
+      "version": "4.0.1",
+      "path": "core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/29434ea766b0fc3c3bf6eaadb43a8f931133649e/core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "bytes": 147230,
+      "sha256": "da412a4eaf058060ffcd146357c7b0115849e37e73ee963c75e2c713494e4aab"
+    },
+    {
+      "version": "4.0.4",
+      "path": "pom.xml",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/pom.xml",
+      "bytes": 135063,
+      "sha256": "f1625a182486a20c2d92f4194d8575fa7e010bec0207fd889275fb5b64ed6c47"
+    },
+    {
+      "version": "4.0.4",
+      "path": "core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "bytes": 92086,
+      "sha256": "967e7e23da938d8a2a9393478a3cbabbd7e2815231354d0e5969f799f95f9b53"
+    },
+    {
+      "version": "4.0.4",
+      "path": "core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "bytes": 3007,
+      "sha256": "9920a0270498e6ab8babd07ea5452c255fcdfbcdc9b42bb5f7be8dd2e1903f57"
+    },
+    {
+      "version": "4.0.4",
+      "path": "core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "bytes": 148457,
+      "sha256": "42d8c419929fde53063d9724a3e506479e91bd884111dab3fa4ede7ba60645ee"
+    },
+    {
+      "version": "4.0.4",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "bytes": 18304,
+      "sha256": "26977a1d7fa3c1c846a9903016a3229a57ecd8519b3d528de5f93d27404d80ba"
+    },
+    {
+      "version": "4.0.4",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "error": "<HTTPError 404: 'Not Found'>"
+    },
+    {
+      "version": "4.0.4",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "bytes": 12130,
+      "sha256": "b8af805ce45c4436c9b5bd9172e389f93603782d8358e31e9154d39aebb3885f"
+    },
+    {
+      "version": "4.0.4",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "bytes": 93111,
+      "sha256": "d9dba47e841b873048d3583ea90a5c98bbe4dd3cae2d2d9df337f43378b86afe"
+    },
+    {
+      "version": "4.0.4",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "bytes": 49289,
+      "sha256": "fd587b611df0d497450d57bf41b00f52e019aa4016274c099323fc82846c312f"
+    },
+    {
+      "version": "4.0.4",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "bytes": 21242,
+      "sha256": "77c844028d11b1ae7ae8315433d777d868c375ade36cb55d1a966332586f4cec"
+    },
+    {
+      "version": "4.0.4",
+      "path": "core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "bytes": 13105,
+      "sha256": "b86664aadc1c294fddaf66451155af37c027f0a640ac5606cc150bda33588c9c"
+    },
+    {
+      "version": "4.0.4",
+      "path": "core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/c7d67e3f5d4c9d88a480367b44fc54d26adf99ab/core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "bytes": 147230,
+      "sha256": "da412a4eaf058060ffcd146357c7b0115849e37e73ee963c75e2c713494e4aab"
+    },
+    {
+      "version": "4.1.3",
+      "path": "pom.xml",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/pom.xml",
+      "bytes": 135358,
+      "sha256": "30aaacb8adbfd9320a91ff1627b4fac903c27f6ce05c238f176fb0808d7530b4"
+    },
+    {
+      "version": "4.1.3",
+      "path": "core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "bytes": 92097,
+      "sha256": "b2ccf06bc67f3109d3f6578cdc02a95d7375686904d54235948bff2a8ee1c04e"
+    },
+    {
+      "version": "4.1.3",
+      "path": "core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "bytes": 3007,
+      "sha256": "9920a0270498e6ab8babd07ea5452c255fcdfbcdc9b42bb5f7be8dd2e1903f57"
+    },
+    {
+      "version": "4.1.3",
+      "path": "core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "bytes": 157885,
+      "sha256": "ffcd845397dfa07e9dfb716a656732462c45b773c87f402c40781939cde44f3d"
+    },
+    {
+      "version": "4.1.3",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "bytes": 19697,
+      "sha256": "fb4133f17de7a3161417371442f3deb42349cce268514db7220c159d22d7daa4"
+    },
+    {
+      "version": "4.1.3",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "error": "<HTTPError 404: 'Not Found'>"
+    },
+    {
+      "version": "4.1.3",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "bytes": 12217,
+      "sha256": "4d7598a8570178cb72ee474a7d09699fa07e1f6a8985d08dc5d4fa3f7864deb1"
+    },
+    {
+      "version": "4.1.3",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "bytes": 94149,
+      "sha256": "98610c72d4be5049d617862383b82003f2773849243ef53f282f479463cabcba"
+    },
+    {
+      "version": "4.1.3",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "bytes": 49614,
+      "sha256": "f014c8e5ef548eb24f3ff98ca84a0b7830a7cd43403761ee25f80143c31b287f"
+    },
+    {
+      "version": "4.1.3",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "bytes": 21237,
+      "sha256": "825f855bd875ef926e57c3c86151664d14201c024cf6bd03db8ed4cede993626"
+    },
+    {
+      "version": "4.1.3",
+      "path": "core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "bytes": 13098,
+      "sha256": "9a1e64492d919ca9cdfbf594a47bc9eb48cf12c22893a1230d62393d9ef5808c"
+    },
+    {
+      "version": "4.1.3",
+      "path": "core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/77bbf77e86ad48f58b5dfbc6ac882b3e70cf1989/core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "bytes": 148009,
+      "sha256": "e1e138089d27132242133c0995e1badecd768128b91bbbb479dc3c6313ee1f3b"
+    },
+    {
+      "version": "4.2.0",
+      "path": "pom.xml",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/pom.xml",
+      "bytes": 138702,
+      "sha256": "fbd9eb96975b77b26cf04738af2adf74e2e8ed1ac550170759e0c4e323aada0b"
+    },
+    {
+      "version": "4.2.0",
+      "path": "core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "bytes": 92933,
+      "sha256": "958724c39412789babab2ac3737de1daef553b8707f1ee980a47c0f3112ccdf2"
+    },
+    {
+      "version": "4.2.0",
+      "path": "core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "bytes": 3430,
+      "sha256": "a5eedddfe83cc505276ad762ed64211c829d461cbdb3854e0d4cff24da07dfae"
+    },
+    {
+      "version": "4.2.0",
+      "path": "core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "bytes": 167022,
+      "sha256": "dce68609ee6d2e4dabb249106861597b07efc9604bdb308b73b053db35d35de8"
+    },
+    {
+      "version": "4.2.0",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "bytes": 22270,
+      "sha256": "17a30b1b631e3ad86014c48b7a1c0d95b145497f37c646882fa1eed1e8ce2221"
+    },
+    {
+      "version": "4.2.0",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "error": "<HTTPError 404: 'Not Found'>"
+    },
+    {
+      "version": "4.2.0",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "bytes": 12217,
+      "sha256": "4d7598a8570178cb72ee474a7d09699fa07e1f6a8985d08dc5d4fa3f7864deb1"
+    },
+    {
+      "version": "4.2.0",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "bytes": 95401,
+      "sha256": "337d4ac67272b1f07b96115ec6d1b928576eaf8b4e8a3deec4aeb70628327876"
+    },
+    {
+      "version": "4.2.0",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "bytes": 49614,
+      "sha256": "f014c8e5ef548eb24f3ff98ca84a0b7830a7cd43403761ee25f80143c31b287f"
+    },
+    {
+      "version": "4.2.0",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "bytes": 22374,
+      "sha256": "63243913c34e74cfdd45bb869863e898fb1766ebadd422a1d2703480a8a20f20"
+    },
+    {
+      "version": "4.2.0",
+      "path": "core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "bytes": 13098,
+      "sha256": "9a1e64492d919ca9cdfbf594a47bc9eb48cf12c22893a1230d62393d9ef5808c"
+    },
+    {
+      "version": "4.2.0",
+      "path": "core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/32f7299601108917fb01920a54e084595b7b3bf8/core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "bytes": 148320,
+      "sha256": "841238cc583fef70106423fd101063d78657eda3faa02ee2e368074364e89b99"
+    },
+    {
+      "version": "master",
+      "path": "pom.xml",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/pom.xml",
+      "bytes": 140299,
+      "sha256": "6a02446b5a81a3ccfcd94fd135be14b6acb933ba9664f5cdc7c485c34cb184c2"
+    },
+    {
+      "version": "master",
+      "path": "core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/core/src/main/scala/org/apache/spark/rdd/RDD.scala",
+      "bytes": 97475,
+      "sha256": "8f4a0152232bfbca40afe329c693332492bfa7d99b448c196611feb3cfdfd482"
+    },
+    {
+      "version": "master",
+      "path": "core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/core/src/main/scala/org/apache/spark/rdd/MapPartitionsRDD.scala",
+      "bytes": 3430,
+      "sha256": "a5eedddfe83cc505276ad762ed64211c829d461cbdb3854e0d4cff24da07dfae"
+    },
+    {
+      "version": "master",
+      "path": "core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/core/src/main/scala/org/apache/spark/scheduler/DAGScheduler.scala",
+      "bytes": 283881,
+      "sha256": "93cce9a83d0560330e784402a806d8d3f19f16a745b5a5d96a94c64eebc990b4"
+    },
+    {
+      "version": "master",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/sql/core/src/main/scala/org/apache/spark/sql/execution/columnar/InMemoryRelation.scala",
+      "bytes": 30974,
+      "sha256": "4cbb8c23d48f7763592e8f21c7e66cc392da13ad7dc9751f022b4b424207fa0b"
+    },
+    {
+      "version": "master",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala",
+      "error": "<HTTPError 404: 'Not Found'>"
+    },
+    {
+      "version": "master",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/QueryStageExec.scala",
+      "bytes": 12217,
+      "sha256": "4d7598a8570178cb72ee474a7d09699fa07e1f6a8985d08dc5d4fa3f7864deb1"
+    },
+    {
+      "version": "master",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/core/src/main/scala/org/apache/spark/storage/BlockManager.scala",
+      "bytes": 109705,
+      "sha256": "106c5c65024b06d964c373cc8a07407f05482892d01b4347041b3ea1af17832b"
+    },
+    {
+      "version": "master",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/core/src/main/scala/org/apache/spark/storage/BlockManagerMasterEndpoint.scala",
+      "bytes": 57506,
+      "sha256": "d8f697653ee658fe80fab51bfda7565ff6ebda48900295fa37ae2ab2fe2344ff"
+    },
+    {
+      "version": "master",
+      "path": "core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/core/src/main/scala/org/apache/spark/storage/BlockManagerDecommissioner.scala",
+      "bytes": 22374,
+      "sha256": "63243913c34e74cfdd45bb869863e898fb1766ebadd422a1d2703480a8a20f20"
+    },
+    {
+      "version": "master",
+      "path": "core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/core/src/main/scala/org/apache/spark/ContextCleaner.scala",
+      "bytes": 17636,
+      "sha256": "686086cade0705e110e536a30153344f4f0b5b67877e1eaef75e1238ea47064c"
+    },
+    {
+      "version": "master",
+      "path": "core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "url": "https://raw.githubusercontent.com/apache/spark/67b62cb4081eda45933e76797a7730596dc50369/core/src/main/scala/org/apache/spark/SparkContext.scala",
+      "bytes": 168335,
+      "sha256": "e8a99085034b4d2f01095fbf9214aa931960da970bef7863479e75632055c607"
+    }
+  ],
+  "downloaded_bytes": 3920888
+}

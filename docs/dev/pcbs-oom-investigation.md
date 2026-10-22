@@ -1,8 +1,9 @@
 # PCBS heap OOM investigation (#16362)
 
-Status: IN PROGRESS — scheduler-token research spike, newer-version audit and
-upstream storage API proposal. Prior reproduction/prototype results remain
-READY FOR REVIEW. No production fix selected; architect acceptance pending.
+Status: READY FOR REVIEW — executable scheduler-token research, newer-version
+audit and upstream storage API proposal verified. Prior reproduction/prototype
+results remain READY FOR REVIEW. Production implementation and architect
+acceptance are pending.
 
 ## Current architecture priorities (read first)
 
@@ -24,12 +25,13 @@ native/disk retention, remote retrieval and cache-miss recomputation. The intend
 payload path avoids heap (network staging may be acceptable). Do not assume
 Spark must continue storing descriptors: that was the earlier split-store
 candidate. SQL cache plan reuse can remain. The custom actual statistics-wrapper
-RDD lifecycle/compute interception is a concrete source candidate, not a tested
-implementation. Prefer recovery WITHOUT task failure; task retry is a fallback.
+RDD lifecycle/compute interception has passed the local research fixture on
+Spark3.5.5 and4.0.1; it is not production implementation. Prefer recovery WITHOUT
+task failure; task retry is a fallback.
 
 ## Active scheduler-token research spike (2026-10-22)
 
-IN PROGRESS. User now authorizes an executable disposable research spike, newer
+READY FOR REVIEW. User authorizes an executable disposable research spike, newer
 Spark compatibility investigation, and a long-term Apache Spark storage-extension
 proposal. This supersedes earlier discussion-only/no-implementation wording for
 research code ONLY. No production cache implementation, Spark patch, new public
@@ -60,6 +62,32 @@ StorageLevel and offer supported storage/ownership/transport/scheduler hooks,
 not just a cache-format hook. No community acceptance is presumed. Park a path
 on a demonstrated architectural blocker; continue independent tracks.
 
+Completed outputs: [research results](pcbs-token-cache-spike.md),
+[portable fixture](../../tools/pcbs-token-cache-spike/README.md), and
+[upstream API proposal](pcbs-cache-storage-api-proposal.md).
+Root independently compiled/executed the final package on 3.5.5/4.0.1 with AQE
+off/on. Each JVM recorded 142 TaskEnd events, exactly two expected FetchFailed
+events in deliberate payload-only-loss controls, and normal ApplicationEnd.
+All rows/count/sum and initial statistics passed. Small 56 B tokens preserved
+native cache hits after four shuffle files and four map outputs were erased;
+deleting token+payload enabled recomputation.
+The fixture uses 10k Longs/80k logical bytes/local[4]/1 GiB, NOT PCBS/GPU/spill/
+remote or production ownership. Payload-only loss with a token requires retry.
+Final package source/artifact/runtime hashes and 55 pinned official source
+files were independently audited; checked-in verified-results.json records
+exact provenance. Two focused peer reviews passed after correcting proposal
+status wording.
+
+Source-only later references 4.0.4/4.1.3/4.2.0/master do NOT establish runtime
+support. 4.2 has keyed statistics and a new constructor; master 5.0.0-SNAPSHOT
+changes the wrapper factory to mapPartitionsWithIndexInternal. No GPU jobs,
+production sources or Spark sources changed.
+The upstream proposal keeps Spark lifecycle/locations/recovery authoritative
+and adds backend storage/lease/transfer contracts honoring StorageLevel.
+API names are illustrative and unaccepted. Commit-before-visibility ordering
+and nonblocking scheduler defer/resubmit are explicit. No external posts, PRs
+or community approval.
+
 Latest proposed refinement: keep genuine small scheduler tokens under the actual
 owner's RDDBlockIds in regular BlockManager, while own custom RDD compute serves
 all data through the native cache manager. DAGScheduler requires BOTH a non-NONE
@@ -69,10 +97,11 @@ so final iterator can still bypass regular data caching. Tokens must represent
 committed, resolvable partitions; native host-to-disk spill is not eviction.
 Token removal and payload removal need version-aware coordination; ordinary
 Spark marker replication/decommission does not automatically copy native data.
-This is an uncompiled stock-Spark source candidate, not a selected production
-protocol or permission to implement. Independently read by root and delegated
-MCP-only audit; no runtime proof. A real-shuffle test must distinguish scheduler
-cache awareness from a local no-shuffle cache-hit benchmark.
+The local stock-Spark fixture now proves the scheduler-token boundary with a
+real upstream shuffle; production paired lifecycle/remote availability remains
+unimplemented. Root independently compiled/reran both packaged versions and
+verified raw events/artifacts. Newer source audit found private API changes;
+see completed research below. No production protocol or implementation approved.
 
 Bypassing super.persist leaves RDD's internal storage level NONE, so its final
 iterator calls compute instead of Spark BlockManager.getOrCompute. Own compute
@@ -83,8 +112,9 @@ locations; getMissingParentStages748 traverses upstream dependencies when those
 locations are absent and can schedule missing shuffle stages despite our cache
 hit. Custom preferred locations alone do not supply that cache-hit boundary.
 Root independently read these paths; bounded worker audit uses MCP tools only.
-This is design discussion, not authorization for implementation or Spark changes.
-Released SQL/PCBS contracts remain; new cache internals are unreleased.
+Research implementation is authorized as recorded below; production changes and
+Spark implementation changes are not. Released SQL/PCBS contracts remain; new
+cache internals are unreleased.
 Earlier design proposals and chronological evidence follow below.
 
 ## Production patch plan (2026-10-22)

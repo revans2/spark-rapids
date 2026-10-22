@@ -1,0 +1,131 @@
+{
+  "status": "READY FOR REVIEW",
+  "scope": "local mechanism, not production acceptance",
+  "cases": [
+    {
+      "spark_version": "3.5.5",
+      "status": "PASS",
+      "aqe_modes": [
+        false,
+        true
+      ],
+      "rows_per_fixture": 10000,
+      "logical_raw_long_bytes": 80000,
+      "cached_partitions": 6,
+      "token_memory_accounting_bytes_each": 56,
+      "task_end_events": 142,
+      "expected_fetch_failed_task_ends": 2,
+      "missing_required_marker_rejected": true,
+      "sources": [
+        {
+          "name": "TokenCacheSpike.scala",
+          "sha256": "df4bb0cdbca6c8b24be508f6e700af5ab3a01b0b031d478b3c841ffaedea7fd6"
+        },
+        {
+          "name": "CacheProbeCompatibility355.scala",
+          "sha256": "b7ed00ff86f6d1c97f5f4215980bf3cd61cab0d91972f735cbd85a089197b5ed"
+        }
+      ],
+      "runner_sha256": "fdac5885ebcdd6633d59304199d12e0eb393bb29981ed562886343a5dd767b1f",
+      "artifact_sha256": "c322b113e1b87d681861281f0bf5d9923595a215156ff1f255be57d4c1b998a3",
+      "runtime_artifacts": [
+        {
+          "path": "/home/roberte/src/spark_3.5.5/assembly/target/scala-2.12/jars/scala-compiler-2.12.18.jar",
+          "bytes": 10983677,
+          "sha256": "5680cee34200e8d8ed7965c71d8b1428d3eeb889eb14fec38d40ffbc3761a0d0"
+        },
+        {
+          "path": "/home/roberte/src/spark_3.5.5/assembly/target/scala-2.12/jars/spark-catalyst_2.12-3.5.5.jar",
+          "bytes": 12579489,
+          "sha256": "5cb974e4b221c50773d132a202da9a87a188766ef0b33979b5660a30a542f31f"
+        },
+        {
+          "path": "/home/roberte/src/spark_3.5.5/assembly/target/scala-2.12/jars/spark-core_2.12-3.5.5.jar",
+          "bytes": 14700867,
+          "sha256": "d01dab9bfa34d541c43e4e331ff66759294e9f341fd19e0f5ebc9966430823f3"
+        },
+        {
+          "path": "/home/roberte/src/spark_3.5.5/assembly/target/scala-2.12/jars/spark-sql_2.12-3.5.5.jar",
+          "bytes": 9671789,
+          "sha256": "93feddc5b9227573f36649429f42dbbf444cc77b4da4e1d2b3948cdd743c2ad5"
+        }
+      ],
+      "evidence": "/data/pcbs-oom/token-cache-spike/root-portable-355"
+    },
+    {
+      "spark_version": "4.0.1",
+      "status": "PASS",
+      "aqe_modes": [
+        false,
+        true
+      ],
+      "rows_per_fixture": 10000,
+      "logical_raw_long_bytes": 80000,
+      "cached_partitions": 6,
+      "token_memory_accounting_bytes_each": 56,
+      "task_end_events": 142,
+      "expected_fetch_failed_task_ends": 2,
+      "missing_required_marker_rejected": true,
+      "sources": [
+        {
+          "name": "TokenCacheSpike.scala",
+          "sha256": "df4bb0cdbca6c8b24be508f6e700af5ab3a01b0b031d478b3c841ffaedea7fd6"
+        },
+        {
+          "name": "CacheProbeCompatibility401.scala",
+          "sha256": "79de6de96b3f65fb0569ec7dc4078b89b68710446b90df38dc81be5361b46cbe"
+        }
+      ],
+      "runner_sha256": "fdac5885ebcdd6633d59304199d12e0eb393bb29981ed562886343a5dd767b1f",
+      "artifact_sha256": "ce19c52f50eb71a8a83c9ae2cd93d82338fb826dc801256d5fb60c924904b6bd",
+      "runtime_artifacts": [
+        {
+          "path": "/home/roberte/src/spark_4.0.1/jars/scala-compiler-2.13.16.jar",
+          "bytes": 12308669,
+          "sha256": "f59982714591e321ba9c087af2c8666e2f5fb92b11a0cef72c2c5e9b342152d3"
+        },
+        {
+          "path": "/home/roberte/src/spark_4.0.1/jars/spark-catalyst_2.13-4.0.1.jar",
+          "bytes": 15354756,
+          "sha256": "474485aa270cb59ca7f59f776dca8d30b667eb4b7a28e4c6fec7f66ff5d823a5"
+        },
+        {
+          "path": "/home/roberte/src/spark_4.0.1/jars/spark-core_2.13-4.0.1.jar",
+          "bytes": 14776655,
+          "sha256": "e35d7b233d15f3102172c14f6db502a3c62586fba73fb2a4a22807843285806c"
+        },
+        {
+          "path": "/home/roberte/src/spark_4.0.1/jars/spark-sql_2.13-4.0.1.jar",
+          "bytes": 12551930,
+          "sha256": "d2f82d16d9afbc04c849e2c4a6c9b7da40c1417a94dc43de74e2544ebe042e74"
+        }
+      ],
+      "evidence": "/data/pcbs-oom/token-cache-spike/root-portable-401"
+    }
+  ],
+  "verified_official_source_files": 55,
+  "source_lookup_paths_unavailable": [
+    {
+      "version": "4.0.1",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala"
+    },
+    {
+      "version": "4.0.4",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala"
+    },
+    {
+      "version": "4.1.3",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala"
+    },
+    {
+      "version": "4.2.0",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala"
+    },
+    {
+      "version": "master",
+      "path": "sql/core/src/main/scala/org/apache/spark/sql/execution/adaptive/TableCacheQueryStageExec.scala"
+    }
+  ],
+  "source_reference_manifest_sha256": "d60f53d250453acb6a7bf7ebd290e621e2ccbc3c2346610076a45c4962fb9e61",
+  "later_versions_runtime_tested": false
+}

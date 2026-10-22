@@ -8,6 +8,11 @@ examines whether normal task retry after acknowledged cache invalidation can
 replace the stronger pre-fetch ownership requirement below. It also narrows
 CPU/serialization and host-budget work to adapters over existing mechanisms.
 That alternative is source-supported but not runtime-proven.
+The later [scheduler-token spike](pcbs-token-cache-spike.md) executes a different
+candidate: our RDD owns data caching while real small BlockManager tokens supply
+scheduler visibility. Its local mechanism passes and production limitations are
+recorded separately. The [upstream proposal](pcbs-cache-storage-api-proposal.md)
+is a long-term design draft, not an existing Spark API.
 
 ## Goal and evidence
 
