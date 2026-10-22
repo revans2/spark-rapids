@@ -169,6 +169,6 @@ the tracker and marked READY FOR REVIEW, not architect-accepted DONE.
 
 | Case | Status | Verified scope |
 | --- | --- | --- |
-| C | READY FOR REVIEW | Spark4.0.1;13Success+1genuineFetchFailed;exact10000rows;2removalgates;actualBMmigration;287hashes. |
-| D | READY FOR REVIEW | Spark3.5.5;3freshJVMs;1cachepartition;producer1receiver0;receiver noWRITE/noPRODUCE,READwithouttask;1000rows/2000values;sourcecomputedonce;248hashes. |
-| E | READY FOR REVIEW | Spark3.5.5;3independentconfigs;44successfultasks percase;allprimarychecks;actualLZ4/crypto paths;no combos/native/performance claim. |
+| C | READY FOR REVIEW | Spark 4.0.1; 13 successes and 1 genuine FetchFailed; exact 10,000 rows; 2 removal gates; BlockManager migration; 287 hashes. |
+| D | READY FOR REVIEW | Spark 3.5.5; 3 fresh JVMs; 1 cache partition; producer 1, receiver 0; receiver decoded without a task and never produced/encoded; exact 1,000 rows/2,000 values; source computed once; 248 hashes. |
+| E | READY FOR REVIEW | Spark 3.5.5; 3 independent settings; 44 successful tasks per case; all primary checks; actual LZ4/crypto paths. Combined settings and performance were not tested. |

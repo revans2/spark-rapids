@@ -40,19 +40,27 @@ production change; never weaken acceptance. Other independent work may proceed.
   untouched except accounting markers; run has normalend/no taskfailures.
   Evidence: /data/pcbs-oom/blockmanager-codec-confidence/docs-native-size/.
   Focused independent review passed; no new native feature or pressure claim.
-- E: READY FOR REVIEW. Spark3.5.5;3independentconfigs;44successfultasks percase;allprimarychecks;actualLZ4/crypto paths;no combos/native/performance claim.
+- E: READY FOR REVIEW. Spark 3.5.5; 3 independent settings; 44 successful tasks per case; all primary checks; actual LZ4/crypto paths. Combined settings and performance were not tested.
   Worker and independent root fresh runs passed; root read decisive code,
   rehashed inputs and reparsed raw logs/events; separate peer review passed.
   Evidence: /data/pcbs-oom/blockmanager-codec-confidence/E/root-matrix1/. MCP-only checkpoint confirmed.
-- C: READY FOR REVIEW. Spark4.0.1;13Success+1genuineFetchFailed;exact10000rows;2removalgates;actualBMmigration;287hashes.
+- C: READY FOR REVIEW. Spark 4.0.1; 13 successes and 1 genuine FetchFailed; exact 10,000 rows; 2 removal gates; BlockManager migration; 287 hashes.
   Worker and independent root fresh runs passed; root read decisive code,
   rehashed inputs and reparsed raw logs/events; separate peer review passed.
   Evidence: /data/pcbs-oom/blockmanager-codec-confidence/C/root401/. MCP-only checkpoint confirmed.
-- D: READY FOR REVIEW. Spark3.5.5;3freshJVMs;1cachepartition;producer1receiver0;receiver noWRITE/noPRODUCE,READwithouttask;1000rows/2000values;sourcecomputedonce;248hashes.
+- D: READY FOR REVIEW. Spark 3.5.5; 3 fresh JVMs; 1 cache partition; producer 1, receiver 0; receiver decoded without a task and never produced/encoded; exact 1,000 rows/2,000 values; source computed once; 248 hashes.
   Worker and independent root fresh runs passed; root read decisive code,
   rehashed inputs and reparsed raw logs/events; separate peer review passed.
   Evidence: /data/pcbs-oom/blockmanager-codec-confidence/D/root-verification/. MCP-only checkpoint confirmed.
-- B, F, G: NOT STARTED; depend on first batch.
+- B: IN PROGRESS after E/C/D verification; exact Spark 4.2.0 target selected.
+  Matching module jars/Scala compiler cached. Runtime lacks RoaringBitmap
+  1.6.10 and flatbuffers-java 25.2.10; DNS prevented exact dependency fetch.
+  Compile-only proof proceeding without substitute versions; runtime parked
+  unless exact dependencies become available.
+- F: IN PROGRESS; actual first-action partial read and once-injected decode
+  failure in separate JVMs, unchanged cleanup behavior; park real lifecycle gaps.
+- G: IN PROGRESS; actual driver SQL unpersist(blocking=true) against a paused
+  executor reader. All workers confirm MCP docker_exec-only at checkpoint.
 - A: NOT STARTED; last, after lower-risk confidence work.
 
 Architect reports independent reproduction of 81347f8ae9 at
