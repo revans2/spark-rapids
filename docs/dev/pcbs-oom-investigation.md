@@ -17,15 +17,27 @@ verify integrated conclusions without repeatedly importing entire source files.
 Preserve priorities here and in every relevant worker handoff after resets.
 All project actions remain MCP docker_exec-only.
 
-Current discussion: user proposes a shadow payload manager. Spark would retain
-small cached metadata/references; plugin-owned payloads would spill off-heap to
-disk, resolve locally/remotely across executors, and remain alive across Spark
-memory eviction. Whole-RDD retirement on the driver would coordinate shadow
-cleanup. This is an unimplemented architecture candidate, not final acceptance
-or authorization to change production behavior. Association with actual cached
-RDD IDs, remote recovery and in-flight ownership remain to be specified.
-Existing Spark/PCBS released contracts must be preserved. Original investigation
-scope and chronological evidence follow below.
+Latest architect clarification: explore bypassing existing RDD persist/unpersist
+storage entirely, using our own BlockManager-equivalent for partition lookup,
+native/disk retention, remote retrieval and cache-miss recomputation. The intended
+payload path avoids heap (network staging may be acceptable). Do not assume
+Spark must continue storing descriptors: that was the earlier split-store
+candidate. SQL cache plan reuse can remain. The custom actual statistics-wrapper
+RDD lifecycle/compute interception is a concrete source candidate, not a tested
+implementation. Prefer recovery WITHOUT task failure; task retry is a fallback.
+
+Bypassing super.persist leaves RDD's internal storage level NONE, so its final
+iterator calls compute instead of Spark BlockManager.getOrCompute. Own compute
+can implement local/remote native-cache lookup and parent computation on a miss,
+preserving the supplied statistics wrapper function. Need investigate scheduler
+integration: DAGScheduler.getCacheLocs426 uses getStorageLevel and Spark BM
+locations; getMissingParentStages748 traverses upstream dependencies when those
+locations are absent and can schedule missing shuffle stages despite our cache
+hit. Custom preferred locations alone do not supply that cache-hit boundary.
+Root independently read these paths; bounded worker audit uses MCP tools only.
+This is design discussion, not authorization for implementation or Spark changes.
+Released SQL/PCBS contracts remain; new cache internals are unreleased.
+Earlier design proposals and chronological evidence follow below.
 
 ## Production patch plan (2026-10-22)
 
