@@ -962,6 +962,47 @@ Root+worker independently verified entry/unit evidence. Full benchmark
 supervisor105278 now runs3JVMs, stoponfailure, no build/test concurrency.
 Source+artifact andallrawlogs retained inpcbs-only-sweep. MCP-onlyconfirmed.
 
+## PCBS-only split-budget experiment result
+
+Status: READY FOR REVIEW; only the architect marks DONE.
+Both 16 and 32 MiB variants passed three fresh JVMs, each with one warmup
+and three timed full-data reads. Global GPU target remained1GiB; defaults
+unroll16/reset100 and fraction0.6/resources/data stayed fixed.
+
+| PCBS target | Median fill s | Median read s | Read GC % | Max post-full-GC GiB |
+|---|---:|---:|---:|---:|
+|16MiB|273.718999901|45.197849639|8.8002816008|31.14453125|
+|32MiB|262.728192850|42.963548705|16.0298599809|35.15234375|
+
+32MiB source b65451d39134eb9f6475c5ae16fb437534d7b760; sourceSHA
+b3c11561bbe40bb8fd78f64e308cb864d1fe1eda09214776d777b07495cb5c32;
+artifactSHA ab3167db471c90a97068ee3ca1923d028e941e74edfe324a75c99de2ca0efaf7.
+All 32MiB partitions had198records, largest33,393,244bytes; total encoded
+102,584,305,728bytes. Both variants passed CachedBatchWriterSuite17/17 and
+both public GPU writer entry round trips with1.2M known ordered rows.
+No OOM, timeout or failed check among the six accepted benchmark JVMs.
+Initial unit dependency-resolution failure remains preserved separately.
+
+Lead reran analysis and independent raw checker for all6cases, inspected
+source and correctness checks, and reviewed report/CSV calculations. Worker
+independently audited raw evidence and substantive source/report changes.
+Report: docs/dev/pcbs-split-budget-sweep.md, aggregateCSV and per-JVM casesCSV.
+Raw evidence/scripts/artifacts: /data/pcbs-oom/pcbs-only-sweep.
+Signed-off source changes remain isolated on pcbs-cache-size-experiment;
+no production default or fix selected. Main workspace plugin/source baseline
+hashes stayed fixed. All benchmark children and GPU processes exited.
+
+For each size, the two approaches have overlapping read-time ranges in this
+synthetic workload; fill medians differ by less than1%.
+PCBS-only sizing retains the global GPU target but scan still feeds small
+decoded batches directly into partial aggregation. Eager output-list retention,
+whole-row materialization and estimated rather than strict encoded-byte sizing
+remain. Fill is sequential; page-cache/A6000/synthetic-schema limitations and
+released CPU/API/format/ownership boundaries are recorded in the report.
+No8MiB test was needed; no larger PCBS-only cap is scheduled.
+MCP docker_exec-only confirmed throughout; required on every future resume,
+checkpoint and worker handoff. User/architect acceptance remains pending.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
