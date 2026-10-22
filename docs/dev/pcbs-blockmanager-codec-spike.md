@@ -5,15 +5,16 @@ Genuine recovery and BlockManager migration are also verified on Spark 3.5.5.
 This is disposable upstream research, not a production
 Spark or RAPIDS change. Existing cache behavior is RELEASED and preserved by
 default. The optional codec carrier and fixtures are UNRELEASED and have no
-compatibility obligations. See the [accepted proposal](pcbs-cache-storage-api-proposal.md)
+compatibility obligations. See the [proposal under review](pcbs-cache-storage-api-proposal.md)
 and [investigation tracker](pcbs-oom-investigation.md).
 
 ## Scope and boundaries
 
 Prove per-cache byte encoding inside the real BlockManager before selecting a
 public API. Heap-backed records are allowed for this first proof; that does not
-establish a heap OOM fix. Native payloads must use RAPIDS-managed spillable
-storage. Spark's existing OFF_HEAP pool is excluded, including as a fallback.
+establish a heap OOM fix. Native storage is optional (nice-to-have), independent
+of every codec gate. If pursued later it uses RAPIDS-managed spillable storage;
+Spark's existing OFF_HEAP pool remains excluded.
 
 The research candidate associates an immutable streaming serializer with the
 actual SQL statistics-wrapper RDD using a custom ClassTag as a temporary
@@ -34,19 +35,6 @@ already send (StorageLevel, ClassTag) as small Java-serialized control metadata.
 Remote requesters supply the tag from their persisted RDD. Runtime tests must
 prove subtype/context survival; type equality alone cannot identify a codec.
 
-The native audit identifies a separate ownership boundary. MemoryStore closes
-AutoCloseable deserialized values on removal; a value can own a RAPIDS
-SpillableHostBuffer. getHostBuffer returns a separately owned materialized
-reference. Block read locks must protect access to the spillable owner through
-materialization and lazy consumption. The factory uses trackNoSpill, so wrapping
-an allocation alone does not establish bounded host-store admission.
-
-BlockManager status currently derives presence and sizes from MemoryStore and
-DiskStore. Retaining a small native handle there can test lifetime, but does
-not prove complete native residency/spill accounting. Native payload bytes must
-not be reserved against Spark heap or its OFF_HEAP pool. A complete backend
-integration needs explicit accounting/status semantics after this proof.
-
 ## Required runtime evidence
 
 - Actual SQL persisted wrapper selects the codec; generic bulk serialization
@@ -55,9 +43,6 @@ integration needs explicit accounting/status semantics after this proof.
 - Multiple JVMs, remote fetch and replicas that never ran the producer task.
 - Exact rows/statistics, empty partitions, existing recovery and blocking removal.
 - Version-specific overlays preserve each version's SQL materialization logic.
-- Separately: actual RAPIDS spillable owner, bounded native allocation, forced
-  spill, disk reload and reader/removal cleanup. The first lifetime proof is
-  limited to deserialized MEMORY_AND_DISK, not all StorageLevels.
 
 ## Verification record
 
@@ -86,23 +71,13 @@ TaskContext absent on both executor JVMs. Those JVMs also produce other
 partitions, so this does not prove a receiver that never produced any cache data.
 The held-reader race is local removeRdd, not a full distributed SQL unpersist race.
 
-Native passes: real RAPIDS SpillableHostBuffer values in deserialized
-MEMORY_AND_DISK entries; forced RAPIDS spill/restore and BlockManager disk
-reload; master blocking removeRdd; independently materialized native reference
-survives owner removal; remote decode and executor cleanup. Driver owners balance
-4/4, each executor 1/1; native payload stores are empty after removal; spill files
-are deleted. RAPIDS HostAlloc has a 64 MiB limit, over-limit allocation is rejected,
-Spark off-heap storage usage is zero. A 1 MiB host bounce allocation remains until
-framework shutdown, after which driver host usage is zero. Framework setup also
-allocates a 1 MiB device bounce buffer; no query GPU operators are exercised.
-SQLPlugin is disabled; the fixture manually initializes the same RAPIDS memory
-and spill components. The original native PCBS artifact supplies those classes;
-its unrelated payload registry is not exercised.
-
-A suspected restore-cap bypass was checked and rejected during review:
-HostMemoryBuffer.allocate delegates to DefaultHostMemoryAllocator, which
-HostAlloc.initialize installs. Root verified the exact supplied artifact's
-bytecode and the initialization source before accepting that conclusion.
+The historical optional native fixture passed successful lifetime/spill/reload
+checks for deserialized MEMORY_AND_DISK. It manually initializes RAPIDS components
+with SQLPlugin disabled; it is not an actual PCBS/SQL/GPU data path. Driver
+owners balance 4/4 and each executor 1/1, payload handles are removed and spill
+files deleted. A 1 MiB host bounce allocation remains until framework shutdown;
+setup also creates a 1 MiB device bounce buffer. The over-limit request check is
+qualified in the optional notes below, not treated as pressure admission.
 
 Root evidence: /data/pcbs-oom/blockmanager-codec-spike/root-acceptance355,
 /root-acceptance401/run (under the same parent), and
@@ -142,14 +117,45 @@ only injection, not Spark recovery. The old failed evidence is preserved at
 /root-recovery355 under the same parent. Final source and runner snapshots match
 the committed versions, and both the corrected worker and root runs pass.
 
-## Remaining criteria
+## Optional native path: open design notes
 
-Full native residency/status accounting, bounded end-to-end transfers, native
-cancellation/failed admission/replication, other native StorageLevels and disabled
-host-limit admission remain unverified. Native values here use ordinary heap
-metadata entries; no complete native store integration is claimed. Serialized
-sender paths can still build partition-sized heap chunks. The native lifetime
-proof is not yet an actual PCBS/SQL/GPU pipeline. Spark versions newer than 4.0.1
-remain source-audited only. Full distributed SQL unpersist races and process-loss
-recovery remain outside the bounded proof. The new codec recovery/migration
-results above are separate from the earlier token research.
+Native payload storage is a nice-to-have (human decision, 2026-10-22), not a
+codec requirement. No codec design, implementation or confidence gate depends
+on native work. More native implementation is outside the current handoff.
+If pursued later, payload allocation uses RAPIDS-managed spillable storage;
+Spark's separately partitioned OFF_HEAP pool remains excluded.
+
+- **Borrowed values:** deserialized entries return the cache-owned object.
+  Iterator exhaustion releases the block read lock even when downstream code
+  still holds the last batch; eviction/removal can then close its owner.
+  Readers must take their own buffer reference while holding that lock.
+  The fixture does so before release. No test yet uses a borrowed batch after its iterator releases
+  the read lock during eviction/removal.
+- **Accounting:** MemoryStore uses SizeEstimator over the reachable heap graph,
+  not native payload bytes. The instrumented existing fixture recorded
+  **197,480 Spark memory bytes for a 32,768-byte native payload**. After RAPIDS
+  spilled it, Spark still reported 197,480 memory bytes, zero disk bytes and
+  useMemory=true. Heap bookkeeping can exceed a small payload; this is not a
+  native residency measurement. Open options are: charge an estimate of native
+  size to Spark; charge wrapper/heap bookkeeping only and report native residency
+  separately; or have Spark ask RAPIDS for residency. None is selected.
+- **Allocation evidence:** the configured 64 MiB HostAlloc test rejects one
+  individually over-limit request. It does not establish admission, aggregate
+  residency or progress under memory pressure.
+- **Heap IO:** payload IO is still heap-buffered. Whole-partition serialization
+  for remote sends explicitly collects 4 MiB heap chunks. Direct BlockManager
+  disk eviction instead calls buffered streaming IO; it does not allocate those
+  4 MiB chunks through that path. Neither establishes heap-free transfers.
+
+Measurement: /data/pcbs-oom/blockmanager-codec-confidence/docs-native-size/
+accounting-measurement.json. This instruments the existing lifetime fixture
+without introducing another native backend or pressure workload.
+
+## Remaining codec criteria
+
+The new confidence handoff covers configurations, clean receiver context,
+upstream-target compatibility, partial/failing reads, distributed SQL unpersist
+and controlled heap/GC/timing benefit. Process-loss recovery and other unsupported
+routes remain outside earlier bounded proofs. Native backend/accounting,
+failure paths and transfer improvements are optional and out of scope; they do
+not block the codec goal.

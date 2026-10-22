@@ -33,7 +33,13 @@ All project operations remain MCP docker_exec-only; require confirmation at
 every worker handoff/checkpoint. Park/report any non-fixture failure or proposed
 production change; never weaken acceptance. Other independent work may proceed.
 
-- Document fixes: IN PROGRESS.
+- Document fixes: READY FOR REVIEW. Native optional/independent, borrowed-reader
+  lifetime gap, unselected accounting choices and precise buffered-IO claims
+  recorded. Existing fixture size-only run measured197480Sparkmem/32768payload
+  before AND afterRAPIDSspill, still useMemory=true, diskBytes=0. Source/runner
+  untouched except accounting markers; run has normalend/no taskfailures.
+  Evidence: /data/pcbs-oom/blockmanager-codec-confidence/docs-native-size/.
+  Focused independent review passed; no new native feature or pressure claim.
 - E: IN PROGRESS (codec worker).
 - C: IN PROGRESS (version/recovery worker).
 - D: IN PROGRESS (clean receiver worker).
@@ -46,8 +52,43 @@ Architect reports independent reproduction of 81347f8ae9 at
 /data/pcbs-oom/blockmanager-native-spike/architect-rerun. Supplied
 architect-rechecked-results.json was inspected: it records valid root evidence
 paths, so it is not by itself an audit of those differently named architect runs.
-Keep that attribution separate; inspect their raw result files before claiming
-independent verification of those paths.
+Keep that attribution separate. Raw architect primary/native result JSONs
+were inspected and report valid runs; no fresh hash audit of those paths
+is claimed here. Root confidence evidence is separately recorded.
+
+## Optional native path: open design notes
+
+Native payload storage is a nice-to-have (human decision, 2026-10-22), not a
+codec requirement. No codec design, implementation or confidence gate depends
+on native work. More native implementation is outside the current handoff.
+If pursued later, payload allocation uses RAPIDS-managed spillable storage;
+Spark's separately partitioned OFF_HEAP pool remains excluded.
+
+- **Borrowed values:** deserialized entries return the cache-owned object.
+  Iterator exhaustion releases the block read lock even when downstream code
+  still holds the last batch; eviction/removal can then close its owner.
+  Readers must take their own buffer reference while holding that lock.
+  The fixture does so before release. No test yet uses a borrowed batch after its iterator releases
+  the read lock during eviction/removal.
+- **Accounting:** MemoryStore uses SizeEstimator over the reachable heap graph,
+  not native payload bytes. The instrumented existing fixture recorded
+  **197,480 Spark memory bytes for a 32,768-byte native payload**. After RAPIDS
+  spilled it, Spark still reported 197,480 memory bytes, zero disk bytes and
+  useMemory=true. Heap bookkeeping can exceed a small payload; this is not a
+  native residency measurement. Open options are: charge an estimate of native
+  size to Spark; charge wrapper/heap bookkeeping only and report native residency
+  separately; or have Spark ask RAPIDS for residency. None is selected.
+- **Allocation evidence:** the configured 64 MiB HostAlloc test rejects one
+  individually over-limit request. It does not establish admission, aggregate
+  residency or progress under memory pressure.
+- **Heap IO:** payload IO is still heap-buffered. Whole-partition serialization
+  for remote sends explicitly collects 4 MiB heap chunks. Direct BlockManager
+  disk eviction instead calls buffered streaming IO; it does not allocate those
+  4 MiB chunks through that path. Neither establishes heap-free transfers.
+
+Measurement: /data/pcbs-oom/blockmanager-codec-confidence/docs-native-size/
+accounting-measurement.json. This instruments the existing lifetime fixture
+without introducing another native backend or pressure workload.
 
 ## Current architecture priorities (read first)
 
@@ -74,8 +115,8 @@ no-Spark-patch wording below describes the previous token spike only.
 
 Scope: first prove per-cache codec selection inside the real BlockManager,
 allowing heap payloads. Cover serialized unroll, disk and receiver-side codec
-context, mixed caches/defaults, existing recovery and blocking removal. Then
-validate RAPIDS-managed spillable payload integration; Spark OFF_HEAP storage
+context, mixed caches/defaults, existing recovery and blocking removal. Native
+payload storage is now explicitly optional and independent; Spark OFF_HEAP storage
 is excluded because its separate pool cannot exchange capacity with RAPIDS.
 Keep existing 1 GiB PCBS/large-test controls unchanged; no new batch sweep.
 
@@ -110,8 +151,9 @@ one normal ApplicationEnd, with zero unexpected task failures. Separate root
 evidence audit rechecked 249/282/250 source/runtime/artifact hashes. Reviewed
 research code and [results](pcbs-blockmanager-codec-spike.md) are READY FOR REVIEW.
 No production files changed; tiny Spark source overlays live only in disposable
-research outputs. Native uses actual RAPIDS SpillableHostBuffer, 64 MiB HostAlloc
-cap and no Spark OFF_HEAP. Balanced native owners, payload stores empty and spill
+research outputs. Optional native uses actual RAPIDS SpillableHostBuffer and no
+Spark OFF_HEAP. Its configured 64 MiB HostAlloc check demonstrates rejection
+of one over-limit request, not admission under pressure. Balanced native owners, payload stores empty and spill
 files deleted; only framework bounce memory remains until explicit shutdown.
 
 Scope qualifications remain explicit: no full native backend/accounting/status,

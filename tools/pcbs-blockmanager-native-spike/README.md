@@ -18,8 +18,9 @@ The fixture checks deterministic 32 KiB native buffers through:
   and per-executor owner/host-store/disk-store cleanup after removal.
 
 Driver owner counts must balance, spill files must disappear, executor owner counts
-must balance, and Spark off-heap storage use must stay zero. HostAlloc has a 64 MiB
-pageable limit and no pinned pool. An over-limit allocation is explicitly rejected.
+must balance, and Spark off-heap storage use must stay zero. HostAlloc is configured
+with a 64 MiB pageable limit and no pinned pool. The test rejects a single request
+larger than that limit; it does not establish admission or progress under pressure.
 One 1 MiB host bounce buffer remains after payload cleanup; framework shutdown
 returns driver host usage to zero. The framework also initializes one 1 MiB device
 bounce buffer; there are no query GPU operators or benchmark workloads.
@@ -64,3 +65,7 @@ The fixture does not validate other StorageLevels, disabled host-allocation limi
 cap-aware receive builders, payload cancellation/partial consumption cleanup,
 failed admission, replication/decommission native ownership or newer Spark.
 Those remain explicit follow-on criteria; do not infer them from this pass.
+
+A size-only instrumentation run records Spark's memory charge before and after
+RAPIDS spill; accounting-measurement.json retains the observed values and provenance.
+Native storage remains optional and independent of the codec proposal.

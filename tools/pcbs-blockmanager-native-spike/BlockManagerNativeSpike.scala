@@ -166,6 +166,13 @@ object BlockManagerNativeSpike {
     val batch = NativeRuntime.make(17)
     require(bm.putIterator(id, Iterator(batch), level))
     require(bm.memoryStore.contains(id))
+    def recordAccounting(phase: String): Unit = {
+      val status = bm.getStatus(id).get
+      mark(s"ACCOUNTING phase=$phase memBytes=${status.memSize} " +
+        s"diskBytes=${status.diskSize} useMemory=${status.storageLevel.useMemory} " +
+        s"payloadBytes=${NativeRuntime.bytes}")
+    }
+    recordAccounting("resident")
     withResource(batch.payload.getDataHostBuffer())(batch.verify)
     mark("LOCAL_NATIVE_PASS")
 
@@ -180,6 +187,7 @@ object BlockManagerNativeSpike {
     require(SpillFramework.stores.diskStore.numHandles > beforeSpill)
     val spillFiles = allFiles() -- filesBeforeSpill
     require(spillFiles.nonEmpty && spillFiles.forall(_.exists()))
+    recordAccounting("rapids-spilled")
     batch.verify()
     mark("RAPIDS_SPILL_RESTORE_PASS")
 

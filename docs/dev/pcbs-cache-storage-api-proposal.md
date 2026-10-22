@@ -3,15 +3,16 @@
 Status: READY FOR REVIEW — revised research proposal, not an accepted Spark API
 or implementation. Revised 2026-10-22 after architect and independent review.
 This is the long-term Apache Spark track. The short-term path continues to
-target unmodified Spark; no Spark patch or external posting is authorized here.
+target unmodified Spark; only isolated research overlays are authorized; no production Spark patch or external posting.
 
 ## Goals, in order
 
 1. Bypass generic Java object serialization/deserialization of SQL cache data.
    A cache format such as Parquet should supply its own framed byte encoding
    without passing its bulk payload through ObjectOutputStream/ObjectInputStream.
-2. Avoid heap residency and bulk heap copies where practical. This is a
-   secondary capability, not a prerequisite for proving the codec integration.
+2. Optionally avoid heap residency and bulk heap copies where practical.
+   Native storage is a nice-to-have, not required for the codec goal.
+   Codec work must remain independent of native implementation.
    A heap-backed implementation can meet goal 1 while still requiring heap
    sizing for its arrays and Spark's retained/unrolled values.
 3. Reuse BlockManager's storage, locking, accounting, locations, replication,
@@ -138,42 +139,39 @@ and [NettyBlockTransferService](https://github.com/apache/spark/blob/7c29c664cdc
 The source-only call-site audit is retained at
 /data/pcbs-oom/cache-codec-revision/findings.md.
 
-## Secondary goal: RAPIDS-managed spillable payload storage
+## Optional native path: open design notes
 
-Payloads must use RAPIDS-managed spillable storage, sharing its memory budget
-and spill machinery with cuDF/Spark-RAPIDS workloads. Spark's existing OFF_HEAP
-store is excluded: its separately partitioned memory pool cannot currently
-exchange capacity with RAPIDS memory management. It is not a prototype stage,
-fallback or proposed payload backend.
+Native payload storage is a nice-to-have (human decision, 2026-10-22), not a
+codec requirement. No codec design, implementation or confidence gate depends
+on native work. More native implementation is outside the current handoff.
+If pursued later, payload allocation uses RAPIDS-managed spillable storage;
+Spark's separately partitioned OFF_HEAP pool remains excluded.
 
-Reuse BlockManager's coordination, locking, publication and recovery wherever
-possible. This does not imply using its native allocator or memory pool.
-BlockData/ManagedBuffer may provide useful byte views, streams and transfer
-ownership. A native BlockData variant alone would not fix codec selection
-at the earlier value-to-byte boundaries.
+- **Borrowed values:** deserialized entries return the cache-owned object.
+  Iterator exhaustion releases the block read lock even when downstream code
+  still holds the last batch; eviction/removal can then close its owner.
+  Readers must take their own buffer reference while holding that lock.
+  The fixture does so before release. No test yet uses a borrowed batch after its iterator releases
+  the read lock during eviction/removal.
+- **Accounting:** MemoryStore uses SizeEstimator over the reachable heap graph,
+  not native payload bytes. The instrumented existing fixture recorded
+  **197,480 Spark memory bytes for a 32,768-byte native payload**. After RAPIDS
+  spilled it, Spark still reported 197,480 memory bytes, zero disk bytes and
+  useMemory=true. Heap bookkeeping can exceed a small payload; this is not a
+  native residency measurement. Open options are: charge an estimate of native
+  size to Spark; charge wrapper/heap bookkeeping only and report native residency
+  separately; or have Spark ask RAPIDS for residency. None is selected.
+- **Allocation evidence:** the configured 64 MiB HostAlloc test rejects one
+  individually over-limit request. It does not establish admission, aggregate
+  residency or progress under memory pressure.
+- **Heap IO:** payload IO is still heap-buffered. Whole-partition serialization
+  for remote sends explicitly collects 4 MiB heap chunks. Direct BlockManager
+  disk eviction instead calls buffered streaming IO; it does not allocate those
+  4 MiB chunks through that path. Neither establishes heap-free transfers.
 
-The integration must establish hooks for:
-
-- Adopting a plugin-owned native buffer with explicit ownership and accurate
-  memory accounting, rather than copying it into Spark-owned storage.
-- Releasing native returned values on failed admission, partial consumption,
-  cancellation or eviction without freeing buffers still used by consumers.
-- Bounded native/file transfer where convenience methods collect a whole
-  serialized partition in heap chunks.
-
-The inspected MemoryStore also closes AutoCloseable deserialized values on
-memory-entry removal. Reuse and test that existing behavior where applicable;
-it is a residency callback, not proof that every borrowed/decoded native value
-has a safe lifetime.
-
-A heap-backed codec returning normal CachedBatch arrays avoids those extra
-native-value ownership changes in the primary proof. It does not establish
-bounded heap. Native mode must separately account for retained cache memory,
-writer/restore buffers and transfer staging. StorageLevel semantics must remain
-explicit: memory-only cannot silently become disk-backed, disk-only cannot
-become permanent native retention. Any OFF_HEAP StorageLevel request needs an
-explicit compatibility decision; it does not authorize Spark-owned payload
-allocation. Do not add public configuration in this proposal.
+Measurement: /data/pcbs-oom/blockmanager-codec-confidence/docs-native-size/
+accounting-measurement.json. This instruments the existing lifetime fixture
+without introducing another native backend or pressure workload.
 
 ## Existing recovery and unpersist are the contract
 
@@ -224,7 +222,7 @@ Exact commit/source evidence is retained at
 
 ## Focused prototype needed before upstream implementation
 
-One BlockManager-integrated codec prototype, in two stages, is the next proof.
+The BlockManager-integrated codec proof stands on its own; native work is optional.
 It is distinct from the completed token/custom-RDD mechanism spike.
 
 ### A. Prove the primary codec goal, allowing heap storage
@@ -254,21 +252,6 @@ research branch. That is long-term upstream research, not a deployable
 short-term fix or authorization to modify production Spark. A global custom
 serializer test alone is only a preliminary codec experiment.
 
-### B. Prove the optional native path
-
-Reuse the same codec and BlockManager coordination with RAPIDS-managed
-SpillableHostMemoryBuffer payloads and the RAPIDS spill framework. Enforce its
-host/spill limits; do not allocate cache payloads in Spark's OFF_HEAP pool.
-Force spill/reload and remote transfers, account native retention and active
-buffers separately, and test reader/removal races and failed admission.
-Integrate PCBS/GPU encoding/decoding only after these ownership paths are clear.
-
-**Pass:** no cache-payload-sized heap materialization in the selected native
-path, correct cleanup and accounting, and unchanged persistence/recovery
-semantics. Explicitly measure and distinguish small control/staging allocations.
-If this needs more than existing storage/disposal hooks, demonstrate the missing
-property before proposing a native-entry/store extension.
-
 The bounded [BlockManager codec spike](pcbs-blockmanager-codec-spike.md) now
 passes on Spark 3.5.5 and 4.0.1; a separate RAPIDS native lifetime fixture passes
 on 3.5.5. These establish the recorded codec/ownership mechanisms, not the full
@@ -284,22 +267,24 @@ remain useful controls and need not be repeated wholesale.
 3. Prepare an Apache SPIP/design discussion if the community considers the change
    sufficiently cross-cutting. Include the default path, compatibility,
    persistence levels and measured heap/performance effects.
-4. Implement and test the codec-context integration first. Add native ownership
-   or bounded-transfer changes only when justified by the prototype.
-5. Keep the native implementation behind a boundary that can use the current
-   private adapter on older Spark and the supported hook on future Spark.
-   Do not freeze the unreleased token representation as a public contract.
+4. Implement and test codec-context integration independently. Optional native
+   work requires its own design and authorization; it is not an upstream codec gate.
+5. Do not freeze the unreleased ClassTag/token research carriers as public contracts.
 
 The [official SPIP guidance](https://spark.apache.org/improvement-proposals.html)
 and [contributor process](https://spark.apache.org/contributing.html) govern any
 future public proposal. No issue, mailing-list message or PR is authorized or
 posted here. API acceptance and the estimated five-year rollout are not promised.
 
-Open decisions are deliberately narrower: where to attach per-cache codec
-context, how to propagate it to receivers, how BlockManager owns references to
-RAPIDS-managed spillable payloads, and how unsupported StorageLevel/provider
-combinations fall back or fail without silently changing existing behavior.
-No provider-owned driver publication API or new cache recovery protocol remains.
+Open codec decisions are where to attach per-cache context, how to propagate
+it to receivers and how unsupported combinations fall back or fail without
+silently changing released behavior. The spike carried the codec inside ClassTag,
+Java-serialized in the task binary and replica-upload metadata. ClassTag equality
+ignores the codec, so it cannot key a per-codec directory. This supports the
+descriptor-in-existing-transfer-metadata option; it is evidence, not a recommended
+ClassTag API. Optional native ownership/accounting decisions are separate notes
+above and do not gate codec acceptance. No provider-owned driver publication API
+or new cache recovery protocol remains.
 
 ## Status and compatibility
 
