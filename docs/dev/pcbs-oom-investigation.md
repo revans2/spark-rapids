@@ -780,6 +780,50 @@ batch target at1GiB for that comparison; do not mix it into current results.
 That conditional follow-up has not started; evaluate this sweep before choosing
 the minimal implementation/test boundary. No new user-facing config authorized.
 
+## Default-settings small-batch follow-up (IN PROGRESS)
+
+User explicitly rejected reset1-controlled comparisons: objective is to make
+cache reads fit with default unroll16/reset100 by shrinking batches. Supersedes
+unstarted two-profile grid/repeats above. Test32MiB and16MiB; try8MiB only if
+16MiB fails. Same48gheap/local8/GPU2/15gpool/host40g/pinned2g/fraction0.6,
+same801,279,744rows/16Doublecolumns/16cachepartitions/96sourcepartitions.
+No reset, unroll, fraction, storage or production changes. Record fill/read
+performance, exact measured records and heap/GC. Repeat passing candidate(s)
+in two additional fresh JVMs before interpreting timing/stability.
+
+Back-of-envelope: about24GiB existing cache plus8*100*batchSize gives49GiB
+at32MiB,36.5GiB at16MiB,30.25GiB at8MiB, before other heap/GC headroom.
+This is an exposure estimate, not a measuredpeak or guaranteed bound.
+Stream handles/unroll/iterator aliases to the same arrays are not additive.
+
+Paused512/default child finished with kernel exit52 (13312 waitstatus),
+all16partitions populated in256.590222328s, then firstSQLheapOOM. Root saved
+/proc exit evidence, recovered one validated record with wall_s=None (discussion
+pause contaminates supervisorwall), and cleaned only its scratchcache. Initial
+recovery helper wrote record then failed formattingNone; follow-up verified
+the intactrecord and completedcleanup. Terminated stopped84071 supervisor and
+its84080monitor without launching any remaining jobs. Verified both andJava
+gone andGPUempty. Old unstarted manifestjobs remain preserved but unexecuted.
+
+At targets below64MiB,GpuRange target/8 also splits original8,346,664row
+sourcepartitions. Root read GpuRange/GpuProject/GpuCoalesce andPCBSsplit code;
+worker independently traced. Exact nested predicted batchrows: split source
+into Rangechunks(target/8), thenPCBSchunks(floor(target*.995/128)), repeat
+six sources/cachepartition. Expected records198/402/810 at32/16/8MiB. Actual
+plan/rows/bytes must validate before accepting results. Benchmarksource/jar
+andpluginunchanged; only externalrunner/shapevalidation adapted. Data shape
+anddistribution unchanged; byte-identical randomvalues across different batch
+boundaries are not claimed. Source/jar/pluginhashes must matchprior manifest.
+
+MCP docker_exec-only for all operations and worker handoffs/checkpoints.
+Acceptance remains exact16populationpartitions, all801,279,744 scanrows,
+onewarmup+3timedSQLscans, finite repeatableaggregates, five storagecheckpoints,
+effectiveconfigs/artifacthashes/exitcodes/rawlogs. Keep expectedSQLheapOOMs;
+park populationOOM, unexpectederror,timeout orwrongshape. No new heapdumps.
+PCBS-only code experiment remains conditional and has not started.
+Reportcurrent32/16(and8ifneeded)results alongside prior64/512 failures and
+the previous1GiB1/1 baseline, clearly distinguishing configurations.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
