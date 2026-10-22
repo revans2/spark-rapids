@@ -753,6 +753,18 @@ Deliver build/read medians, GC/heap, measured batch sizes, retained OOMs and
 limitations; independently review and commit tracker/report together.
 Prior1GiB fill medians were249.370s at1/1,250.435s at1/2 and249.901s at2/1.
 
+Batch sweep smoke checkpoint: default64MiB built all16cache partitions in
+259.472247414s (6.744% GC), then first SQL scan heapOOM exit52. Actual
+102records/partition including six8row tails; full records66,784,684bytes.
+Total encoded102,581,534,784bytes; initial23.884GiBmemory/71.652GiBdisk.
+Root analyzer and independently written worker checker passed raw effective
+configs/env/shape/scan/storage/artifact checks. Root read and executed checker.
+All source/jar/plugin hashes match preceding unroll sweep. No PCBS changes.
+Remaining nine shuffled screening cells started supervisor84071 only after
+smoke JVM ended. Retain negative default64 result; no read timing assigned.
+Only current external runner/analyzer adapted; smoke validates actual splits.
+MCP docker_exec-only reaffirmed for root and worker; no resource knobs changed.
+
 User follow-up: current sweep changes only global batchSizeBytes, not PCBS
 code. Finish it first. User wants a subsequent PCBS-only splitting experiment
 only if the smaller-target approach works without crashes. Keep global GPU
