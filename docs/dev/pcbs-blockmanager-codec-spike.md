@@ -103,8 +103,8 @@ The real DecommissionBlockManager endpoint migrated a sample cached block from
 executor 0 to executor 1 before any later SQL job. The test compared the complete
 sample payload before/after relocation and checked the whole SQL result. This
 establishes BlockManager RDD migration, not process termination, full scheduler
-decommission policy, or native ownership during migration. Recovery/migration
-were not runtime-tested on 4.0.1.
+decommission policy, or native ownership during migration. The original recovery run covered 3.5.5; confidence C below
+adds an independently verified 4.0.1 run.
 
 The first root recovery repeat failed its mandatory FetchFailed assertion despite
 correct rows. Investigation found a fixture error: it forwarded addressless
@@ -159,3 +159,14 @@ and controlled heap/GC/timing benefit. Process-loss recovery and other unsupport
 routes remain outside earlier bounded proofs. Native backend/accounting,
 failure paths and transfer improvements are optional and out of scope; they do
 not block the codec goal.
+
+## Confidence handoff results
+
+These are independent heap-codec confidence runs. Native work is optional.
+Every listed case has a fresh worker run, fresh root rerun, input/artifact
+hashes, raw logs/events and a result/verifier JSON. Each case is committed with
+the tracker and marked READY FOR REVIEW, not architect-accepted DONE.
+
+| Case | Status | Verified scope |
+| --- | --- | --- |
+| C | READY FOR REVIEW | Spark4.0.1;13Success+1genuineFetchFailed;exact10000rows;2removalgates;actualBMmigration;287hashes. |

@@ -1,0 +1,47 @@
+{
+  "cases": {
+    "C": {
+      "status": "READY FOR REVIEW",
+      "title": "Spark 4.0.1 recovery and migration",
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/C/root401",
+      "checked": {
+        "valid": true,
+        "spark_version": "4.0.1",
+        "verified_hashes": 287,
+        "task_end_reasons": {
+          "Success": 13,
+          "FetchFailed": 1
+        },
+        "worker_gates": 2,
+        "stage_submissions": [
+          [
+            0,
+            0
+          ],
+          [
+            1,
+            0
+          ],
+          [
+            3,
+            0
+          ],
+          [
+            2,
+            0
+          ],
+          [
+            3,
+            1
+          ],
+          [
+            5,
+            0
+          ]
+        ],
+        "application_ends": 1
+      },
+      "scope": "Spark4.0.1;13Success+1genuineFetchFailed;exact10000rows;2removalgates;actualBMmigration;287hashes."
+    }
+  }
+}

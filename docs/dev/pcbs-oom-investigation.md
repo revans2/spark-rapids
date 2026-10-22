@@ -41,7 +41,10 @@ production change; never weaken acceptance. Other independent work may proceed.
   Evidence: /data/pcbs-oom/blockmanager-codec-confidence/docs-native-size/.
   Focused independent review passed; no new native feature or pressure claim.
 - E: IN PROGRESS (codec worker).
-- C: IN PROGRESS (version/recovery worker).
+- C: READY FOR REVIEW. Spark4.0.1;13Success+1genuineFetchFailed;exact10000rows;2removalgates;actualBMmigration;287hashes.
+  Worker and independent root fresh runs passed; root read decisive code,
+  rehashed inputs and reparsed raw logs/events; separate peer review passed.
+  Evidence: /data/pcbs-oom/blockmanager-codec-confidence/C/root401/. MCP-only checkpoint confirmed.
 - D: IN PROGRESS (clean receiver worker).
 - B, F, G: NOT STARTED; depend on first batch.
 - A: NOT STARTED; last, after lower-risk confidence work.
