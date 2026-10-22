@@ -844,6 +844,24 @@ only after16JVM completed. 8MiB not needed at this stage. 16MiB still requires
 twofresh repeats; no reliability claim from oneJVM. ConditionalPCBS experiment
 still unstarted. Allprojectoperations remainedMCPdocker_exec-only.
 
+32MiB upward first completion: default16/100PASS exit0, fill264.049571285s,
+medianread42.894320794s, fillGC3.720%, readGC15.039%. Four exactfullscans,
+198records/partition, full33,393,244bytearrays,102,584,285,760encodedbytes.
+Maxsampledoccupied41.927GiB, maxpostFullGC34.417GiB. This disproves any
+deterministic prediction that32mustfail: earlier49GiB arithmetic was possible
+retention exposure before overhead, not simultaneous observed ownership.
+Do not call it a guaranteed bound; task/reset timing can avoid that peak.
+
+Root reran analyzer and independentworkerrawchecker (fouracceptedJVMs).
+Default repeat supervisor87672 started after32JVMexit:16trial1,32trial1,
+16trial2,32trial2, all defaults/fraction0.6. Initialpasses selectcandidates;
+laterfailures remaincounted. 8MiB not needed unless16repeatfails. No old
+matrixlaunch, noreset1experiments. ConditionalPCBSsourceexperiment still
+parked untilrepeatedsmallpasses. Read-onlypreparation identified GPU budget
+helper as minimalcap point; no newconfig, no change toCPUwriter. It does not
+bound eageroutputList/rowmaterialization orcoalesceGPUreads. Preserve those
+limits in eventualcomparison. MCPdocker_exec-only reaffirmed.
+
 ## Review and handoff
 
 A read-only worker reviewed the diagnostic and verified8/large2 logs, confirmed
