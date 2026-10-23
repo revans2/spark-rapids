@@ -127,6 +127,32 @@ READY FOR REVIEW: both datasets preserve all original row groups and column byte
 Root independently verified all 561 copied row-group hashes, contiguous complete
 coverage, rows and column totals in root-input-audit001.json. Small decoded-value
 roundtrips also pass; the initial footer-hash-definition mismatch was a fixture
-error and is preserved as failed evidence. Harness and launcher/verifier remain in
-review. Root will verify the oracle, class origins and small runtime gates before
-starting the frozen large-case schedule.
+error and is preserved as failed evidence. The harness, launcher/verifier and sparse reporter are READY FOR REVIEW for the
+bounded initial sweep. Root read their decisive code, independently compiled the
+harness, reran 21 verifier and 14 reporter checks, and reparsed all seven fresh
+runtime gates in root-smoke002-rechecked.json. A separate worker audited the raw
+six GPU gates: exact all-column oracles, full-row GPU operators, producer/decode
+counters, physical disk files, first-attempt tasks and blocking cleanup all pass.
+
+Full CPU references measure 97,812,713,394 raw-value bytes for GHArchive and
+33,401,767,650 for TLC. Their uncached plans, effective timestamp schemas and all
+first-attempt successful task events are audited in cpu-oracles001/oracle-audit.json.
+Small actual-data fixtures preserve every type and value in 128-row prefixes from
+each canonical partition; they are explicitly reencoded smoke inputs, not matrix
+substitutes. Source/canonical datasets remain unchanged.
+
+One initial codec gate completed correctly but the verifier incorrectly required
+zero codec reads during fill. Spark BlockManager's successful put reads the block
+back to return its iterator; DISK_ONLY therefore invokes the codec on fill. The
+corrected rule requires exact stored record/payload write/readback totals for DISK,
+bounded readback for MEMORY_AND_DISK, and zero codec use for Java. The original
+ERROR and its exact archived verifier remain preserved; all seven fresh corrected
+gates pass. Fill timings intentionally include this stock readback work.
+
+The frozen 48-case schedule is matrix001/schedule.json. Execute one fresh JVM per
+case, ordered by 48/16/8 GiB heap, DISK_ONLY then MEMORY_AND_DISK, GHArchive then
+TLC, existing PCBS/Java, row-group Java/codec, then default CPU. A 30-minute timeout
+parks unexpected hangs; genuine heap/GC-limit OOM remains a negative result.
+The supervisor stops on unexpected failures, verifies source hashes, and waits for
+all case-path processes (including Spark's external cleanup command) before
+recording and removing owned scratch. All large measurements are still pending.

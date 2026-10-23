@@ -30,8 +30,17 @@ are undergoing review. User authorized interpreting TLC's timezone-free timestam
 as Timestamp, then pointed to the read configuration: fix
 spark.sql.parquet.inferTimestampNTZ.enabled=false and session UTC across every arm
 and oracle, with no added cast operators. Verify actual inferred types first.
-No large GPU runs have started. Root will inspect decisive code
-and independently verify gates before freezing and launching the matrix.
+The harness, launcher/verifier and sparse reporter are READY FOR REVIEW for the
+bounded sweep. All seven fresh root gates pass (six actual-schema GPU cases plus
+the CPU launcher); root independently compiled the harness and reparsed results,
+and workers audited raw correctness/operator/storage/task evidence. Full CPU
+oracles measure GHArchive 91.095 GiB and TLC 31.108 GiB of raw values. The first
+codec gate exposed a verifier-only error: successful DISK_ONLY cache puts normally
+read back their records during fill. The corrected exact accounting is verified;
+old failure/raw evidence and verifier bytes are preserved. Fill includes that work.
+The frozen 48-case schedule and guarded supervisor are ready at
+/data/pcbs-oom/pcbs-real-world-cache/matrix001/schedule.json. Large-case execution
+and final comparison remain IN PROGRESS; no full-run result is claimed yet.
 
 ## Row-group storage and combined decode prototype (2026-10-23)
 
