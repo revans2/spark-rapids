@@ -56,9 +56,13 @@ adapters. No Spark core/OFF_HEAP/new public config or external posting.
 Initial patch scope: GPU-written small records, combined GPU reads, CPU-reader
 and existing CPU-written-record compatibility. CPU parquet-mr producer streaming
 and profiling and heavy downstream GPU queries remain separate follow-ups.
-Root coordinates an isolated production worktree after this final checkpoint,
-reads decisive code, independently verifies workers, commits with DCO sign-off,
-and requests focused reviews. Only the architect marks work DONE.
+Production is IN PROGRESS in isolated worktree
+/data/pcbs-oom/pcbs-rowgroup-production/worktree, branch pcbs-rowgroup-production,
+based on 60c28e44f0. Root coordinates helper/reader/integration-test workers in
+separate files, owns existing PCBS integration and GPU/build scheduling, reads
+decisive code, independently verifies workers, commits with DCO sign-off and
+requests focused reviews. See the production-plan implementation checkpoint.
+Only the architect marks work DONE.
 
 ## Row-group storage and combined decode prototype (2026-10-23)
 

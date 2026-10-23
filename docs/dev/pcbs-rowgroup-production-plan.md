@@ -6,6 +6,25 @@ reviews. The 48-case sweep is complete and READY FOR REVIEW: 46 PASS, two genuin
 heap OOMs; root independently reverified every result and frozen hash. Only the architect marks completed work DONE; verified work is READY FOR
 REVIEW. The real-data sweep remains the prerequisite for implementation.
 
+## Implementation checkpoint
+
+The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,
+branch pcbs-rowgroup-production, based on 60c28e44f0. The original repository and
+all experiment sources remain unchanged. The full sweep and independent hash/
+result verification are READY FOR REVIEW; production gates remain IN PROGRESS.
+
+- Metadata helper and focused new suites: worker producer_target_trace.
+- Combined chunked reader and focused new suite: worker controlled_launcher,
+  dependent on the agreed metadata-helper interface.
+- Focused integration tests in cache_test.py: worker parked_case_audit.
+- Existing PCBS integration, existing suite adaptations, builds/GPU scheduling,
+  independent verification, tracker/commits and review coordination: root.
+
+Every worker uses MCP docker_exec only, confirms it at checkpoints, and reports
+files, verification and material deviations. No parallel GPU jobs or conflicting
+builds. Root owns commits after inspecting code and verifying decisive checks.
+No changes to frozen fixtures/artifacts, unrelated user files or Git configuration.
+
 ## Scope and compatibility
 
 Use MCP docker_exec for every operation, including workers. Confirm at handoffs
