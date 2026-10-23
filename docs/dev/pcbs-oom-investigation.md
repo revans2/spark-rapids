@@ -5,9 +5,28 @@ research, scheduler-token research, newer-version audit and upstream proposal ve
 results remain READY FOR REVIEW. Production implementation and architect
 acceptance are pending.
 
+## Row-group storage and combined decode prototype (2026-10-23)
+
+Status: IN PROGRESS. The user redirected work to extracting smaller Parquet
+row-group records from large GPU writer output and combining them for large GPU
+decode, reusing the scan path or newer true multi-file cuDF APIs. Read
+[the spike plan](pcbs-rowgroup-stitch-spike.md) before resuming this work. All
+operations remain MCP docker_exec only. Existing contracts are RELEASED;
+isolated research overlays are UNRELEASED, with no compatibility scaffolding.
+Root stopped the owned supervisor/JVM and verified all launcher/sampler processes
+exited and GPU idle. Original24 completed results are preserved; case024 was
+interrupted and excluded. Matrix2 status is STOPPED_BY_USER; remaining60 cases
+and profiles are deferred. No global policy override or Spark/cuDF change was
+made at that checkpoint. Runtime/API audit selected a research-only thin Java/JNI
+wrapper over existing cuDF multi-source reads, explicitly authorized by the user.
+Core cuDF algorithms and production Spark/plugin changes remain out of scope.
+Writer targets are soft 65,536 rows/8 MiB; measure distributions and compression
+rather than treating target adherence as success. Java100/unroll16 and codec100/
+unroll16 retain identical data, large GPU targets and memory controls.
+
 ## Controlled serialization and record-size experiments (2026-10-23)
 
-Status: IN PROGRESS. Architect approved the first two benchmark questions.
+Status: STOPPED_BY_USER at 24 completed cases; completed evidence READY FOR REVIEW. Architect approved the first two benchmark questions.
 Substantial downstream GPU workloads are explicitly DEFERRED; retain the existing
 all-column sum/count consumer. This supersedes the earlier no-new-runs restriction
 for these bounded experiments only. No memory-fraction tuning, native storage,
@@ -176,8 +195,9 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   No override or configuration change was implemented/tested. Evidence:
   unroll-policy-audit/findings.md. Runtime mechanism validation and any policy
   decision are separate from the unchanged 84-case benchmark schedule.
-  Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING resumed
-  at case 021 with supervisor PID 324318 (resumer commit d4ac9c0c5c). Previous
+  Historical continuation: matrix2 resumed at case 021 with supervisor PID 324318
+  (resumer commit d4ac9c0c5c), then STOPPED_BY_USER during case024 for the row-group
+  prototype. All its processes are now exited; no benchmark remains running. Previous
   supervisors are exited; frozen fixture commit 424f34bada remains unchanged.
   Latest provenance/log: matrix2-resume-002/ and matrix2-resume-002.log; earlier
   continuation remains archived under matrix2-resume-001/. Original parked
