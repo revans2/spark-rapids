@@ -30,6 +30,12 @@ OFF_HEAP storage remain outside this batch.
 - GHArchive, the available seven-day sample: 32,078,549 rows, 7 files, JSON/text,
   timestamps, boolean and nulls.
 
+For these experiments the user authorized reading TLC's timezone-free timestamps as
+Timestamp. Set spark.sql.parquet.inferTimestampNTZ.enabled=false and session timezone
+UTC consistently for the oracle and every benchmark mode; verify the inferred schema.
+This avoids extra cast operators and preserves the source files. The default inferred
+TimestampNTZ is unsupported by the GPU path and is not silently benchmarked as fallback.
+
 The inventory inspected 4,343 Parquet footers without errors. Source file sizes and
 uncompressed column-page sizes are recorded, but the latter remain dictionary/RLE
 encoded and are NOT decoded heap/device bytes.

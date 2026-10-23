@@ -21,9 +21,16 @@ resume and checkpoint. No production source/default changes or old-run edits.
 User steering: adapting the CPU branch of PCBS similarly, and profiling it against
 existing PCBS, are explicitly LATER, after real-world performance/cost is clearer.
 The default CPU cache reference in this matrix is a separate released path.
-Dataset inventory and source/storage audits are complete; immutable input prep,
-arbitrary-schema harness and launcher/verifier are in progress in independent
-worker scopes. No large GPU runs have started. Root will inspect decisive code
+Dataset inventory and source/storage audits are complete. Both immutable input
+preparations pass; root independently verified all 561 copied row-group hashes,
+complete contiguous coverage, row counts and column byte totals at
+/data/pcbs-oom/pcbs-real-world-cache/root-input-audit001.json. The small CPU harness
+checks pass for both storage levels; arbitrary-schema harness and launcher/verifier
+are undergoing review. User authorized interpreting TLC's timezone-free timestamps
+as Timestamp, then pointed to the read configuration: fix
+spark.sql.parquet.inferTimestampNTZ.enabled=false and session UTC across every arm
+and oracle, with no added cast operators. Verify actual inferred types first.
+No large GPU runs have started. Root will inspect decisive code
 and independently verify gates before freezing and launching the matrix.
 
 ## Row-group storage and combined decode prototype (2026-10-23)
