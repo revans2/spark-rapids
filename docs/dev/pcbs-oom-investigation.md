@@ -7,11 +7,26 @@ acceptance are pending.
 
 ## PCBS split/coalesce and CPU default-cache comparison (2026-10-23)
 
-IN PROGRESS — discovery/design before timed runs. Architect requests PCBS-only
+IN PROGRESS — research fixtures READY FOR REVIEW; full-data timings pending.
+Stock-only compilation, CPU smoke/root rerun, both common GPU smokes and
+separate real PCBS disk/wire/coalescer gates passed. See
+[comparison evidence](pcbs-real-data-comparison.md). Architect requests PCBS-only
 pre-splitting with the global 1 GiB target unchanged, optionally recombining
 decoded records near 1 GiB, plus a pure CPU default-cache comparison at the
 same input volume and task layout.
 
+- Concrete first matrix: stock CPU/default cache, research-codec PCBS cap32 MiB,
+  and the same cap32 MiB plus standard immediate post-cache GPU coalescing.
+  Global target stays 1 GiB; no unsplit or additional-size sweep is scheduled.
+  Use one immutable canonical set of 16 Parquet files: 805,306,368 rows of
+  16 DOUBLE values, exactly 96 GiB logical values (6 GiB per cache partition).
+  Generate on CPU once and verify shared file hashes and aggregate oracle.
+  Fill all 16 cache partitions in parallel on local[8], then one warmup and
+  three all-column reads. MEMORY_AND_DISK, ParallelGC, 48 GiB configured heap;
+  report usable heap separately. Actual cache bytes are format-dependent.
+  GPU uses the research per-cache codec, fixed 15 GiB pool, concurrency 2,
+  host limit 40 GiB and pinned pool 2 GiB; CPU has no RAPIDS or overlay jars.
+  Prior split-fill timings were sequential and are not directly comparable.
 - Reuse the prior real PCBS split experiment and standard GPU coalescing code.
   Keep baseline, split-only and split-plus-coalesce distinguishable. Measure
   actual encoded record sizes, decoded and downstream GPU batch sizes,
