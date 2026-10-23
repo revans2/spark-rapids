@@ -5,6 +5,37 @@ research, scheduler-token research, newer-version audit and upstream proposal ve
 results remain READY FOR REVIEW. Production implementation and architect
 acceptance are pending.
 
+## Constant-data comparison and cleanup follow-up (2026-10-23)
+
+IN PROGRESS. Architect direction: keep total payload and partition count fixed
+when comparing record sizes; the previous A sweep changed total data from
+24 to 96 GiB and therefore changed memory pressure. Preserve those observations
+as historical evidence, not an equal-data record-size comparison.
+
+- Constant-data benchmark: 96 GiB total, 16 partitions, 6 GiB per task,
+  local[8], 48 GiB configured heap, ParallelGC, DISK_ONLY; 256 MiB records
+  mean 24 per partition, 1 GiB records mean six. Compare Java and per-cache
+  codec in separate fresh JVMs, serially, with one warmup and three reads.
+  Memory fraction, unroll period and object-stream reset remain defaults.
+  Record actual bytes, correctness, fill/read/heap/GC and negative OOM outcomes;
+  root repeats independently in reverse order. No shuffle repartitioning.
+- Cleanup: architect selected the existing task-completion notification
+  pattern for task-bound decoder streams. Prototype idempotent cleanup,
+  early termination and decode-error handling in a separate F follow-up.
+  Check exact later data, complete blocks, normal EOF and no double close.
+  Reads outside TaskContext need explicit ownership and a separate bounded
+  check; do not assume task listeners cover them. Preserve original F evidence.
+- Release status: existing Spark behavior is RELEASED and unchanged by default.
+  Research overlays/fixtures/proposal are UNRELEASED; no compatibility adapter.
+  Native storage remains optional; no production changes, public config,
+  external posting or use of Spark's separate OFF_HEAP pool.
+- Delegation: independent benchmark and cleanup workers; root owns decisive
+  reads, independent reruns, tracker and signed item commits. All operations
+  MUST use MCP docker_exec tools; require confirmation at every checkpoint.
+  Park non-fixture failures needing production changes; never weaken checks.
+  Expected benchmark heap OOM is a measured negative outcome, not a pass of
+  cache correctness. Completed work is READY FOR REVIEW, not architect DONE.
+
 ## Confidence handoff (2026-10-22)
 
 Research results READY FOR REVIEW. F remains PARKED on the independently
