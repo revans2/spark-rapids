@@ -10,8 +10,8 @@ active matrix supervisor.
 ## First disk-only references
 
 Each row is one fresh JVM, local[8], 16 fixed canonical partitions, configured
-48 GiB heap (recorded Runtime maximum 46 GiB), default reset100/unroll16. GPU
-cases keep the 1 GiB input/decode target, 15 GiB device pool, concurrency2 and
+48 GiB heap (recorded Runtime maximum 46 GiB), default reset 100 / unroll 16. GPU
+cases keep the 1 GiB input/decode target, 15 GiB device pool, concurrency 2 and
 40 GiB RAPIDS host limit. Timestamp inference selects Timestamp with session UTC
 for every case and CPU oracle. No forced GC or data-volume changes.
 
@@ -48,44 +48,44 @@ fixed order, not repeated balanced fresh-JVM trials.
 ## What is and is not controlled
 
 All three GPU modes have identical producer batch counts, rows, device-byte totals
-and min/max sizes within each dataset. GHArchive produces128 batches; TLC52.
+and min/max sizes within each dataset. GHArchive produces 128 batches; TLC 52.
 The row-group Java and codec arms also have identical actual decoded layouts:
-GHArchive96 batches per read, TLC80. Parquet payload sizes differ by548 bytes for
-GHArchive and14,868 bytes for TLC out of tens/billions of bytes; byte-for-byte
+GHArchive 96 batches per read, TLC 80. Parquet payload sizes differ by 548 bytes for
+GHArchive and 14,868 bytes for TLC out of tens/billions of bytes; byte-for-byte
 writer determinism is not claimed.
 
-Existing PCBS versus row groups changes decoded batching. GHArchive goes from128
-to96 batches, with the largest row-group output about1.10 GiB. TLC goes from52
-to80, with the largest row-group output about0.56 GiB. The 1 GiB decoded-size
+Existing PCBS versus row groups changes decoded batching. GHArchive goes from 128
+to 96 batches, with the largest row-group output about 1.10 GiB. TLC goes from 52
+to 80, with the largest row-group output about 0.56 GiB. The 1 GiB decoded-size
 estimate is a hint: it underestimates this string-heavy GHArchive output and is
 conservative for TLC. These differences can affect performance and must not be
 hidden behind a common configured target. Improving that estimate is future work;
 this sweep does not retune it between cases.
 
-Row-group storage produces11,722 GHArchive records (maximum3.90 MiB) and5,346 TLC
-records (maximum1.49 MiB), versus128 and52 existing records respectively. It
-preserves GHArchive compression here but increases TLC payload by8.86%. Both
+Row-group storage produces 11,722 GHArchive records (maximum 3.90 MiB) and 5,346 TLC
+records (maximum 1.49 MiB), versus 128 and 52 existing records respectively. It
+preserves GHArchive compression here but increases TLC payload by 8.86%. Both
 Parquet layouts remain much smaller than the default CPU format on these inputs.
 This result is dataset-specific, not a universal compression guarantee.
 
-Default CPU caching stops at10,000 rows or a soft4 MiB uncompressed column-stat
+Default CPU caching stops at 10,000 rows or a soft 4 MiB uncompressed column-stat
 budget, checked before appending the next whole row; it chooses column compression
-after batching. GHArchive reaches the byte budget and produces23,527 records;
-TLC reaches the row cap and produces23,955. The final encoded record size need not
-be4 MiB. This is a format/compute reference, not an isolated serializer comparison.
+after batching. GHArchive reaches the byte budget and produces 23,527 records;
+TLC reaches the row cap and produces 23,955. The final encoded record size need not
+be 4 MiB. This is a format/compute reference, not an isolated serializer comparison.
 
 ## Evidence behind the codec comparison
 
 The row-group Java and codec GPU layouts match, and their serialized sizes are
-effectively equal. GHArchive measured-read GC is11–53 ms for row-group Java and
-8–27 ms for codec, too little to explain the roughly6 s difference. Sampled read
-intervals report zero physical read_bytes delta while returning21.4–25.1 GB through
+effectively equal. GHArchive measured-read GC is 11–53 ms for row-group Java and
+8–27 ms for codec, too little to explain the roughly 6 s difference. Sampled read
+intervals report zero physical read_bytes delta while returning 21.4–25.1 GB through
 rchar; phase-boundary gaps remain unmeasured, so whole-phase zero I/O is not proved.
 
-Local JDK17 bytecode shows ObjectInputStream reading byte arrays through an extra
-copy loop with at most1,024-byte pieces. The research codec allocates its final
+Local JDK 17 bytecode shows ObjectInputStream reading byte arrays through an extra
+copy loop with at most 1,024-byte pieces. The research codec allocates its final
 heap array and requests bulk reads with DataInputStream.readFully. These DISK_ONLY
-reads use FileInputStream and BufferedInputStream, not Spark's4 MiB serialized
+reads use FileInputStream and BufferedInputStream, not Spark's 4 MiB serialized
 buffer chunks. The extra looping/copying is a concrete hypothesis for lower CPU
 cost; no profile has attributed the measured speedup to it. Both paths still
 allocate payload arrays on the heap.
@@ -102,9 +102,9 @@ partition buffers, disk files, task events and content fingerprints independentl
 
 ## Remaining measurements
 
-The active 48-case schedule is matrix001/schedule.json, supervisor PID365757;
-status is matrix001/progress.json. Cases008–015 test MEMORY_AND_DISK at48 GiB,
-then cases016–031 repeat both storage levels at16 GiB and032–047 at8 GiB.
+The active 48-case schedule is matrix001/schedule.json, supervisor PID 365757;
+status is matrix001/progress.json. Cases 008–015 test MEMORY_AND_DISK at 48 GiB,
+then cases 016–031 repeat both storage levels at 16 GiB and 032–047 at 8 GiB.
 Dataset rows, partitioning, targets and other controls stay fixed. Record actual
 residency and whether the codec wire path is exercised; RAM hits can bypass it.
 A partial disk subset has no whole-cache disk compression ratio. Genuine heap or
