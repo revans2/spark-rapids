@@ -181,7 +181,8 @@
         },
         "runtime_hashes_verified": 243
       },
-      "scope": "PARKED: both first-action take(1) and once-injected decode failure returned exact later data and complete cache blocks, but each had one read stream without a successful close notification after completed actions. Snapshot precedes shutdown; no permanent leak is claimed. Decide codec versus integration cleanup ownership before a remedy."
+      "scope": "PARKED: both first-action take(1) and once-injected decode failure returned exact later data and complete cache blocks, but each had one read stream without a successful close notification after completed actions. Snapshot precedes shutdown; no permanent leak is claimed. Decide codec versus integration cleanup ownership before a remedy.",
+      "follow_up": "F-cleanup"
     },
     "G": {
       "status": "READY FOR REVIEW",
@@ -207,6 +208,13 @@
       "results_sha256": "ff8ee625aa0a5860d63f81a52aa551a5f243f71ccf9aab9504265fb0cd0f1f55",
       "runtime_sources_identical": true,
       "cases_checked": 8
+    },
+    "F-cleanup": {
+      "status": "READY FOR REVIEW",
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/F-cleanup",
+      "scope": "Worker/root first-action take1 and injected decode failure, exact later data, idempotent EOF/error/caller/task-completion close; bounded taskless ownership checks",
+      "results": "partial_failure_cleanup/independently-verified-results.json",
+      "results_sha256": "aa85437e05b3666987d6978e0704994d494b800922bc6deaa57d83fef2475c12"
     }
   }
 }

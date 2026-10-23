@@ -136,8 +136,15 @@ take(1) or an injected decode exception, exact later reads passed, but one read
 stream in each case lacked a successful close notification after the actions.
 The snapshot precedes shutdown; this does not establish a permanent leak.
 The existing iterator closes on EOF, which is insufficient for this contract.
-Open decision: must the codec register task-completion/exception cleanup, or
-must the proposed integration guarantee it? No remedy has been implemented.
+Architect direction (2026-10-23): the codec's task-bound decoder streams use
+the existing task-completion notification pattern and an idempotent close
+guard; decode exceptions close immediately while preserving the original error.
+A separate research follow-up passed both worker and independent root runs,
+including early termination, failed-task retry, EOF/listener duplicate requests,
+and explicit taskless caller/error cleanup. No new Spark cleanup protocol is
+needed for these tested paths. Abandoned taskless BlockManager iterators and
+replica receiver failures remain outside that bounded proof; caller ownership
+there still needs explicit verification. This is a fixture, not a production fix.
 Evidence and reproducible probe: [confidence results](pcbs-blockmanager-codec-spike.md#confidence-handoff-results).
 
 Codec context must remain available for deferred eviction and existing readers.

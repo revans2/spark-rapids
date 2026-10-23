@@ -1,0 +1,62 @@
+{
+  "status": "READY FOR REVIEW",
+  "valid": true,
+  "runtime_jars_verified": 243,
+  "cases": {
+    "worker1/partial": {
+      "valid": true,
+      "streams": 10,
+      "task_reads": 3,
+      "task_end_reasons": {
+        "Success": 3
+      },
+      "result_sha256": "8d932df89fe28d23575e131b0533ea85ba01ef3d3c1c3b5adde643db3757116c",
+      "manifest_sha256": "649fee2e9ec205de794f0a038b89fbb99d4f58556037f55df88fd751e53dd57d",
+      "raw_hashes_verified": 2,
+      "source_sha256": "6db953114637a3eb5c3946e2f7a8f27c4edd9fbcea02ff500fdd0c18b8571b69",
+      "runner_sha256": "a7f83961751f10d0a16f18ad6dbee106f1efa53a9d4fa442a368ce5730f68429"
+    },
+    "worker1/failure": {
+      "valid": true,
+      "streams": 12,
+      "task_reads": 5,
+      "task_end_reasons": {
+        "Success": 4,
+        "ExceptionFailure": 1
+      },
+      "result_sha256": "f8a4ed50b4fbf794ee197541e03494f089a59fb7b7b637584de8cdec855970ef",
+      "manifest_sha256": "6125b7b1c4e01cc5232e2876a9e94fa4b2d9d0e83ab1f43950489b612882b15d",
+      "raw_hashes_verified": 2,
+      "source_sha256": "6db953114637a3eb5c3946e2f7a8f27c4edd9fbcea02ff500fdd0c18b8571b69",
+      "runner_sha256": "a7f83961751f10d0a16f18ad6dbee106f1efa53a9d4fa442a368ce5730f68429"
+    },
+    "root1/partial": {
+      "valid": true,
+      "streams": 10,
+      "task_reads": 3,
+      "task_end_reasons": {
+        "Success": 3
+      },
+      "result_sha256": "552184d7b6083158b4d3afe35dfbbf694b4d910ebd6a625a27a45f15ccb58f5e",
+      "manifest_sha256": "0318b99f2be50cb74d9addc5daf34e0936713cb20b3db343f6d0f3ab8900999e",
+      "raw_hashes_verified": 2,
+      "source_sha256": "6db953114637a3eb5c3946e2f7a8f27c4edd9fbcea02ff500fdd0c18b8571b69",
+      "runner_sha256": "a7f83961751f10d0a16f18ad6dbee106f1efa53a9d4fa442a368ce5730f68429"
+    },
+    "root1/failure": {
+      "valid": true,
+      "streams": 12,
+      "task_reads": 5,
+      "task_end_reasons": {
+        "Success": 4,
+        "ExceptionFailure": 1
+      },
+      "result_sha256": "0f0751d631774fb99881b24a60acc26384a8fa34742c1a8334cc3f1736e5d5f5",
+      "manifest_sha256": "5a6d62e88124c5a8154db6d05724a4fd8c69fd679d1c0743bed8263638d5b04f",
+      "raw_hashes_verified": 2,
+      "source_sha256": "6db953114637a3eb5c3946e2f7a8f27c4edd9fbcea02ff500fdd0c18b8571b69",
+      "runner_sha256": "a7f83961751f10d0a16f18ad6dbee106f1efa53a9d4fa442a368ce5730f68429"
+    }
+  },
+  "scope": "Idempotent decoder cleanup through task completion, EOF, decode failure and explicit taskless caller; exact later data; no close-throw/cancellation claim"
+}

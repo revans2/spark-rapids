@@ -19,7 +19,16 @@ as historical evidence, not an equal-data record-size comparison.
   Memory fraction, unroll period and object-stream reset remain defaults.
   Record actual bytes, correctness, fill/read/heap/GC and negative OOM outcomes;
   root repeats independently in reverse order. No shuffle repartitioning.
-- Cleanup: architect selected the existing task-completion notification
+- Cleanup: READY FOR REVIEW. Worker and independent root fresh cases passed;
+  four raw/source/artifact/event audits verified 243 runtime jars. Partial reads
+  close at task completion, errors close immediately, EOF/listener/caller share
+  exactly one successful underlying close. Exact 1,000 rows/complete blocks
+  and ordinary retry preserved. Explicit taskless early close/error cases pass.
+  Original F counterexample remains unchanged. No close-throw, cancellation or
+  abandoned taskless BlockManager iterator claim. Evidence:
+  /data/pcbs-oom/blockmanager-codec-confidence/F-cleanup/{worker1,root1}/.
+  MCP-only checkpoints and independent peer review passed. The
+  architect selected the existing task-completion notification
   pattern for task-bound decoder streams. Prototype idempotent cleanup,
   early termination and decode-error handling in a separate F follow-up.
   Check exact later data, complete blocks, normal EOF and no double close.
@@ -38,8 +47,9 @@ as historical evidence, not an equal-data record-size comparison.
 
 ## Confidence handoff (2026-10-22)
 
-Research results READY FOR REVIEW. F remains PARKED on the independently
-reproduced cleanup gap; B runtime remains blocked by missing exact dependencies.
+Research results READY FOR REVIEW. Original F records the independently
+reproduced cleanup gap; its task-bound follow-up passed on 2026-10-23 above.
+B runtime remains blocked by missing exact dependencies.
 No production implementation or architect acceptance is claimed.
 
 Contradiction check before edits: the prior proposal and tracker

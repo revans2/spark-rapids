@@ -224,3 +224,26 @@ include both fresh observations and the individual read times.
 [Reproduction instructions](../../tools/pcbs-blockmanager-codec-spike/confidence/benefit_measurement/README.md)
 describe methods and limits. The F cleanup counterexample remains PARKED;
 B runtime remains blocked by missing exact dependencies.
+
+
+## Task-completion cleanup follow-up (2026-10-23)
+
+The architect selected the existing task-completion pattern for task-bound
+codec read streams. A separate fixture preserves original F's failing
+observations and adds idempotent close shared by task completion, normal EOF,
+explicit caller close and decode-error handling. Read errors remain the primary
+exception if cleanup also throws; throwing-close behavior was not fault-injected.
+
+Worker and independent root runs each passed first-action take(1) and a
+once-injected decode failure. Partial cases had three successful tasks; failure
+cases had four successes and one expected ExceptionFailure. Every stream had
+one successful underlying close; every task-bound read received its completion
+callback. Exact later rows, complete cached blocks and SQL statistics remained
+correct. Explicit taskless partial close and malformed-read cleanup also passed;
+full remote reads still close at EOF.
+
+This resolves the tested F cleanup gap without a new core cleanup mechanism.
+It does not prove cancellation, concurrent reads, failed inner close, abandoned
+taskless BlockManager iterators or replica-receiver failure cleanup.
+[Fixture and verified results](../../tools/pcbs-blockmanager-codec-spike/confidence/partial_failure_cleanup/README.md)
+are READY FOR REVIEW. Native work remains optional; production code is untouched.
