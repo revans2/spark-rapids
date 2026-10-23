@@ -5,6 +5,27 @@ research, scheduler-token research, newer-version audit and upstream proposal ve
 results remain READY FOR REVIEW. Production implementation and architect
 acceptance are pending.
 
+## Public-data compression, heap and storage experiments (2026-10-23)
+
+Status: IN PROGRESS. The user authorized real-world datasets from /data/public,
+compression comparisons including ordinary Java serialization, smaller heaps,
+and DISK_ONLY versus MEMORY_AND_DISK. Read
+[the experiment plan](pcbs-real-world-cache-experiments.md) before resuming.
+Initial scope: TLC high-volume FHV 2024 and the GHArchive week; existing GPU
+PCBS/Java, row-group Java/codec and the default CPU cache; 48/16/8 GiB heap with
+fixed eight task slots, 16 partitions and the prior GPU/memory controls. New
+research fixtures are UNRELEASED; existing contracts are RELEASED and preserved.
+All operations MUST use MCP docker_exec; repeat this at every worker handoff,
+resume and checkpoint. No production source/default changes or old-run edits.
+
+User steering: adapting the CPU branch of PCBS similarly, and profiling it against
+existing PCBS, are explicitly LATER, after real-world performance/cost is clearer.
+The default CPU cache reference in this matrix is a separate released path.
+Dataset inventory and source/storage audits are complete; immutable input prep,
+arbitrary-schema harness and launcher/verifier are in progress in independent
+worker scopes. No large GPU runs have started. Root will inspect decisive code
+and independently verify gates before freezing and launching the matrix.
+
 ## Row-group storage and combined decode prototype (2026-10-23)
 
 Status: READY FOR REVIEW for the bounded prototype and first full-size pair.
