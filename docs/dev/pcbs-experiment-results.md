@@ -23,8 +23,9 @@ across every row or a recommendation for a particular batch size.
   fixture's batching, not that comparator.
 - **Fill/read** are ranges across fresh-JVM observations; reads are ranges of
   per-JVM measured-read medians. A single value means only one observation or
-  no visible range at this precision. `raw` reads only cached-record metadata;
-  `val` validates synthetic bytes. Other reads sum real SQL columns.
+  no visible range at this precision. `raw` reloads/deserializes full cached
+  records and inspects metadata without Parquet decoding; `val` validates
+  synthetic bytes. Other reads sum real SQL columns.
 - **Peak heap** is maximum observed occupancy, including garbage, across the
   available phases/JVMs. Historical values are sampled; current real-codec values
   also check pre-GC logs. `R` means read-only peak (fill peak unavailable); `F`

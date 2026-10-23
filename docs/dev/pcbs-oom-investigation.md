@@ -26,7 +26,10 @@ historical extraction. A separate reviewer checked aggregation against CSV/JSON
 inputs. Preserve fill completed before read OOM; distinguish SQL/raw/validation
 reads, global target versus PCBS cap, data size, heap/slots/GPU concurrency,
 storage/fraction, native shadow versus heap codec, and sampled peak scope.
-Never substitute post-GC occupancy for maximum heap. All operations use MCP
+Never substitute post-GC occupancy for maximum heap. Final presentation review
+clarified that raw reloads still deserialize full cached records, without Parquet
+decoding. CSV uses LF line endings so Git whitespace checks apply cleanly;
+a failed whitespace check must stop a commit sequence. All operations use MCP
 docker_exec; no benchmark, runtime source or released default changed.
 
 ## PCBS split/coalesce and CPU default-cache comparison (2026-10-23)
