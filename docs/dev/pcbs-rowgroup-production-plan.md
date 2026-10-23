@@ -115,6 +115,41 @@ mode gates and layout fixtures compile; actual production performance remains
 pending. Native/codec overlays are excluded; defaults reset100/unroll16 and memory
 fraction0.6 remain unchanged. Benchmarks must run alone after correctness gates.
 
+The new SQL cases also pass Kryo (integration-kryo002): exactly nine nonskipped
+cases, actual -Xmx4g, KryoSerializer plus the required GpuKryoRegistrator verified
+from completed event logs. Kryo001 failed before tests because its launcher omitted
+the required registrator; the ordinary launcher omission was corrected in a fresh
+JVM. The separate Java compatibility lane passes all 122 selected existing cases
+(integration-contract-java001, actual4 GiB): reordering, CPU/GPU mixed reads,
+additional types, maps/arrays, binary and empty-column/converted-row cases. Root
+independently parsed raw JUnit for all three lanes: root-integration-recheck001.json.
+Some compatibility tests use the repository's normal injected-OOM mechanism; these
+are correctness runs, not uninjected performance experiments. Existing mixed-test
+string truthiness covers GPU-write/CPU-read, not both directions, and map/array
+vectorized parameters are not applied by that existing test. Do not infer stronger
+coverage from their parametrization count; old CPU-file GPU reads have separate units.
+
+Ordinary stock BlockManager replication/remote gates pass Java and Kryo (17.246 /
+17.649 seconds): ../remote-gate/{java001,kryo001}. Three distinct executor JVMs,
+one GPU producer, three one-row-group records / 131,073 exact rows, clean replica
+receiver CPU/native GPU decoding, third executor Network fetch without local
+caching, identical copy digests within each run, and blocking SQL removal of all
+copies/driver locations. Root inspected raw markers and independently reran both
+verifiers. Actual driver2g/executor2048m flags, serializers/registrator and eager
+RMM initialization are checked. These small tests share one physical GPU with
+bounded per-executor pools; they do not prove production multi-node GPU isolation,
+decommission/executor-loss behavior or the production combined-reader RDD path.
+Fresh encodings across runs need not be byte-identical; the cause of different
+cross-run file digests was not isolated. Exact decoded values were checked.
+
+Coordinator checkpoint: all operations remain MCP docker_exec only. A next task
+sent with send_message to a completed worker did not restart it, causing idle time.
+Use followup_task for every new executable handoff, even when a worker may still
+be running; reserve send_message for information. Check worker state after a
+completion before assuming a queued action is active. This repeats an earlier
+coordination mistake; no code/results changed. Current next gate is isolated330
+full verify (crossverify330-001);401 runtime and matched performance remain pending.
+
 ## Scope and compatibility
 
 Use MCP docker_exec for every operation, including workers. Confirm at handoffs

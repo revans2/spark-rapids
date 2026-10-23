@@ -79,6 +79,14 @@ compile/package gates pass with runtime tests explicitly not yet executed. Core
 commit c385525a51 and detailed evidence/limits are in the production plan. Matched
 production performance remains pending; do not substitute old prototype timings.
 
+Production SQL compatibility is additionally READY FOR REVIEW: Kryo nine-case lane
+and 122 existing Java cases pass, with root raw-JUnit verification. Three-executor
+stock replication/remote native-decode/unpersist gates pass Java and Kryo; root
+reran both verifiers. All controls and limitations, including actual correctness
+JVM sizes, are recorded in the production plan. Cross-version runtime and matched
+production timing remain pending. New executable worker handoffs MUST use
+followup_task; send_message does not restart a completed worker.
+
 ## Row-group storage and combined decode prototype (2026-10-23)
 
 Status: READY FOR REVIEW for the bounded prototype and first full-size pair.
