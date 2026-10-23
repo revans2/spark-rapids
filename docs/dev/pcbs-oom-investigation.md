@@ -5,6 +5,42 @@ research, scheduler-token research, newer-version audit and upstream proposal ve
 results remain READY FOR REVIEW. Production implementation and architect
 acceptance are pending.
 
+## PCBS split/coalesce and CPU default-cache comparison (2026-10-23)
+
+IN PROGRESS — discovery/design before timed runs. Architect requests PCBS-only
+pre-splitting with the global 1 GiB target unchanged, optionally recombining
+decoded records near 1 GiB, plus a pure CPU default-cache comparison at the
+same input volume and task layout.
+
+- Reuse the prior real PCBS split experiment and standard GPU coalescing code.
+  Keep baseline, split-only and split-plus-coalesce distinguishable. Measure
+  actual encoded record sizes, decoded and downstream GPU batch sizes,
+  heap/GC, cache fill and full-data read times. No global target reduction.
+- CPU means Spark DefaultCachedBatchSerializer with default Java serialization,
+  RAPIDS disabled, and normal CPU cache batching. The preceding synthetic codec
+  fixture padded 384 SQL Long rows to 96 GiB inside its custom serializer;
+  feeding those tiny rows into the CPU default cache would be invalid.
+  Use actual SQL data, shared exactly between CPU/GPU where feasible.
+- Preserve the same total logical data, 16 cache partitions, 6 GiB logical
+  data per partition if exact 96 GiB input is feasible, local[8], 48 GiB heap.
+  Confirm the real workload's storage level and source layout before running;
+  do not silently compare MEMORY_AND_DISK with DISK_ONLY or change partitions.
+  CPU/GPU compression and encoded sizes may differ and must be measured.
+- GPU target/pool remain 1 GiB / fixed 15 GiB; reuse bounded RAPIDS host spill
+  limits. Do not tune memory fraction, unroll period, stream reset or public
+  configuration to obtain a pass. Expected heap OOM remains a negative result.
+- Released PCBS/Spark contracts and defaults remain unchanged. Historical
+  split overlays and new fixture work are UNRELEASED; adapt directly without
+  compatibility scaffolding. No production default, Spark patch, native-cache
+  backend, Spark OFF_HEAP pool or external posting is authorized.
+- Independent workers discover split/coalesce, CPU comparability and environment
+  prerequisites. Root reads decisive code, settles a concrete bounded run plan,
+  independently verifies delegated results and commits each item with tracker.
+  Every project operation MUST use MCP docker_exec; require worker confirmation
+  at each handoff/checkpoint. Park material design conflicts or non-fixture
+  failures requiring production changes; never weaken an acceptance check.
+  Deliver verified research READY FOR REVIEW, not architect-accepted DONE.
+
 ## Constant-data comparison and cleanup follow-up (2026-10-23)
 
 READY FOR REVIEW. Architect direction: keep total payload and partition count fixed
