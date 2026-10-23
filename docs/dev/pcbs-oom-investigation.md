@@ -7,16 +7,22 @@ acceptance are pending.
 
 ## PCBS split/coalesce and CPU default-cache comparison (2026-10-23)
 
-IN PROGRESS — research fixtures READY FOR REVIEW; full-data timings pending.
-Stock-only compilation, CPU smoke/root rerun, both common GPU smokes and
-separate real PCBS disk/wire/coalescer gates passed. First full 96 GiB matrix
-also passed all three runtime verifiers: CPU fill/read-median 114.32/18.64 s,
-GPU split 138.37/26.84 s, GPU split/coalesce 113.52/26.96 s. Sampled overall
-heap peaks 42.73/42.01/41.70 GiB. Coalescing restored up to 991.27 MiB batches.
-Identical GPU fill-path timing variance and lower combined read-phase heap
-motivate one unchanged reverse-order repeat; final hash/event audits follow
-all timing. No GC matching/tuning or final causal performance claim. See
-[comparison evidence](pcbs-real-data-comparison.md). Architect requests PCBS-only
+READY FOR REVIEW — fixtures, six full runs and independent raw audits passed.
+Root ran CPU/split/split-coalesce; the worker repeated unchanged commands in
+reverse order. Same exact 96 GiB values, 16 partitions, eight task slots,
+48 GiB configured heap; no OOMs, failed tasks or timeouts. CPU fill range
+99.30–114.32 s/read-median range 18.64–19.20 s; GPU split 110.20–138.37 /
+26.84–28.20 s; GPU split/coalesce 113.52–138.55 / 24.96–26.96 s. Largest
+observed heap (samples plus logged pre-GC occupancy) 42.73/42.01/42.10 GiB.
+Coalescing consistently restored 112 batches/read, maximum 991.27 MiB,
+from 3,184 small records; global GPU target stayed 1 GiB. Read-heap and fill
+rankings reversed across JVMs, so no consistent heap/fill benefit is established.
+Max heap and wall times are primary; no GC matching or tuning was performed.
+Post-timing independent audits passed all six raw/hash/source/artifact/GC/event
+checks; exact rows/sums, defaults, stock CPU classpath, stable cache residency
+and cleanup verified. Evidence: /data/pcbs-oom/pcbs-real-data-comparison/
+{root-full-audits.json,independently-verified-comparison.json}. No apps remain.
+See [comparison evidence](pcbs-real-data-comparison.md). Architect requests PCBS-only
 pre-splitting with the global 1 GiB target unchanged, optionally recombining
 decoded records near 1 GiB, plus a pure CPU default-cache comparison at the
 same input volume and task layout.
@@ -55,8 +61,9 @@ same input volume and task layout.
   configuration to obtain a pass. Expected heap OOM remains a negative result.
 - Released PCBS/Spark contracts and defaults remain unchanged. Historical
   split overlays and new fixture work are UNRELEASED; adapt directly without
-  compatibility scaffolding. No production default, Spark patch, native-cache
-  backend, Spark OFF_HEAP pool or external posting is authorized.
+  compatibility scaffolding. No production default or production Spark/plugin
+  change, native-cache backend, Spark OFF_HEAP pool or external posting is
+  authorized. The existing research Spark codec overlay is used for GPU cases.
 - Independent workers discover split/coalesce, CPU comparability and environment
   prerequisites. Root reads decisive code, settles a concrete bounded run plan,
   independently verifies delegated results and commits each item with tracker.

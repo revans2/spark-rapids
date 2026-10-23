@@ -102,8 +102,10 @@ are retained. Neither repair changes PCBS source or weakens correctness checks.
 
 ## Remaining gates
 
-Root independent verification is required. The full shared-input 96 GiB
-MEMORY_AND_DISK runs, memory/GC behavior, cache-fill/read performance and
-near-1 GiB downstream batches remain unverified by these small gates.
+The small gates alone do not prove large-data behavior. The later full shared-input
+96 GiB MEMORY_AND_DISK comparison and independent raw audits passed; measured
+coalesced batches reached 991.27 MiB. See the
+[comparison report](../../docs/dev/pcbs-real-data-comparison.md) for maximum heap,
+fill/read wall times, paired runs and limits. Research is READY FOR REVIEW.
 The optional unsplit codec reference requires explicit artifact preparation
 with `--include-baseline`; no 256 MiB sweep is included.

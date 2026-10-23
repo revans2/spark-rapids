@@ -3,8 +3,10 @@
 Unreleased diagnostic harness; no production defaults or APIs change. Source ready
 for review. Stock-only compilation, canonical/CPU correctness smokes, both
 common GPU correctness smokes and the separate GPU disk/wire gate passed.
-The exact96 GiB canonical CPU materialization is in progress; full cache
-benchmarks remain unrun. All project operations use MCP docker_exec tools.
+The exact 96 GiB canonical input and six full comparison runs passed independent
+raw-evidence audits. Results are READY FOR REVIEW in
+[the comparison report](../../docs/dev/pcbs-real-data-comparison.md).
+All project operations use MCP docker_exec tools.
 
 This is different from the 384-Long synthetic padded serializer fixture. Full
 input has **805,306,368 actual rows × 16 non-null DOUBLE values = 96 GiB** of
@@ -117,6 +119,14 @@ GPU gate's classloader failure is retained; corrected GPU driver/executor
 classpath is overlay:provider:selectedPlugin, with those jars also supplied
 through --jars. CPU continues to have neither overlay nor plugin.
 
-Canonical full data is currently being written once by stock CPU under
-`canonical96-run1`/`canonical96`; no full cache benchmark has run. Preserve old
-fixtures and their negative outcomes.
+Canonical full data was written once by stock CPU under `canonical96-run1` /
+`canonical96`: 805,306,368 rows, 16 files with 50,331,648 rows / 49 row groups each,
+103,079,215,104 logical value bytes and 103,135,540,973 actual Parquet file bytes.
+CPU write took 88.023572793 s and the uncached all-column CPU oracle 23.472610675 s;
+these are preparation timings, not cache fill/read results. The immutable
+canonical-manifest.json SHA256 is
+`e5484fe01a568ba9708479d6bf311fa0dd82173595a451097c9a8713a902858b`.
+All 16 full-file hashes and CPU sums are frozen; preparation-audit.json rechecks
+sizes/mtimes and binary footer hashes. Root independently verified all six full
+cache runs against raw/hash/source/artifact/event evidence in root-full-audits.json.
+Preserve old fixtures and their negative outcomes.

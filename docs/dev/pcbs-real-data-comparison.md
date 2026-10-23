@@ -1,6 +1,7 @@
 # PCBS record splitting, read coalescing and stock CPU caching
 
-Status: IN PROGRESS. Research fixtures only; no production configuration or
+Status: READY FOR REVIEW. Six full runs and independent raw-evidence audits
+passed. Research fixtures only; no production configuration or
 cache contract changes. Existing Spark/PCBS behavior is released and unchanged.
 These fixtures and generated overlays are unreleased. All project operations
 use MCP docker_exec tools. Architect acceptance is pending.
@@ -127,15 +128,71 @@ BlockManager residency remained stable through all four reads. CPU reported
 reported 25,776,390,048 memory bytes and 77,329,035,876 disk bytes. These are
 Spark's recorded sizes, not additional isolated live-heap measurements.
 
-At this stage coalescing restores large GPU batches with essentially unchanged
-median read time. Overall observed heap peaks remain similar because fill
-peaks dominate the combined case. Do not attribute its lower fill wall time
-to read coalescing: the two GPU artifacts have the same fill path. To check
-run-to-run variation, the same three cases are being repeated in reverse order
-with unchanged files, artifacts and controls. Peak heap and wall times remain
-the primary results; no GC matching or tuning is performed. Full independent
-post-run hash/GC/event audits are deferred until timing ends, avoiding competing
-I/O. No final cross-run performance claim is made yet.
+In this first matrix coalescing restored large GPU batches with essentially
+unchanged median read time. Fill peaks dominated the combined case. Its lower
+fill wall time cannot be attributed to read coalescing: both GPU artifacts have
+the same fill path. The unchanged reverse-order repeat below checks this variation.
 
-Expected heap OOM remains a negative outcome. Non-fixture correctness failures
-or required production changes must be investigated and escalated before proceeding.
+## Verified comparison across two fresh JVMs per case
+
+Root ran CPU, split, then split/coalesce. The independent worker repeated the
+same commands in reverse order, changing only output directories. All six
+runs passed with the same canonical hashes, exact rows and aggregate oracle;
+there were no failed tasks, OOMs or timeouts. Global GPU target remained 1 GiB,
+with private PCBS pre-splitting only. No control was tuned to obtain a pass or
+match GC behavior. Full audits ran after timing ended, avoiding competing I/O.
+
+The following heap maxima take the larger of the 20 ms samples and logged
+pre-GC occupancy during each timed phase. Read peaks include warmup; read wall
+medians exclude warmup. These are observed peaks, not guaranteed upper bounds
+or isolated payload/live-set measurements. Two JVMs give observed ranges, not
+a statistical confidence interval.
+
+| Mode | Fill wall range s | Read median range s | Largest observed fill heap GiB | Largest observed read heap GiB | Largest overall observed heap GiB |
+|---|---:|---:|---:|---:|---:|
+| CPU/default | 99.30–114.32 | 18.64–19.20 | 42.19 | 42.73 | 42.73 |
+| GPU/PCBS codec, split only | 110.20–138.37 | 26.84–28.20 | 41.63 | 42.01 | 42.01 |
+| GPU/PCBS codec, split/coalesce | 113.52–138.55 | 24.96–26.96 | 41.74 | 42.10 | 42.10 |
+
+The reverse-order individual observations are:
+
+| Mode | Fill wall s | Three measured read walls s | Observed fill/read heap peaks GiB |
+|---|---:|---|---|
+| GPU split/coalesce | 138.55 | 26.26, 24.96, 24.38 | 39.92 / 42.10 |
+| GPU split | 110.20 | 28.20, 29.00, 27.95 | 41.47 / 36.84 |
+| CPU/default | 99.30 | 19.28, 19.20, 19.16 | 42.19 / 41.74 |
+
+The lower read-phase peak switched between GPU modes across the two orders.
+It is not reproducible evidence that coalescing reduces heap. Overall maximum
+observed heap stayed near 42–43 GiB in all modes. Fill rankings also reversed,
+so the fill difference is run variation, not a coalescer benefit. Coalescing
+consistently restored 112 large GPU batches per read instead of 3,184 small
+ones, with the same measured 991.27 MiB maximum. Read times were similar or
+modestly lower with coalescing in these observations. CPU/default was faster
+for this all-column sum/count query. These measurements do not isolate the
+codec's benefit from the PCBS format and splitting changes, nor predict a
+customer query with different downstream processing or establish a safe cap
+for smaller heaps and higher parallelism.
+
+All repeats matched their corresponding first-run encoded bytes, record
+counts, measured GPU batch sizes and stable BlockManager residency. CPU kept
+normal 10,000-row batches (maximum encoded record 1.22 MiB); it had no RAPIDS or
+research-overlay jars and default Java serialization. Its input bytes and
+partition layout were identical to the GPU cases.
+
+Root independently audited all six cases against raw markers, source/build
+manifests, runtime artifact hashes, actual stock/overlay class origins, full
+canonical hashes, GC logs, Spark event logs, complete cache retention and
+successful unpersist. Every audit passed. GPU resources were released and no
+Spark JVM remained after timing. Evidence under the shared root:
+
+- `root-full-audits.json`: six independent raw audits with hashes.
+- `independently-verified-comparison.json`: phase maxima and paired ranges.
+- `root-matrix-process.json`, `worker-reverse-matrix-process.json`: serial
+  process outcomes and exact command files.
+- `{root,worker}-{cpu96,gpu32split96,gpu32combine96}/`: raw logs, event logs,
+  GC logs, memory samples, launch controls, process and verifier results.
+- `summarize_full_audits.py`: reviewed derivation of the comparison JSON.
+
+Research is READY FOR REVIEW. Architect acceptance and any production design
+or implementation remain separate.
