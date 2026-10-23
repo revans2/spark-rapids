@@ -7,12 +7,22 @@ acceptance are pending.
 
 ## Constant-data comparison and cleanup follow-up (2026-10-23)
 
-IN PROGRESS. Architect direction: keep total payload and partition count fixed
+READY FOR REVIEW. Architect direction: keep total payload and partition count fixed
 when comparing record sizes; the previous A sweep changed total data from
 24 to 96 GiB and therefore changed memory pressure. Preserve those observations
 as historical evidence, not an equal-data record-size comparison.
 
-- Constant-data benchmark: 96 GiB total, 16 partitions, 6 GiB per task,
+- Constant-data benchmark: READY FOR REVIEW. Worker and root independently
+  ran four fresh JVM cases each in opposite order. Four codec cases completed
+  exactly; four Java cases OOMed during producer allocation, with zero blocks
+  published. All eight raw/hash/event/GC audits passed, runtime sources match
+  and no timeouts occurred. Root codec 256 MiB/1 GiB: fill 73.28/77.94 s,
+  median read 18.14/24.34 s, GC across three reads 3,500/14,250 ms; sampled
+  occupancy peak 28.13/45.44 GiB. Equal logical data and payload content verified.
+  Native remains optional; this does not prove a PCBS MEMORY_AND_DISK fix.
+  Evidence: /data/pcbs-oom/blockmanager-codec-confidence/constant-data/.
+  Full paired data: confidence/constant_data_benefit/independently-verified-results.json.
+  Controls: 96 GiB total, 16 partitions, 6 GiB per task,
   local[8], 48 GiB configured heap, ParallelGC, DISK_ONLY; 256 MiB records
   mean 24 per partition, 1 GiB records mean six. Compare Java and per-cache
   codec in separate fresh JVMs, serially, with one warmup and three reads.

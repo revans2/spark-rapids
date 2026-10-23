@@ -1,0 +1,371 @@
+{
+  "status": "READY FOR REVIEW; worker observations, paired root evidence in independently-verified-results.json",
+  "controls": {
+    "total_payload_bytes": 103079215104,
+    "partitions": 16,
+    "payload_bytes_per_partition": 6442450944,
+    "logical_input_rows": 384,
+    "unit_bytes": 268435456,
+    "task_threads": 8,
+    "configured_heap_gib": 48,
+    "gc": "ParallelGC",
+    "storage": "DISK_ONLY",
+    "memory_fraction": "default 0.6",
+    "unroll_check_period": "default 16",
+    "object_stream_reset": "default 100",
+    "warmup_reads": 1,
+    "measured_reads": 3,
+    "fresh_jvm_per_case": true
+  },
+  "same_content_model": "Each partition concatenates24 fixed256MiB regions for its24consecutive input seeds; batch boundaries only differ.",
+  "cases": [
+    {
+      "mode": "codec",
+      "record_mib": 256,
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/constant-data/worker-256-codec",
+      "valid_classified_experiment": true,
+      "outcome": "complete",
+      "completed_correctness": true,
+      "verification_sha256": "a01ab376b2bd910497439f2e84a70fa06cc8da6dea599122539ec961f1e21203",
+      "source_sha256": "5602d4b083928977aa119550a007e30a7df63f1add40e7ea8800864cbda8eeb6",
+      "phase_metrics": [
+        {
+          "event": "phase_finished",
+          "phase": "fill",
+          "wall_s": 73.02163935,
+          "gc_ms": 6212,
+          "gc_count": 31,
+          "sampled_heap_peak_bytes": 24106475360,
+          "heap_used_end_bytes": 14641715776,
+          "validated_records": 384,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        },
+        {
+          "event": "phase_finished",
+          "phase": "warmup",
+          "wall_s": 18.347949746,
+          "gc_ms": 1528,
+          "gc_count": 6,
+          "sampled_heap_peak_bytes": 30211344088,
+          "heap_used_end_bytes": 21559923904,
+          "validated_records": 384,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        },
+        {
+          "event": "phase_finished",
+          "phase": "read_1",
+          "wall_s": 18.191476906,
+          "gc_ms": 1179,
+          "gc_count": 6,
+          "sampled_heap_peak_bytes": 30763720624,
+          "heap_used_end_bytes": 24700510832,
+          "validated_records": 384,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        },
+        {
+          "event": "phase_finished",
+          "phase": "read_2",
+          "wall_s": 17.926435343,
+          "gc_ms": 1131,
+          "gc_count": 7,
+          "sampled_heap_peak_bytes": 28596042888,
+          "heap_used_end_bytes": 14704508528,
+          "validated_records": 384,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        },
+        {
+          "event": "phase_finished",
+          "phase": "read_3",
+          "wall_s": 18.41527427,
+          "gc_ms": 1004,
+          "gc_count": 6,
+          "sampled_heap_peak_bytes": 28400197320,
+          "heap_used_end_bytes": 18168371080,
+          "validated_records": 384,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        }
+      ],
+      "cache_filled": [
+        {
+          "event": "cache_filled",
+          "sql_rows": 384,
+          "sql_size_bytes": 103079215104,
+          "generated_records": 384,
+          "generated_payload_bytes": 103079215104,
+          "generated_logical_rows": 384,
+          "total_disk_bytes": 103079219712,
+          "filled_partitions": 16
+        }
+      ],
+      "median_read_s": 18.191476906,
+      "measured_read_gc_ms": 3314,
+      "sampled_peak_heap_occupancy_bytes": 30763720624,
+      "observed_post_gc_occupancy_peak_bytes": 13762088696,
+      "maximum_published_rdd_blocks": 16,
+      "last_heap_progress": {
+        "event": "heap_sample",
+        "phase": "read_3",
+        "heap_used_bytes": 18195313264,
+        "phase_sampled_heap_peak_bytes": 28400197320,
+        "global_sampled_heap_peak_bytes": 30763720624,
+        "generated_records": 384,
+        "generated_payload_bytes": 103079215104,
+        "generated_logical_rows": 384,
+        "validated_records": 1920,
+        "validated_payload_bytes": 515396075520,
+        "validated_logical_rows": 1920,
+        "java_writes": 0,
+        "java_reads": 0,
+        "codec_writes": 384,
+        "codec_reads": 1920
+      },
+      "gc_notifications_observed": 58,
+      "gc_notification_duration_ms_observed": 11080,
+      "task_end_reasons": {
+        "Success": 80
+      },
+      "process": {
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_s": 167.80175412539393,
+        "disk_free_after_bytes": 636061073408
+      },
+      "hashes_checked": 253,
+      "gc_files": [
+        "gc.log"
+      ],
+      "cleanup_record": "/data/pcbs-oom/blockmanager-codec-confidence/constant-data/worker-256-codec/raw-block-cleanup.json"
+    },
+    {
+      "mode": "java",
+      "record_mib": 256,
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/constant-data/worker-256-java",
+      "valid_classified_experiment": true,
+      "outcome": "heap_oom",
+      "completed_correctness": false,
+      "verification_sha256": "5de7d51bb28a7a07bce58fd346918368c36277a7fb7ebbf55b3c8209f5704a8d",
+      "source_sha256": "5602d4b083928977aa119550a007e30a7df63f1add40e7ea8800864cbda8eeb6",
+      "phase_metrics": [],
+      "cache_filled": [],
+      "median_read_s": null,
+      "measured_read_gc_ms": null,
+      "sampled_peak_heap_occupancy_bytes": 40865592512,
+      "observed_post_gc_occupancy_peak_bytes": 40856321320,
+      "maximum_published_rdd_blocks": 0,
+      "last_heap_progress": {
+        "event": "heap_sample",
+        "phase": "fill",
+        "heap_used_bytes": 35215300240,
+        "phase_sampled_heap_peak_bytes": 40865592512,
+        "global_sampled_heap_peak_bytes": 40865592512,
+        "generated_records": 171,
+        "generated_payload_bytes": 45902462976,
+        "generated_logical_rows": 171,
+        "validated_records": 0,
+        "validated_payload_bytes": 0,
+        "validated_logical_rows": 0,
+        "java_writes": 165,
+        "java_reads": 0,
+        "codec_writes": 0,
+        "codec_reads": 0
+      },
+      "gc_notifications_observed": 78,
+      "gc_notification_duration_ms_observed": 53486,
+      "task_end_reasons": {},
+      "process": {
+        "exit_code": 52,
+        "timed_out": false,
+        "wall_s": 77.98418863210827,
+        "disk_free_after_bytes": 636060332032
+      },
+      "hashes_checked": 253,
+      "gc_files": [
+        "gc.log"
+      ],
+      "cleanup_record": "/data/pcbs-oom/blockmanager-codec-confidence/constant-data/worker-256-java/raw-block-cleanup.json"
+    },
+    {
+      "mode": "codec",
+      "record_mib": 1024,
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/constant-data/worker-1024-codec",
+      "valid_classified_experiment": true,
+      "outcome": "complete",
+      "completed_correctness": true,
+      "verification_sha256": "1b8624eb79c6a4c6f88bbbd5f8b92d4b573b03a14b1a0671ac88818166bf574c",
+      "source_sha256": "5602d4b083928977aa119550a007e30a7df63f1add40e7ea8800864cbda8eeb6",
+      "phase_metrics": [
+        {
+          "event": "phase_finished",
+          "phase": "fill",
+          "wall_s": 80.614261848,
+          "gc_ms": 18554,
+          "gc_count": 34,
+          "sampled_heap_peak_bytes": 35562261584,
+          "heap_used_end_bytes": 16522942600,
+          "validated_records": 96,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        },
+        {
+          "event": "phase_finished",
+          "phase": "warmup",
+          "wall_s": 26.870847412,
+          "gc_ms": 6199,
+          "gc_count": 9,
+          "sampled_heap_peak_bytes": 40106520760,
+          "heap_used_end_bytes": 26355939480,
+          "validated_records": 96,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        },
+        {
+          "event": "phase_finished",
+          "phase": "read_1",
+          "wall_s": 26.684686064,
+          "gc_ms": 6353,
+          "gc_count": 7,
+          "sampled_heap_peak_bytes": 47658777432,
+          "heap_used_end_bytes": 32747199192,
+          "validated_records": 96,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        },
+        {
+          "event": "phase_finished",
+          "phase": "read_2",
+          "wall_s": 25.92640763,
+          "gc_ms": 4972,
+          "gc_count": 6,
+          "sampled_heap_peak_bytes": 48727197312,
+          "heap_used_end_bytes": 40205752240,
+          "validated_records": 96,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        },
+        {
+          "event": "phase_finished",
+          "phase": "read_3",
+          "wall_s": 24.047452166,
+          "gc_ms": 3891,
+          "gc_count": 6,
+          "sampled_heap_peak_bytes": 47649139072,
+          "heap_used_end_bytes": 47709092128,
+          "validated_records": 96,
+          "validated_logical_rows": 384,
+          "validated_payload_bytes": 103079215104
+        }
+      ],
+      "cache_filled": [
+        {
+          "event": "cache_filled",
+          "sql_rows": 384,
+          "sql_size_bytes": 103079215104,
+          "generated_records": 96,
+          "generated_payload_bytes": 103079215104,
+          "generated_logical_rows": 384,
+          "total_disk_bytes": 103079216256,
+          "filled_partitions": 16
+        }
+      ],
+      "median_read_s": 25.92640763,
+      "measured_read_gc_ms": 15216,
+      "sampled_peak_heap_occupancy_bytes": 48727197312,
+      "observed_post_gc_occupancy_peak_bytes": 35579733160,
+      "maximum_published_rdd_blocks": 16,
+      "last_heap_progress": {
+        "event": "heap_sample",
+        "phase": "read_3",
+        "heap_used_bytes": 47732494648,
+        "phase_sampled_heap_peak_bytes": 47732494648,
+        "global_sampled_heap_peak_bytes": 48727197312,
+        "generated_records": 96,
+        "generated_payload_bytes": 103079215104,
+        "generated_logical_rows": 384,
+        "validated_records": 480,
+        "validated_payload_bytes": 515396075520,
+        "validated_logical_rows": 1920,
+        "java_writes": 0,
+        "java_reads": 0,
+        "codec_writes": 96,
+        "codec_reads": 480
+      },
+      "gc_notifications_observed": 65,
+      "gc_notification_duration_ms_observed": 40171,
+      "task_end_reasons": {
+        "Success": 80
+      },
+      "process": {
+        "exit_code": 0,
+        "timed_out": false,
+        "wall_s": 208.38769237417728,
+        "disk_free_after_bytes": 636059267072
+      },
+      "hashes_checked": 253,
+      "gc_files": [
+        "gc.log"
+      ],
+      "cleanup_record": "/data/pcbs-oom/blockmanager-codec-confidence/constant-data/worker-1024-codec/raw-block-cleanup.json"
+    },
+    {
+      "mode": "java",
+      "record_mib": 1024,
+      "evidence": "/data/pcbs-oom/blockmanager-codec-confidence/constant-data/worker-1024-java",
+      "valid_classified_experiment": true,
+      "outcome": "heap_oom",
+      "completed_correctness": false,
+      "verification_sha256": "2214f8f1d97eaa44f662c04e8bfa4e83809f40a2ad482772e7be59ae28beda13",
+      "source_sha256": "5602d4b083928977aa119550a007e30a7df63f1add40e7ea8800864cbda8eeb6",
+      "phase_metrics": [],
+      "cache_filled": [],
+      "median_read_s": null,
+      "measured_read_gc_ms": null,
+      "sampled_peak_heap_occupancy_bytes": 33342995392,
+      "observed_post_gc_occupancy_peak_bytes": 33341271552,
+      "maximum_published_rdd_blocks": 0,
+      "last_heap_progress": {
+        "event": "heap_sample",
+        "phase": "fill",
+        "heap_used_bytes": 33342995392,
+        "phase_sampled_heap_peak_bytes": 33342995392,
+        "global_sampled_heap_peak_bytes": 33342995392,
+        "generated_records": 24,
+        "generated_payload_bytes": 25769803776,
+        "generated_logical_rows": 96,
+        "validated_records": 0,
+        "validated_payload_bytes": 0,
+        "validated_logical_rows": 0,
+        "java_writes": 24,
+        "java_reads": 0,
+        "codec_writes": 0,
+        "codec_reads": 0
+      },
+      "gc_notifications_observed": 9,
+      "gc_notification_duration_ms_observed": 4982,
+      "task_end_reasons": {},
+      "process": {
+        "exit_code": 52,
+        "timed_out": false,
+        "wall_s": 23.94946620054543,
+        "disk_free_after_bytes": 636058664960
+      },
+      "hashes_checked": 253,
+      "gc_files": [
+        "gc.log"
+      ],
+      "cleanup_record": "/data/pcbs-oom/blockmanager-codec-confidence/constant-data/worker-1024-java/raw-block-cleanup.json"
+    }
+  ],
+  "limits": [
+    "Synthetic padded-seed format, not Parquet/PCBS/GPU or MEMORY_AND_DISK unroll behavior.",
+    "Full fill includes generation,encoding,disk materialization,firstdecode and all-byte validation.",
+    "Heap/post-GC samples are occupancy, not live sets; GC notification phase labels can lag.",
+    "Classified heap OOM is negative experimental evidence, not completed correctness.",
+    "One worker JVM per case; root reverses mode order; no statistical confidence claim.",
+    "Raw block files removed after recorded verification; logs/manifests/events/GC retained."
+  ]
+}

@@ -247,3 +247,54 @@ It does not prove cancellation, concurrent reads, failed inner close, abandoned
 taskless BlockManager iterators or replica-receiver failure cleanup.
 [Fixture and verified results](../../tools/pcbs-blockmanager-codec-spike/confidence/partial_failure_cleanup/README.md)
 are READY FOR REVIEW. Native work remains optional; production code is untouched.
+
+
+## Constant-data record-size comparison (2026-10-23)
+
+The previous A sweep changed both record size and total bytes. This follow-up
+holds the logical input, ordered payload content, total 96 GiB, 16 partitions
+and 6 GiB per task fixed. The same 384 SQL seed rows represent fixed 256 MiB
+payload units: 256 MiB records hold one unit (24 records/partition), while
+1 GiB records hold four (six records/partition). All payload bytes and returned
+rows are validated. Only record boundaries/framing change.
+
+Fresh JVMs use local[8], 48 GiB configured heap, ParallelGC with its default
+43 workers, DISK_ONLY and unchanged fraction/reset/unroll defaults. Worker
+and root run opposite mode order, serially. Each completed case fills once,
+warms up once and performs three measured reads.
+
+Independent root results:
+
+| Record size | Mode | Fill seconds | Median read seconds | GC ms across 3 reads | Sampled peak heap GiB |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 256 MiB | Java | Heap OOM | Not reached | Not available | 32.65 before failure |
+| 256 MiB | Codec | 73.28 | 18.14 | 3,500 | 28.13 |
+| 1 GiB | Java | Heap OOM | Not reached | Not available | 31.11 before failure |
+| 1 GiB | Codec | 77.94 | 24.34 | 14,250 | 45.44 |
+
+Both independent observations agreed on outcomes. Worker codec fills were
+73.02/80.61 seconds and median reads 18.19/25.93 seconds (256 MiB/1 GiB).
+Smaller codec records reduced read time about 25–30% in these observations,
+with lower recorded GC and sampled occupancy. The remaining timing difference
+has not been separately attributed to allocation, decoding or IO.
+
+Both Java sizes OOMed allocating the next producer array during fill, before
+publishing any block; no Java read timing was obtained. Thus the earlier
+24 GiB Java pass cannot establish that reducing record size alone solves the
+same-pressure workload. No memory settings or partition count were changed.
+
+Each successful codec case published 16 blocks, validated 384 SQL rows and
+96 GiB in each of five actions, and had 80 successful tasks. Actual disk totals
+were 103,079,219,712 bytes at 256 MiB and 103,079,216,256 bytes at 1 GiB;
+their 3,456-byte difference is just framing. All eight raw/source/artifact/
+event/GC audits passed, with identical runtime sources and no timeouts.
+
+Fill includes generation, writing, initial decoding and full-byte validation.
+Read timings include validation and reflect warm filesystem/JIT conditions.
+Heap peaks include garbage and are not live-set or minimum-heap measurements.
+These are synthetic heap-format DISK_ONLY tests, without Parquet or GPU compute;
+they do not establish a fix for the original PCBS MEMORY_AND_DISK OOM.
+
+[Paired results and controls](../../tools/pcbs-blockmanager-codec-spike/confidence/constant_data_benefit/independently-verified-results.json)
+and [reproduction instructions](../../tools/pcbs-blockmanager-codec-spike/confidence/constant_data_benefit/README.md)
+are READY FOR REVIEW. Prior unequal-data evidence remains unchanged.
