@@ -1,6 +1,6 @@
 # Real-world PCBS cache measurements
 
-Status: IN PROGRESS. The first eight full cases are READY FOR REVIEW; remaining
+Status: IN PROGRESS. The first sixteen full cases are READY FOR REVIEW; remaining
 memory/storage cases and architect acceptance are pending. Follow the
 [experiment plan](pcbs-real-world-cache-experiments.md). Existing behavior is
 RELEASED; all new fixtures and formats remain UNRELEASED. All operations, including
@@ -51,7 +51,7 @@ All three GPU modes have identical producer batch counts, rows, device-byte tota
 and min/max sizes within each dataset. GHArchive produces 128 batches; TLC 52.
 The row-group Java and codec arms also have identical actual decoded layouts:
 GHArchive 96 batches per read, TLC 80. Parquet payload sizes differ by 548 bytes for
-GHArchive and 14,868 bytes for TLC out of tens/billions of bytes; byte-for-byte
+GHArchive and 14,868 bytes for TLC out of billions of bytes; byte-for-byte
 writer determinism is not claimed.
 
 Existing PCBS versus row groups changes decoded batching. GHArchive goes from 128
@@ -100,11 +100,50 @@ reporter and decisive Spark/JDK/codec code, reran its synthetic checks, and chec
 the published table against case results; workers recomputed raw phases, GC peaks,
 partition buffers, disk files, task events and content fingerprints independently.
 
+## Memory-and-disk references at 48 GiB
+
+Cases 008–015 also all PASS. All six GPU cache cases and the TLC default CPU
+cache remain fully deserialized in RAM at every checkpoint. The GHArchive CPU
+cache has five memory-resident and fourteen disk-backed blocks, with three
+blocks in both; its 76.038 GiB of disk files are a subset, not a whole-cache
+compression measurement.
+
+| Dataset | Cache path | Fill s | Read s | Fill heap GiB | Read heap GiB | Residency |
+|---|---|---:|---:|---:|---:|---|
+| GHArchive | Existing PCBS + Java | 33.487 | 6.100 | 24.278 | 25.324 | All RAM |
+| GHArchive | Row groups + Java | 32.799 | 5.623 | 23.717 | 27.378 | All RAM |
+| GHArchive | Row groups + codec | 33.046 | 5.642 | 23.623 | 27.332 | All RAM |
+| GHArchive | Default CPU cache + Java | 101.561 | 15.090 | 43.566 | 42.303 | Mixed |
+| TLC | Existing PCBS + Java | 12.962 | 3.517 | 11.057 | 12.059 | All RAM |
+| TLC | Row groups + Java | 14.367 | 3.864 | 12.060 | 11.255 | All RAM |
+| TLC | Row groups + codec | 14.129 | 3.827 | 12.060 | 11.249 | All RAM |
+| TLC | Default CPU cache + Java | 120.186 | 39.263 | 45.988 | 39.286 | All RAM |
+
+Both codec cases perform zero codec reads and writes: these RAM hits bypass
+wire serialization. The near-equal row-group Java/codec timings therefore do
+not measure a serialization difference. The same actual producer and decoded
+GPU fingerprints match their disk-only controls. Peak heap can rise because
+the cache itself now remains on heap; it still does not establish a minimum
+required heap.
+
+MemoryStore accounting is an estimate, separate from measured payload bytes.
+For example, the GHArchive row-group cache is charged about 22.032 GiB while
+its arrays total 23.336 GiB. The cause of that difference is not established;
+the experiment records both rather than treating the estimate as actual
+residency footprint.
+
+The full single table and raw checks now also exist as
+first16-comparison001.md/.csv/.json and first16-independent-audit001.json.
+The raw/content audit is matrix001/independent-next8-audit.json; operational
+evidence is matrix001-operational-audit/second8-summary.json. Root checked
+the table against case results; workers independently recomputed raw phases,
+GC/sample peaks, buffer/file arrays, codec counters and task/content evidence.
+
 ## Remaining measurements
 
 The active 48-case schedule is matrix001/schedule.json, supervisor PID 365757;
-status is matrix001/progress.json. Cases 008–015 test MEMORY_AND_DISK at 48 GiB,
-then cases 016–031 repeat both storage levels at 16 GiB and 032–047 at 8 GiB.
+status is matrix001/progress.json. All sixteen 48 GiB cases pass; cases 016–031
+now repeat both storage levels at 16 GiB, followed by 032–047 at 8 GiB.
 Dataset rows, partitioning, targets and other controls stay fixed. Record actual
 residency and whether the codec wire path is exercised; RAM hits can bypass it.
 A partial disk subset has no whole-cache disk compression ratio. Genuine heap or

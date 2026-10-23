@@ -42,11 +42,14 @@ The frozen 48-case schedule and guarded supervisor are ready at
 /data/pcbs-oom/pcbs-real-world-cache/matrix001/schedule.json. Large-case execution
 and final comparison remain IN PROGRESS. Root supervisor PID 365757 is executing
 matrix001/schedule.json sequentially; monitor matrix001/progress.json and root_status.py.
-The first eight full cases (both datasets, four methods, 48 GiB, DISK_ONLY) are
-verified PASS and READY FOR REVIEW; see [the real-data results](pcbs-real-world-cache-results.md).
-Independent raw audits and the complete eight-row comparison are preserved under
-the evidence root. Current execution has advanced to MEMORY_AND_DISK at 48 GiB;
-remaining 16/8 GiB cases are pending. Historical first baseline: GHArchive existing
+The first sixteen full cases (both datasets, four methods, 48 GiB, both storage
+levels) are verified PASS and READY FOR REVIEW; see [the real-data results](pcbs-real-world-cache-results.md).
+Independent raw audits and the complete first16-comparison001 table are preserved
+under the evidence root. The 48 GiB GPU MEMORY_AND_DISK cases all stayed in RAM;
+codec wire counters stayed zero and row-group Java/codec read times matched.
+CPU GHArchive had mixed residency; CPU TLC remained in RAM. No whole-cache disk
+ratios are assigned to these partial/no-disk cases. Current execution has advanced
+to 16 GiB DISK_ONLY; the 16/8 GiB results are pending. Historical first baseline: GHArchive existing
 PCBS/Java, DISK_ONLY, configured 48 GiB (Runtime maximum 46 GiB), fill 48.511 s,
 read median 14.554 s, payload 23.512 GiB, serialized disk 23.512 GiB and observed
 fill/read peak heap 14.750/21.065 GiB. Actual producer: 128 batches,
