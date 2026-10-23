@@ -7,93 +7,58 @@ acceptance are pending.
 
 ## Public-data compression, heap and storage experiments (2026-10-23)
 
-Status: IN PROGRESS. The user authorized real-world datasets from /data/public,
-compression comparisons including ordinary Java serialization, smaller heaps,
-and DISK_ONLY versus MEMORY_AND_DISK. Read
-[the experiment plan](pcbs-real-world-cache-experiments.md) before resuming.
-Initial scope: TLC high-volume FHV 2024 and the GHArchive week; existing GPU
-PCBS/Java, row-group Java/codec and the default CPU cache; 48/16/8 GiB heap with
-fixed eight task slots, 16 partitions and the prior GPU/memory controls. New
-research fixtures are UNRELEASED; existing contracts are RELEASED and preserved.
-All operations MUST use MCP docker_exec; repeat this at every worker handoff,
-resume and checkpoint. No production source/default changes or old-run edits.
+Status: READY FOR REVIEW for the completed frozen 48-case sweep: 46 PASS, two
+HEAP_OOM results, no unexpected errors or timeouts. See [the complete results](pcbs-real-world-cache-results.md)
+and [the frozen plan](pcbs-real-world-cache-experiments.md). All operations,
+including workers, MUST use MCP docker_exec; repeat at handoffs, resumes and
+checkpoints. Preserve frozen sources/results and unrelated user files.
 
-User steering after the first real-data results: finish the frozen 48-case sweep,
-then develop a production-readiness plan for small stored row groups with combined
-large GPU decode, unless the remaining evidence reveals a material problem. Assess
-resource lifetime, CPU PCBS parity, supported versions, correctness and performance.
-Keep custom codec work separate from the stock-Java row-group path. Subsequent
-weekend instruction authorizes continuing through production implementation, tests,
-performance verification and sub-agent reviews for a reviewable code handoff.
-No new public configuration, Spark-core modification or external publication is
-authorized. The [production plan](pcbs-rowgroup-production-plan.md) records the
-candidate existing buffer/chunked-reader integration and its prerequisite gates;
-independent review found no material scope contradiction and added explicit
-storage/serialization/remote-read and concurrent-host-pressure checks.
-Root must establish the concrete production plan after the frozen
-runs, preserve released behavior, inspect decisive code and independently verify
-worker changes; escalate material architecture/contract changes.
-Existing released cache/StorageLevel contracts remain the compatibility boundary;
-prototype artifacts/formats are UNRELEASED and need no compatibility adapters.
+Full GHArchive and TLC FHV2024 data were copied into sixteen immutable partitions
+without value re-encoding. Root verified all 561 copied row-group hashes, coverage,
+rows and byte totals (root-input-audit001.json). CPU oracles measure 91.095/31.108
+GiB of raw values. The read configuration is inferTimestampNTZ.enabled=false with
+UTC in every mode/oracle, authorized by the user; no cast operators were added.
+All seven fresh smoke gates pass before the full run. Original verifier-only
+DISK_ONLY fill-readback mistake and exact old bytes remain preserved.
 
-User steering: adapting the CPU branch of PCBS similarly, and profiling it against
-existing PCBS, are explicitly LATER, after real-world performance/cost is clearer.
-The default CPU cache reference in this matrix is a separate released path.
-Dataset inventory and source/storage audits are complete. Both immutable input
-preparations pass; root independently verified all 561 copied row-group hashes,
-complete contiguous coverage, row counts and column byte totals at
-/data/pcbs-oom/pcbs-real-world-cache/root-input-audit001.json. The small CPU harness
-checks pass for both storage levels; arbitrary-schema harness and launcher/verifier
-are undergoing review. User authorized interpreting TLC's timezone-free timestamps
-as Timestamp, then pointed to the read configuration: fix
-spark.sql.parquet.inferTimestampNTZ.enabled=false and session UTC across every arm
-and oracle, with no added cast operators. Verify actual inferred types first.
-The harness, launcher/verifier and sparse reporter are READY FOR REVIEW for the
-bounded sweep. All seven fresh root gates pass (six actual-schema GPU cases plus
-the CPU launcher); root independently compiled the harness and reparsed results,
-and workers audited raw correctness/operator/storage/task evidence. Full CPU
-oracles measure GHArchive 91.095 GiB and TLC 31.108 GiB of raw values. The first
-codec gate exposed a verifier-only error: successful DISK_ONLY cache puts normally
-read back their records during fill. The corrected exact accounting is verified;
-old failure/raw evidence and verifier bytes are preserved. Fill includes that work.
-The frozen 48-case schedule and guarded supervisor are ready at
-/data/pcbs-oom/pcbs-real-world-cache/matrix001/schedule.json. Large-case execution
-and final comparison remain IN PROGRESS. Root supervisor PID 365757 is executing
-matrix001/schedule.json sequentially; monitor matrix001/progress.json and root_status.py.
-The first sixteen full cases (both datasets, four methods, 48 GiB, both storage
-levels) are verified PASS and READY FOR REVIEW; see [the real-data results](pcbs-real-world-cache-results.md).
-Independent raw audits and the complete first16-comparison001 table are preserved
-under the evidence root. The 48 GiB GPU MEMORY_AND_DISK cases all stayed in RAM;
-codec wire counters stayed zero and row-group Java/codec read times matched.
-CPU GHArchive had mixed residency; CPU TLC remained in RAM. No whole-cache disk
-ratios are assigned to these partial/no-disk cases. Current execution has advanced
-through 16 GiB DISK_ONLY: cases 016–023 also verified PASS and READY FOR REVIEW.
-The first24 combined table and three independent raw/operational audits are preserved.
-Root independently reparsed raw phases, partition rows/buffer totals and completion
-for all 24 cases (root-phase-recheck-024.json). No OOM occurred in these disk cases;
-Cases 024–031 at 16 GiB MEMORY_AND_DISK also verify PASS and READY FOR REVIEW.
-Root independently reparsed all 32 raw phase/partition results; the first32 table,
-fourth8 raw audit and fourth8 operational audit preserve evidence. Mixed-residency
-partition IDs differ between Java/codec, so that timing pair is not a fully isolated
-codec comparison. Cases 032–039 at 8 GiB DISK_ONLY also verify PASS and READY FOR REVIEW, with
-first40 comparison/raw/operational evidence and root-phase-recheck-040.json.
-Runtime.maxMemory is a startup snapshot; independent-heap039-audit.json explains
-why a ParallelGC observation can exceed that snapshot while below configured Xmx.
-The final 8 GiB MEMORY_AND_DISK group is active: case040 existing GHArchive PCBS
-filled then genuinely HEAP_OOMed in read0, Array.newInstance/ObjectInputStream
-through MemoryStore.putIterator and BlockManager.maybeCacheDiskValuesInMemory.
-Root read the raw stack; exit52, clean quiescence and owned scratch cleanup are
-verified. It is an expected negative, not an unexpected error; later cases continue. Historical first baseline: GHArchive existing
-PCBS/Java, DISK_ONLY, configured 48 GiB (Runtime maximum 46 GiB), fill 48.511 s,
-read median 14.554 s, payload 23.512 GiB, serialized disk 23.512 GiB and observed
-fill/read peak heap 14.750/21.065 GiB. Actual producer: 128 batches,
-98,879,350,738 device bytes; source/value bytes and cache compression differ.
-Root inspected the result and workers independently checked raw arrays, phase/GC
-metrics, exact oracles, physical block files and first-attempt successful tasks.
-Remaining cases and any comparative conclusions are pending. Source fixtures are
-frozen; future agents must keep using MCP docker_exec and must not start a second
-benchmark JVM alongside the active supervisor. Read-only first-eight audits are
-running independently and will write audit/comparison evidence under the same root.
+Evidence root: /data/pcbs-oom/pcbs-real-world-cache. The frozen supervisor completed
+matrix001/schedule.json and all JVMs/GPU contexts/scratch were cleaned. Combined
+final48-comparison001.md/.csv/.json retains every case and metric, with independent
+raw numeric/content and operational audits. Root independently reparsed all raw
+phase/partition results (root-phase-recheck-048.json), then reran the exact frozen
+verifier for all 48 cases: root-reverified48.json matches every saved result
+exactly, checks 313 unique files and rehashes each at the end. Hash memoization
+checked file identity/size/mtime on reuse; no source/result changes or acceptance
+weakening. See independent-heap039-audit.json for startup Runtime.maxMemory versus
+adaptive ParallelGC capacity; occupancy includes garbage and is not a live set.
+
+Both negatives occur at 8 GiB MEMORY_AND_DISK on GHArchive. Existing PCBS fills
+then fails in read0, ObjectInputStream.readArray / JavaDeserializationStream through
+MemoryStore.putIterator / BlockManager.maybeCacheDiskValuesInMemory (case040).
+Pure CPU default caching fails during fill in ColumnBuilder.ensureFreeSpace
+(case043). Root inspected both raw stacks; failed metrics remain partial/unknown.
+Both row-group modes pass all cases, including these controls. Java row groups
+GHArchive 8 GiB MEMORY_AND_DISK: fill 46.954 s / read 13.394 s / peak 6.856 GiB;
+codec 39.230 s / 8.380 s / 6.749 GiB. Mixed residency can retain different partition IDs and
+cannot isolate codec cost alone. Full disk-only ratios are distinct from partial
+memory-and-disk subsets. TLC has a compression/read-time tradeoff, not a universal
+speed win. CPU reference has CPU computation throughout.
+
+The user authorized completing production implementation/tests/performance and
+sub-agent reviews for a reviewable weekend handoff. Follow the independently
+reviewed [production plan](pcbs-rowgroup-production-plan.md). Candidate reader
+integration reuses existing cuDF logical-buffer/chunked-reader APIs and MUST pass
+new gates; completed benchmarks use the research multi-file helper. Keep custom
+codec separate. Existing PCBS/Spark/StorageLevel contracts are RELEASED (main and
+deployed); prototype helpers/formats/overlays are UNRELEASED, with no compatibility
+adapters. No Spark core/OFF_HEAP/new public config or external posting.
+
+Initial patch scope: GPU-written small records, combined GPU reads, CPU-reader
+and existing CPU-written-record compatibility. CPU parquet-mr producer streaming
+and profiling and heavy downstream GPU queries remain separate follow-ups.
+Root coordinates an isolated production worktree after this final checkpoint,
+reads decisive code, independently verifies workers, commits with DCO sign-off,
+and requests focused reviews. Only the architect marks work DONE.
 
 ## Row-group storage and combined decode prototype (2026-10-23)
 

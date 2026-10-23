@@ -2,7 +2,8 @@
 
 Status: IN PROGRESS. The user authorized finishing the real-data sweep, then a
 reviewable production patch with tests, performance checks and independent agent
-reviews. Only the architect marks completed work DONE; verified work is READY FOR
+reviews. The 48-case sweep is complete and READY FOR REVIEW: 46 PASS, two genuine
+heap OOMs; root independently reverified every result and frozen hash. Only the architect marks completed work DONE; verified work is READY FOR
 REVIEW. The real-data sweep remains the prerequisite for implementation.
 
 ## Scope and compatibility

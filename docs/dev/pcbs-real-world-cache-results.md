@@ -1,7 +1,11 @@
 # Real-world PCBS cache measurements
 
-Status: IN PROGRESS. The first forty full cases are READY FOR REVIEW; remaining
-memory/storage cases and architect acceptance are pending. Follow the
+Status: READY FOR REVIEW for the completed 48-case sweep: 46 PASS and two genuine
+heap OOMs. Architect acceptance and production implementation are pending.
+The [complete single table](/data/pcbs-oom/pcbs-real-world-cache/final48-comparison001.md)
+and [CSV](/data/pcbs-oom/pcbs-real-world-cache/final48-comparison001.csv) include every
+case, storage mode, configured heap, fill/read times, encoded size and observed
+heap. Neither row-group mode failed in this bounded sweep. Follow the
 [experiment plan](pcbs-real-world-cache-experiments.md). Existing behavior is
 RELEASED; all new fixtures and formats remain UNRELEASED. All operations, including
 worker audits, use MCP docker_exec. Do not launch another benchmark alongside the
@@ -234,15 +238,54 @@ independently reparsed all forty raw phase/partition results
 these heap sizes while observed occupancy declines; this does not establish
 universal heap bounds or eliminate the pending memory-and-disk pressure test.
 
-## Remaining measurements
+## Memory-and-disk at 8 GiB and final outcome
 
-The active 48-case schedule is matrix001/schedule.json, supervisor PID 365757;
-status is matrix001/progress.json. All first 40 cases pass; cases 040–047
-now test MEMORY_AND_DISK at 8 GiB. Case040 has recorded a genuine heap OOM during
-read0 in Java deserialization / MemoryStore disk-to-memory caching; its fill
-succeeded. No successful read timing is assigned. Remaining cases are pending.
-Dataset rows, partitioning, targets and other controls stay fixed. Record actual
-residency and whether the codec wire path is exercised; RAM hits can bypass it.
-A partial disk subset has no whole-cache disk compression ratio. Genuine heap or
-GC-limit OOM is a negative result; unexpected errors park the supervisor. CPU PCBS
-adaptation/profiling and heavier downstream workloads remain deferred by the user.
+The schedule at matrix001/schedule.json is COMPLETE. All controls, total rows and
+partitioning stayed fixed. There were 46 PASS and two HEAP_OOM results; no unexpected
+format/native errors, timeouts or GC-limit outcomes. All JVMs/GPU contexts exited
+and owned scratch was removed. Failed phases remain incomplete observations.
+
+| Dataset | Cache path | Fill s | Read s | Fill heap GiB | Read heap GiB | Outcome |
+|---|---|---:|---:|---:|---:|---|
+| GHArchive | Existing PCBS + Java | 49.340 | — | 7.682 | 7.718* | Read0 heap OOM |
+| GHArchive | Row groups + Java | 46.954 | 13.394 | 6.581 | 6.856 | PASS |
+| GHArchive | Row groups + codec | 39.230 | 8.380 | 6.448 | 6.749 | PASS |
+| GHArchive | Default CPU cache + Java | — | — | 7.097* | — | Fill heap OOM |
+| TLC | Existing PCBS + Java | 14.415 | 3.573 | 6.476 | 7.387 | PASS |
+| TLC | Row groups + Java | 14.562 | 4.837 | 5.592 | 5.551 | PASS |
+| TLC | Row groups + codec | 13.785 | 4.205 | 5.648 | 5.417 | PASS |
+| TLC | Default CPU cache + Java | 131.461 | 41.542 | 7.491 | 7.333 | PASS |
+
+*Partial occupancy observations from failed phases, not successful phase bounds.
+Case040 filled, then failed in ObjectInputStream.readArray / JavaDeserializationStream
+through MemoryStore.putIterator and BlockManager.maybeCacheDiskValuesInMemory.
+Case043 failed during construction, in HeapByteBuffer.allocate / ColumnBuilder.ensureFreeSpace
+through DefaultCachedBatchSerializer and MemoryStore.putIterator. These are different
+failure points. CPU case043 has no complete payload measurement; its size is not
+borrowed from successful larger-heap runs. Root inspected both raw failure stacks.
+
+Both GHArchive row-group cases retained two blocks in memory and fourteen on disk;
+TLC existing PCBS retained twelve memory/four disk blocks, row-group modes eleven
+memory/five disk blocks. CPU TLC retained three memory/fourteen disk blocks (one in
+both). Partition identities and payload subsets can differ, so mixed-residency
+Java/codec timing pairs do not isolate serialization alone. No whole-cache disk
+compression factor is assigned to these cases. Codec disk counters were active.
+
+The new real-data negative supports the synthetic reproduction: small stored
+records work with stock Java serialization/default checks where existing large
+PCBS records fail. This is bounded evidence, not a universal heap guarantee.
+The codec gives promising disk-path times; it is a separate path from the initial
+production patch. TLC shows a real compression/read-time cost that must remain in
+review: roughly 9% more encoded bytes, and row-group Java is slower than existing
+PCBS in these TLC reads. The full CPU reference uses CPU compute throughout and
+does not isolate encoding cost. Read phases include the verification aggregate.
+
+Final evidence: final48-comparison001.md/.csv/.json,
+final48-independent-audit001.json and matrix001-operational-audit/{sixth8-summary.json,
+final48-cleanup-summary.json}. Root independently reparsed raw times, partition
+rows/buffer totals and completion/negative results for all48
+(root-phase-recheck-048.json). The full frozen verifier rerun matches all 48 saved
+results exactly (root-reverified48.json), with all 313 unique input/artifact/source
+files checked and rehashed at the end. CPU PCBS producer adaptation/profiling and heavier downstream workloads
+remain separate follow-ups. The [production plan](pcbs-rowgroup-production-plan.md)
+records the initial stock-Java row-group patch and its additional gates.

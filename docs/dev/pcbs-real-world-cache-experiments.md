@@ -1,8 +1,10 @@
 # PCBS cache experiments with public datasets
 
-Status: IN PROGRESS. User authorized real-world compression, heap-size and storage-level
-experiments on 2026-10-23. This extends the completed row-group prototype; it does not
-resume the stopped synthetic matrix.
+Status: READY FOR REVIEW. The frozen 48-case sweep completed: 46 PASS, two genuine
+heap OOMs, no unexpected errors. See [results](pcbs-real-world-cache-results.md).
+User authorized these real-world compression, heap-size and storage-level experiments
+on 2026-10-23. This extends the row-group prototype and does not resume the stopped
+synthetic matrix. Production work follows a separate committed plan.
 
 ## Scope and controls
 
