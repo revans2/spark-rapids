@@ -86,7 +86,10 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   seven negative mutations proving changed producer fingerprints/targets fail.
   Evidence: producer-contract-independent-negative-review.json; original result
   remains ERROR, separate producer-contract-recheck.json passes.
-  Current stage: fixture correction READY FOR REVIEW; matrix2 restart next.
+  Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING with
+  supervisor PID 303699 and fixture commit 424f34bada. Active status is
+  /data/pcbs-oom/controlled-cache-comparison/matrix2/status.json; matrix1 remains
+  the preserved parked run. Root is actively monitoring to completion.
   Previous launch: Supervisor PID 302093;
   /data/pcbs-oom/controlled-cache-comparison/matrix1/status.json reports current
   case and completed/84 count; plan.json freezes controls/hashes; results.csv
