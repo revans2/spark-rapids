@@ -198,7 +198,7 @@ class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
       val listOfPCB = withResource(
         buildNullTypeBatch(values, nestedType, arrayType, mapType, arrayOfStructType)) {
         gpuCB => ser.compressColumnarBatchWithParquet(gpuCB, cachedSchema, origSchema,
-          BYTES_ALLOWED_PER_BATCH, useCompression = false)
+          BYTES_ALLOWED_PER_BATCH, useCompression = false).toList
       }
 
       val conf = TrampolineUtil.getSparkConf(spark)

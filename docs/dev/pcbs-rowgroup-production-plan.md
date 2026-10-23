@@ -25,6 +25,58 @@ files, verification and material deviations. No parallel GPU jobs or conflicting
 builds. Root owns commits after inspecting code and verifying decisive checks.
 No changes to frozen fixtures/artifacts, unrelated user files or Git configuration.
 
+Initial validation: the metadata helper's nine CPU tests passed in worker gate003
+and root independently recompiled/reran them in root-helper-cpu-gate001. Maven
+build003 compiled the production plugin but found new fixture compile errors
+(reader class-name collision, event-handler import and Java varargs overload).
+Root stopped the owned build after those diagnostics (exit143, 558.265 seconds);
+no runtime test passed from that build. Workers are fixing the fixtures and adding
+CPU-written dictionary/plain GPU decoding and whole-materialization retry cleanup
+coverage. Review identified partial parent-pinning risk, not an observed deadlock.
+Build004 then found only three deprecated Parquet-MR int overloads in fixtures;
+root verified the long overload and retained identical sizes. Build005 PASS
+(92.450 seconds): all 50 selected Scala tests and nine Java tests passed. This
+includes GPU NONE/SNAPPY decoding after writer/staged-input spill, later-parent
+retry cleanup, CPU-written dictionary/plain labels and projection, chunk replay,
+early/task cleanup, existing writer/schema conversions and pending GPU-output
+exception cleanup. Root inspected the raw test summaries and idle GPU state.
+These focused correctness gates are READY FOR REVIEW; pressure, SQL integration,
+remote/replication, cross-version and performance gates remain IN PROGRESS.
+
+The baseline checkout at ../baseline-worktree is detached at 60c28e44f0. Its full
+package build passed (196.777 seconds, tests deliberately skipped for baseline
+packaging). Root froze the actual JNI and private-dependency artifacts and
+byte-checked all 237 private classes in the shaded baseline. The new benchmark
+adapter was independently reviewed, root reran its 28 Python checks, then
+compiled it and passed its pure-JVM action gate (performance/bench-build001).
+An initial mistaken claim that the old harness accepted a production action was
+caught by root before execution and corrected in a separate minimal harness;
+frozen originals were not modified. No production performance numbers exist yet.
+
+Latest verification checkpoint (MCP docker_exec only): build010 full Maven verify
+PASS (278.804 seconds), with dist, tests and integration-test artifacts packaged,
+52 selected Scala tests plus nine Java tests, RAT and all module style checks.
+Two new tests cover producer-finalization failures after one/multiple output chunks.
+Build009 was stopped after the Maven compiler code cache filled; build010 increased
+only the Maven process code cache to 1 GiB. Spark benchmark controls are unchanged.
+The full RAT check also required adding only an Apache/NVIDIA XML license comment
+to the older pcbs-reset-sweep.svg; chart data and rendering are unchanged.
+
+Concurrent managed-host-pressure gate is READY FOR REVIEW: worker run001 and
+root independent root-run002 both PASS (9.379 seconds each). Four 2,111,779-byte
+records were forced to disk, two readers competed under a 6 MiB host limit with
+a 1 MiB reservation, and one real RMM retry caused whole-attempt cleanup/progress.
+All 4,096 rows decoded exactly; no injected failure and zero host usage after
+shutdown. This proves concurrent host materialization, not concurrent GPU decode.
+Evidence: ../pressure-gate/{run001,root-run002}/result.json and retained fixture.
+
+The first Java SQL integration lane (integration-java001) failed all nine new
+fixture cases before cache validation: its nested/binary xxhash64 oracle requested
+an unsupported GPU/CPU bridge expression. This is not a passing production gate.
+Repair the fixture with equally strong exact-data checks, then rerun Java/Kryo
+in fresh JVMs. Remote/replication, cross-version and production performance remain
+unverified. All temporary fixtures/runtimes are kept outside the production tree.
+
 ## Scope and compatibility
 
 Use MCP docker_exec for every operation, including workers. Confirm at handoffs

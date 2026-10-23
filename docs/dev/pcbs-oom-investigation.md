@@ -64,6 +64,14 @@ decisive code, independently verifies workers, commits with DCO sign-off and
 requests focused reviews. See the production-plan implementation checkpoint.
 Only the architect marks work DONE.
 
+Production checkpoint: full build010 verify passes RAT/style, 52 focused Scala
+and nine Java tests; root independently reproduced real concurrent host-pressure
+retry/cleanup (6 MiB limit, no injected failures, exact 4,096 rows). Core correctness
+is READY FOR REVIEW; SQL integration, distributed/cross-version and matched
+performance gates remain IN PROGRESS. The first SQL fixture failed on its own
+unsupported nested xxhash64 bridge before cache validation and is being corrected
+without weakening exact-data checks. See the production plan for evidence/limits.
+
 ## Row-group storage and combined decode prototype (2026-10-23)
 
 Status: READY FOR REVIEW for the bounded prototype and first full-size pair.
