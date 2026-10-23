@@ -1,6 +1,6 @@
 # Real-world PCBS cache measurements
 
-Status: IN PROGRESS. The first thirty-two full cases are READY FOR REVIEW; remaining
+Status: IN PROGRESS. The first forty full cases are READY FOR REVIEW; remaining
 memory/storage cases and architect acceptance are pending. Follow the
 [experiment plan](pcbs-real-world-cache-experiments.md). Existing behavior is
 RELEASED; all new fixtures and formats remain UNRELEASED. All operations, including
@@ -203,11 +203,44 @@ matrix001-operational-audit/fourth8-summary.json. Root independently reparsed ra
 phase times, partition rows/buffer totals and completion for all first 32 cases
 (root-phase-recheck-032.json). No OOM occurred at 16 GiB in either storage mode.
 
+## Disk-only at 8 GiB
+
+Cases 032–039 all PASS with unchanged full data and controls.
+
+| Dataset | Cache path | Fill s | Read s | Fill heap GiB | Read heap GiB |
+|---|---|---:|---:|---:|---:|
+| GHArchive | Existing PCBS + Java | 50.166 | 17.662 | 7.518 | 7.382 |
+| GHArchive | Row groups + Java | 44.502 | 13.938 | 2.470 | 2.876 |
+| GHArchive | Row groups + codec | 37.034 | 7.430 | 2.714 | 2.945 |
+| GHArchive | Default CPU cache + Java | 100.703 | 22.986 | 7.358 | 6.854 |
+| TLC | Existing PCBS + Java | 17.595 | 5.302 | 4.889 | 7.323 |
+| TLC | Row groups + Java | 16.929 | 5.881 | 2.571 | 2.595 |
+| TLC | Row groups + codec | 14.455 | 4.436 | 2.687 | 2.740 |
+| TLC | Default CPU cache + Java | 122.465 | 41.348 | 7.708 | 7.342 |
+
+The recorded Runtime.maxMemory is a startup snapshot: 7.667 GiB here, not a
+fixed lifetime capacity. TLC CPU's GC log observes 7.708 GiB before a full GC,
+below configured -Xmx8g. Independent audit found no parser double counting;
+adaptive ParallelGC survivor sizing changed usable capacity. Matching OpenJDK
+source reports max_capacity using at least current capacity. No later runtime
+maxMemory sample was taken, so its later value is an inference, not a measurement.
+Keep the observed peak rather than clamping it to the startup snapshot. Evidence:
+independent-heap039-audit.json with exact GC lines and matching-version source.
+
+The full table is first40-comparison001.md/.csv/.json, with
+first40-independent-audit001.json and operational fifth8-summary.json. Root
+independently reparsed all forty raw phase/partition results
+(root-phase-recheck-040.json). The row-group read timings change little across
+these heap sizes while observed occupancy declines; this does not establish
+universal heap bounds or eliminate the pending memory-and-disk pressure test.
+
 ## Remaining measurements
 
 The active 48-case schedule is matrix001/schedule.json, supervisor PID 365757;
-status is matrix001/progress.json. All first 32 cases pass; cases 032–047
-now test both storage modes at 8 GiB.
+status is matrix001/progress.json. All first 40 cases pass; cases 040–047
+now test MEMORY_AND_DISK at 8 GiB. Case040 has recorded a genuine heap OOM during
+read0 in Java deserialization / MemoryStore disk-to-memory caching; its fill
+succeeded. No successful read timing is assigned. Remaining cases are pending.
 Dataset rows, partitioning, targets and other controls stay fixed. Record actual
 residency and whether the codec wire path is exercised; RAM hits can bypass it.
 A partial disk subset has no whole-cache disk compression ratio. Genuine heap or

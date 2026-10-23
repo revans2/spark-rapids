@@ -75,7 +75,15 @@ Cases 024–031 at 16 GiB MEMORY_AND_DISK also verify PASS and READY FOR REVIEW.
 Root independently reparsed all 32 raw phase/partition results; the first32 table,
 fourth8 raw audit and fourth8 operational audit preserve evidence. Mixed-residency
 partition IDs differ between Java/codec, so that timing pair is not a fully isolated
-codec comparison. All 8 GiB cases remain pending. Historical first baseline: GHArchive existing
+codec comparison. Cases 032–039 at 8 GiB DISK_ONLY also verify PASS and READY FOR REVIEW, with
+first40 comparison/raw/operational evidence and root-phase-recheck-040.json.
+Runtime.maxMemory is a startup snapshot; independent-heap039-audit.json explains
+why a ParallelGC observation can exceed that snapshot while below configured Xmx.
+The final 8 GiB MEMORY_AND_DISK group is active: case040 existing GHArchive PCBS
+filled then genuinely HEAP_OOMed in read0, Array.newInstance/ObjectInputStream
+through MemoryStore.putIterator and BlockManager.maybeCacheDiskValuesInMemory.
+Root read the raw stack; exit52, clean quiescence and owned scratch cleanup are
+verified. It is an expected negative, not an unexpected error; later cases continue. Historical first baseline: GHArchive existing
 PCBS/Java, DISK_ONLY, configured 48 GiB (Runtime maximum 46 GiB), fill 48.511 s,
 read median 14.554 s, payload 23.512 GiB, serialized disk 23.512 GiB and observed
 fill/read peak heap 14.750/21.065 GiB. Actual producer: 128 batches,
