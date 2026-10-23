@@ -18,6 +18,20 @@ research fixtures are UNRELEASED; existing contracts are RELEASED and preserved.
 All operations MUST use MCP docker_exec; repeat this at every worker handoff,
 resume and checkpoint. No production source/default changes or old-run edits.
 
+User steering after the first real-data results: finish the frozen 48-case sweep,
+then develop a production-readiness plan for small stored row groups with combined
+large GPU decode, unless the remaining evidence reveals a material problem. Assess
+resource lifetime, CPU PCBS parity, supported versions, correctness and performance.
+Keep custom codec work separate from the stock-Java row-group path. Subsequent
+weekend instruction authorizes continuing through production implementation, tests,
+performance verification and sub-agent reviews for a reviewable code handoff.
+No new public configuration, Spark-core modification or external publication is
+authorized. Root must establish the concrete production plan after the frozen
+runs, preserve released behavior, inspect decisive code and independently verify
+worker changes; escalate material architecture/contract changes.
+Existing released cache/StorageLevel contracts remain the compatibility boundary;
+prototype artifacts/formats are UNRELEASED and need no compatibility adapters.
+
 User steering: adapting the CPU branch of PCBS similarly, and profiling it against
 existing PCBS, are explicitly LATER, after real-world performance/cost is clearer.
 The default CPU cache reference in this matrix is a separate released path.
@@ -53,7 +67,11 @@ through 16 GiB DISK_ONLY: cases 016–023 also verified PASS and READY FOR REVIE
 The first24 combined table and three independent raw/operational audits are preserved.
 Root independently reparsed raw phases, partition rows/buffer totals and completion
 for all 24 cases (root-phase-recheck-024.json). No OOM occurred in these disk cases;
-16 GiB MEMORY_AND_DISK and all 8 GiB cases remain pending. Historical first baseline: GHArchive existing
+Cases 024–031 at 16 GiB MEMORY_AND_DISK also verify PASS and READY FOR REVIEW.
+Root independently reparsed all 32 raw phase/partition results; the first32 table,
+fourth8 raw audit and fourth8 operational audit preserve evidence. Mixed-residency
+partition IDs differ between Java/codec, so that timing pair is not a fully isolated
+codec comparison. All 8 GiB cases remain pending. Historical first baseline: GHArchive existing
 PCBS/Java, DISK_ONLY, configured 48 GiB (Runtime maximum 46 GiB), fill 48.511 s,
 read median 14.554 s, payload 23.512 GiB, serialized disk 23.512 GiB and observed
 fill/read peak heap 14.750/21.065 GiB. Actual producer: 128 batches,

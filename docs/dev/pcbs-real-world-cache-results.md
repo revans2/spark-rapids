@@ -1,6 +1,6 @@
 # Real-world PCBS cache measurements
 
-Status: IN PROGRESS. The first twenty-four full cases are READY FOR REVIEW; remaining
+Status: IN PROGRESS. The first thirty-two full cases are READY FOR REVIEW; remaining
 memory/storage cases and architect acceptance are pending. Follow the
 [experiment plan](pcbs-real-world-cache-experiments.md). Existing behavior is
 RELEASED; all new fixtures and formats remain UNRELEASED. All operations, including
@@ -173,11 +173,41 @@ phase times, partition rows/buffer totals and completion markers for all 24 case
 root-phase-recheck-024.json. All reported disk compression factors remain close
 to the 48 GiB references; small writer-size variation is preserved in the table.
 
+## Memory-and-disk at 16 GiB
+
+Cases 024–031 all PASS with unchanged data and controls.
+
+| Dataset | Cache path | Fill s | Read s | Fill heap GiB | Read heap GiB | Residency |
+|---|---|---:|---:|---:|---:|---|
+| GHArchive | Existing PCBS + Java | 43.856 | 12.339 | 14.907 | 14.787 | Mixed |
+| GHArchive | Row groups + Java | 42.163 | 11.180 | 11.780 | 11.868 | Mixed |
+| GHArchive | Row groups + codec | 37.076 | 7.392 | 11.247 | 11.743 | Mixed |
+| GHArchive | Default CPU cache + Java | 105.838 | 21.104 | 14.897 | 13.828 | Mixed |
+| TLC | Existing PCBS + Java | 13.310 | 3.524 | 6.201 | 7.289 | All RAM |
+| TLC | Row groups + Java | 12.967 | 3.806 | 6.643 | 8.112 | All RAM |
+| TLC | Row groups + codec | 13.035 | 3.918 | 6.559 | 8.125 | All RAM |
+| TLC | Default CPU cache + Java | 124.949 | 40.516 | 15.198 | 14.938 | Mixed |
+
+Each GHArchive GPU run has six memory-resident and ten disk-backed blocks.
+The row-group Java and codec runs retain different partition IDs in memory,
+so their mixed-residency timing comparison does not isolate only the codec.
+The codec is exercised on the disk subset: 7,307 records / 15,627,215,248 payload
+bytes per read. TLC GPU caches remain wholly in Spark MemoryStore, with zero
+codec wire operations. Neither mixed residency nor all-RAM checkpoints provide
+a whole-cache disk compression measurement. CPU GHArchive has one memory block
+and fifteen disk blocks; CPU TLC has six memory and twelve disk blocks, two in both.
+
+Evidence: first32-comparison001.md/.csv/.json, first32-independent-audit001.json,
+matrix001/independent-fourth8-audit.json and
+matrix001-operational-audit/fourth8-summary.json. Root independently reparsed raw
+phase times, partition rows/buffer totals and completion for all first 32 cases
+(root-phase-recheck-032.json). No OOM occurred at 16 GiB in either storage mode.
+
 ## Remaining measurements
 
 The active 48-case schedule is matrix001/schedule.json, supervisor PID 365757;
-status is matrix001/progress.json. All first 24 cases pass; cases 024–031
-now test MEMORY_AND_DISK at 16 GiB, followed by 032–047 at 8 GiB.
+status is matrix001/progress.json. All first 32 cases pass; cases 032–047
+now test both storage modes at 8 GiB.
 Dataset rows, partitioning, targets and other controls stay fixed. Record actual
 residency and whether the codec wire path is exercised; RAM hits can bypass it.
 A partial disk subset has no whole-cache disk compression ratio. Genuine heap or
