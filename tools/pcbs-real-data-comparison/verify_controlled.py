@@ -152,8 +152,22 @@ def verify(case):
             require(fill.get('gpu_produced_rows') == expected_rows,
                     'producer attempt rows differ from exact cache population')
             if not meta['smoke']:
-                require(900 * 2**20 <= fill.get('gpu_produced_max_bytes', 0) <= 1058 * 2**20,
-                        'producer batch maximum not near fixed 1 GiB target')
+                # Whole input batches are packed below the configured target; there is
+                # no minimum fullness contract. Freeze the audited canonical producer
+                # layout instead, so record splitting cannot silently change its input.
+                expected_producer = {
+                    'gpu_produced_batches': 112,
+                    'gpu_produced_rows': 805306368,
+                    'gpu_produced_bytes': 103079215104,
+                    'gpu_produced_min_bytes': 806860032,
+                    'gpu_produced_max_bytes': 939265152}
+                require(all(fill.get(key) == value for key, value in expected_producer.items()),
+                        'canonical producer layout changed across controlled cases')
+                producer_goals = [line.strip() for line in plan.get('plan', '').splitlines()
+                                  if 'GpuCoalesceBatches' in line]
+                require(len(producer_goals) == 16 and all(
+                    'targetsize(1073741824)' in line for line in producer_goals),
+                    'producer plan lost a fixed 1 GiB coalescing target')
         for delta in deltas:
             require(delta.get('gpu_produced_rows') == 0, 'cache unexpectedly recomputed on read')
             require(delta.get('gpu_decoded_rows') == expected_rows,

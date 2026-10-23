@@ -68,7 +68,26 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   Long matrices use a detached supervisor with observable checkpoints, avoiding
   long MCP commands that prevent status reads on the same tool session.
   See tools/pcbs-real-data-comparison/controlled-experiments.md.
-  Current stage: full 96 GiB matrix RUNNING. Supervisor PID 302093;
+  Monitoring ownership: root remains responsible through completion and result
+  verification; the user does not monitor or restart the runner. Root must not
+  end with only a background launch and leave fixture failures unattended.
+  Matrix1 PARKED on its first case: workload itself exited 0 with 100 successful
+  tasks, exact 96 GiB/all-column oracle, fill 157.935 s/read median 55.367 s and
+  observed peak 45.414 GiB. The only rejection was an unsupported 900 MiB minimum
+  producer-batch assertion (actual maximum 895.753 MiB). Root and two independent
+  code/raw audits confirm whole-batch packing has no such minimum. The corrected
+  verifier enforces the exact canonical producer fingerprint (112 batches,
+  805306368 rows, 103079215104 bytes, min806860032/max939265152), plus sixteen
+  explicit 1 GiB producer-plan goals. All other controls remain. This is seven
+  records/partition, not the historic six literal 1 GiB records; do not conflate.
+  Original error output is preserved; separate recheck passes. Fresh matrix2
+  will restart the complete schedule with this verified fixture correction.
+  Focused peer review and independent raw audit passed; root reran the audit and
+  seven negative mutations proving changed producer fingerprints/targets fail.
+  Evidence: producer-contract-independent-negative-review.json; original result
+  remains ERROR, separate producer-contract-recheck.json passes.
+  Current stage: fixture correction READY FOR REVIEW; matrix2 restart next.
+  Previous launch: Supervisor PID 302093;
   /data/pcbs-oom/controlled-cache-comparison/matrix1/status.json reports current
   case and completed/84 count; plan.json freezes controls/hashes; results.csv
   and results.json populate after completed cases. Launched from

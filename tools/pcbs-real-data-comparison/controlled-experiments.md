@@ -34,6 +34,15 @@ different from the first stage's four reads. Report results by stage, storage an
 consumer target; do not treat different read schedules as identical controls.
 The configured private cap is not an encoded/device allocation guarantee.
 Record actual encoded distributions and producer/decoded/combined sizes.
+The audited canonical producer has 112 batches (seven per partition), exactly
+96 GiB device values, with minimum 806,860,032 and maximum 939,265,152 bytes.
+The coalescer packs whole incoming batches below its 1 GiB target; it has no
+900 MiB minimum-fullness contract. Enforce this exact producer fingerprint and
+all sixteen 1 GiB plan goals across full cases. This dataset is not the historical
+six literal 1 GiB records per partition. An initial successful DISK_ONLY run was
+incorrectly rejected by that unsupported lower bound; its raw data and original
+verifier result remain preserved under matrix1, with an independent audit and
+separate producer-contract recheck. Subsequent measurements use a fresh matrix.
 
 Dynamic consumer selection lives only in a process-local research observer. New
 query plans capture the requested target before execution; cached payloads and
