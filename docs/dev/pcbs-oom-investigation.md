@@ -34,6 +34,15 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   for matched comparison. Then measure no coalescing, 256 MiB and 1 GiB output
   from the SAME populated cache, using fresh query plans and target-aligned
   warmup plus three reads. Do not silently substitute rebuilt caches.
+- Interpretation clarification (human discussion): reset/period are different
+  subsystems. objectStreamReset controls Java object streams; unrollMemoryCheckPeriod
+  controls MemoryStore for every serializer. Codec still returns heap payload arrays.
+  Root reread MemoryStore.putIterator: period16 checks after the first record and
+  at completion for this seven-record partition, whereas period1 checks every record.
+  Thus codec1/1 passing does not demonstrate any payload benefit from Java reset.
+  The paired settings do not isolate the individual knobs; codec reset100/period1
+  versus reset100/period16 would isolate the storage check. No extra runs or frozen
+  schedule changes are authorized by this clarification alone.
 - Primary results: fill/read wall time and separate maximum fill/read heap.
   Supporting evidence: cache residency/bytes serialized, producer/stored/decoded/
   combined batch distributions, allocation/GC, RSS/CPU/physical IO, GPU wait/spill.
