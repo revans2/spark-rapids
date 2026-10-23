@@ -135,8 +135,12 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   dry run. Root read the full resumer and reran its tests. Evidence:
   resumer-independent-review.json and resumer-negative-tests.json. Resumer fixture
   is READY FOR REVIEW. No production behavior or measured controls are changed.
-  Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING with
-  supervisor PID 303699 and fixture commit 424f34bada. Active status is
+  Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING resumed
+  at case 017 with supervisor PID 320699 (resumer commit 2b664428f3). The original
+  supervisor PID 303699 is exited; frozen fixture commit 424f34bada remains unchanged.
+  Resume provenance/log: matrix2-resume-001/ and matrix2-resume-001.log. Original
+  parked status/results and raw-prefix hashes are archived there. Root verified
+  case016 cleanup proof and case017 launch, with no JVM/GPU contention. Active status is
   /data/pcbs-oom/controlled-cache-comparison/matrix2/status.json; matrix1 remains
   the preserved parked run. Root is actively monitoring to completion.
 
