@@ -26,7 +26,11 @@ Keep custom codec work separate from the stock-Java row-group path. Subsequent
 weekend instruction authorizes continuing through production implementation, tests,
 performance verification and sub-agent reviews for a reviewable code handoff.
 No new public configuration, Spark-core modification or external publication is
-authorized. Root must establish the concrete production plan after the frozen
+authorized. The [production plan](pcbs-rowgroup-production-plan.md) records the
+candidate existing buffer/chunked-reader integration and its prerequisite gates;
+independent review found no material scope contradiction and added explicit
+storage/serialization/remote-read and concurrent-host-pressure checks.
+Root must establish the concrete production plan after the frozen
 runs, preserve released behavior, inspect decisive code and independently verify
 worker changes; escalate material architecture/contract changes.
 Existing released cache/StorageLevel contracts remain the compatibility boundary;
