@@ -30,8 +30,16 @@ ParquetMR dictionary/null roundtrips under NONE/SNAPPY and concurrent counter/
 shim-observer checks: /data/pcbs-oom/pcbs-rowgroup-stitch-spike/root-cpu-rerun003/.
 Each row group is independently framed with relocated dictionary/data offsets;
 the lazy splitter borrows writer host buffers until exhaustion/task cleanup.
-GPU staging, full PCBS integration, compression comparisons and full-size timing
-remain unverified. All workers and root confirmed MCP-only operations.
+The thin multi-source JNI binding is READY FOR REVIEW for its small runtime gate:
+root-native-gate003/result.json independently verifies two in-memory Parquet inputs,
+projection, nulls, timestamps, malformed-input cleanup, one exact-runtime cuDF
+mapping, shared RMM accounting (282 live result bytes, zero after close), and
+rejection of a single allocation larger than the configured 15 GiB pool. This
+last check is not a pressure/admission benchmark. The inferred header dependency
+lock remains an explicit research assumption. Earlier gate failures were fixture
+classpath and randomized library-filename assumptions; raw evidence is retained.
+Full PCBS integration, compression comparisons and full-size timing remain
+unverified. All workers and root confirmed MCP-only operations.
 
 ## Controlled serialization and record-size experiments (2026-10-23)
 
