@@ -39,8 +39,8 @@ def ordered_prefix(cases, completed):
     assert [item['case'] for item in completed] == cases[:len(completed)], 'non-prefix results'
 
 
-def assert_quiescent(case_out):
-    """Read-only evidence; never kill a PID or guess that a live process is expendable."""
+def quiescence_snapshot(case_out, timeout):
+    """Read-only observation; a case reference is not proof of process ownership."""
     needle = str(case_out.resolve()).encode()
     matches = []
     for proc in Path('/proc').iterdir():
@@ -48,16 +48,46 @@ def assert_quiescent(case_out):
             continue
         try:
             command = (proc / 'cmdline').read_bytes()
+            if needle not in command:
+                continue
+            stat = (proc / 'stat').read_text().rsplit(')', 1)[1].split()
         except FileNotFoundError:
             continue
-        if needle in command:
-            matches.append(int(proc.name))
-    assert not matches, 'case still referenced by live process(es): ' + repr(matches)
+        matches.append({'pid': int(proc.name), 'start_time_ticks': int(stat[19]),
+                        'ppid': int(stat[1]), 'process_group': int(stat[2]),
+                        'cmdline': [value.decode(errors='replace')
+                                    for value in command.rstrip(b'\0').split(b'\0')]})
     users = subprocess.check_output(['nvidia-smi', '--query-compute-apps=pid',
-                                     '--format=csv,noheader,nounits'], universal_newlines=True)
-    assert not users.strip(), 'GPU in use; do not clean or launch'
+                                     '--format=csv,noheader,nounits'], universal_newlines=True,
+                                    timeout=timeout)
     return {'case': case_out.name, 'epoch': time.time(), 'live_case_processes': matches,
-            'gpu_compute_pids': []}
+            'gpu_compute_pids': [int(value.strip()) for value in users.splitlines() if value.strip()]}
+
+
+def assert_quiescent(case_out, grace_seconds=30, poll_seconds=1):
+    """Wait outside benchmark phases; never kill or disregard a persistent process."""
+    assert 0 <= grace_seconds <= 30 and 0 < poll_seconds <= 1
+    started = time.monotonic()
+    deadline = started + grace_seconds
+    observations = []
+    while True:
+        if observations:
+            assert time.monotonic() < deadline, (
+                'case/GPU still busy after bounded quiescence wait: ' + json.dumps(observations))
+        remaining = max(0.001, deadline - time.monotonic())
+        observed = quiescence_snapshot(case_out, min(5, remaining))
+        observations.append(observed)
+        # OS/probe stalls cannot be preempted here, but a late observation is never accepted.
+        assert time.monotonic() <= deadline, (
+            'quiescence observation exceeded bounded grace: ' + json.dumps(observations))
+        if not observed['live_case_processes'] and not observed['gpu_compute_pids']:
+            return dict(observed, observations=observations,
+                        waited_seconds=time.monotonic() - started)
+        print('QUIESCENCE_WAIT ' + json.dumps(observed), flush=True)
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, ('case/GPU still busy after bounded quiescence wait: ' +
+                               json.dumps(observations))
+        time.sleep(min(poll_seconds, remaining))
 
 
 def cleanup_error(function, path, exception):

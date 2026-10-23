@@ -135,6 +135,15 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   dry run. Root read the full resumer and reran its tests. Evidence:
   resumer-independent-review.json and resumer-negative-tests.json. Resumer fixture
   is READY FOR REVIEW. No production behavior or measured controls are changed.
+  Quiescence follow-up: after case 020 read HEAP_OOM, the resumer correctly
+  PARKED on PID 323615 referencing that case; child JVM 323009 had exited. Both
+  were gone at root/peer inspection shortly afterward, and GPU idle. Identity of
+  PID 323615 remains unknown. The companion now waits at most 30 s outside timed
+  phases, retaining PID/start/cmdline/GPU observations, and still parks on persistent
+  activity or probe errors. It never kills a process. Root read the diff and reran
+  18 synthetic checks, including a late quiet observation. Peer review passed;
+  root/peer fresh validation passed all 21 recorded results. Original five frozen
+  sources and measured controls remain. This orchestration fix is READY FOR REVIEW.
   Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING resumed
   at case 017 with supervisor PID 320699 (resumer commit 2b664428f3). The original
   supervisor PID 303699 is exited; frozen fixture commit 424f34bada remains unchanged.
