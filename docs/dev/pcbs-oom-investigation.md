@@ -68,6 +68,19 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   Long matrices use a detached supervisor with observable checkpoints, avoiding
   long MCP commands that prevent status reads on the same tool session.
   See tools/pcbs-real-data-comparison/controlled-experiments.md.
+  Post-run reporters READY FOR REVIEW: aggregate_task_metrics.py preserves
+  task-local updates, attempt outcomes, phase boundaries, missing values and
+  high-water maxima; it refuses scans before all 84 cases complete. The runtime
+  memory extractor reports actual Runtime.maxMemory and phase-aligned sampled
+  RSS, separating warmup from measured reads and lifetime HWM from phase peaks.
+  Missing verified PID data leaves residency unknown. Peer review caught and
+  fixed integer-string time units, missing event evidence, negative HWM and
+  missing PID provenance. Root read decisive code, reran both 13-check synthetic
+  suites against promoted sources and independently matched first-case raw CSV
+  RSS/HWM/fill peaks with AWK. Evidence: task-aggregator-*-review.json,
+  runtime-memory-independent-negatives.json, first-four-runtime-memory.json.
+  Full event aggregation and full-matrix memory extraction remain pending.
+  All operations at this checkpoint still use MCP docker_exec exclusively.
   Monitoring ownership: root remains responsible through completion and result
   verification; the user does not monitor or restart the runner. Root must not
   end with only a background launch and leave fixture failures unattended.

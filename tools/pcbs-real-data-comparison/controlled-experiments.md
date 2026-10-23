@@ -88,6 +88,19 @@ status retained separately. Profile selected cases with JFR/Nsight separately
 from primary timing repetitions; do not sum overlapping operator times as wall
 time. Neither serialization choice moves payload arrays off the Java heap.
 
+## Post-run reporting
+
+`summarize_controlled.py` builds the sparse timing/heap table from verifier
+results. `extract_runtime_memory.py` adds actual JVM heap capacity and phase
+RSS from completed case logs/samples; missing JVM PID provenance leaves residency
+unknown. Lifetime HWM is never attributed to a phase. Whole-matrix extraction
+is blocked while timings run, although explicit completed-case checks are allowed.
+`aggregate_task_metrics.py` reads event logs only after all 84 primary runs
+complete. It separates successful/failed/killed/unfinished attempts, retains
+uncertain phase attribution, and treats missing counters as unknown. Memory
+high-watermarks are maxima across task reports, not simultaneous residency.
+These reporters supplement the correctness verifier; they do not replace it.
+
 ## Mechanisms to check against the profiles
 
 Root and a worker traced the actual benchmark JDK 17.0.20.1 bytecode and the
