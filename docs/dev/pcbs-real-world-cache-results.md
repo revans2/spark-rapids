@@ -1,6 +1,6 @@
 # Real-world PCBS cache measurements
 
-Status: IN PROGRESS. The first sixteen full cases are READY FOR REVIEW; remaining
+Status: IN PROGRESS. The first twenty-four full cases are READY FOR REVIEW; remaining
 memory/storage cases and architect acceptance are pending. Follow the
 [experiment plan](pcbs-real-world-cache-experiments.md). Existing behavior is
 RELEASED; all new fixtures and formats remain UNRELEASED. All operations, including
@@ -139,11 +139,45 @@ evidence is matrix001-operational-audit/second8-summary.json. Root checked
 the table against case results; workers independently recomputed raw phases,
 GC/sample peaks, buffer/file arrays, codec counters and task/content evidence.
 
+## Disk-only at 16 GiB
+
+Cases 016–023 all PASS with the same full datasets and controls. Configured heap
+is 16 GiB, recorded Runtime maximum 15.333 GiB. Every checkpoint has all sixteen
+cache blocks on disk and none in Spark MemoryStore. OS page-cache residency is
+separate.
+
+| Dataset | Cache path | Fill s | Read s | Fill heap GiB | Read heap GiB |
+|---|---|---:|---:|---:|---:|
+| GHArchive | Existing PCBS + Java | 49.415 | 16.232 | 13.652 | 13.185 |
+| GHArchive | Row groups + Java | 45.375 | 13.452 | 5.176 | 5.644 |
+| GHArchive | Row groups + codec | 36.474 | 7.455 | 5.365 | 5.507 |
+| GHArchive | Default CPU cache + Java | 99.323 | 19.368 | 14.813 | 13.521 |
+| TLC | Existing PCBS + Java | 17.546 | 5.112 | 5.023 | 7.457 |
+| TLC | Row groups + Java | 17.422 | 5.856 | 5.374 | 5.403 |
+| TLC | Row groups + codec | 15.093 | 4.407 | 5.342 | 5.372 |
+| TLC | Default CPU cache + Java | 121.614 | 40.329 | 15.164 | 13.637 |
+
+Row-group Java and codec retain their actual producer/decoded GPU layouts from
+48 GiB and continue to agree with one another. Their GHArchive read times remain
+near the larger-heap measurements while observed heap occupancy falls sharply.
+This reinforces that occupancy at 48 GiB was not a minimum heap requirement.
+Existing PCBS also passes these disk-only cases; no OOM threshold has been shown.
+The default CPU GHArchive read is faster at the smaller heap, while TLC is slightly
+slower; these single-JVM results do not establish a causal explanation.
+
+The complete first24-comparison001.md/.csv/.json and
+first24-independent-audit001.json preserve the combined table. Raw content/layout
+checks are matrix001/independent-third8-audit.json and operational checks are
+matrix001-operational-audit/third8-summary.json. Root independently reparsed raw
+phase times, partition rows/buffer totals and completion markers for all 24 cases:
+root-phase-recheck-024.json. All reported disk compression factors remain close
+to the 48 GiB references; small writer-size variation is preserved in the table.
+
 ## Remaining measurements
 
 The active 48-case schedule is matrix001/schedule.json, supervisor PID 365757;
-status is matrix001/progress.json. All sixteen 48 GiB cases pass; cases 016–031
-now repeat both storage levels at 16 GiB, followed by 032–047 at 8 GiB.
+status is matrix001/progress.json. All first 24 cases pass; cases 024–031
+now test MEMORY_AND_DISK at 16 GiB, followed by 032–047 at 8 GiB.
 Dataset rows, partitioning, targets and other controls stay fixed. Record actual
 residency and whether the codec wire path is exercised; RAM hits can bypass it.
 A partial disk subset has no whole-cache disk compression ratio. Genuine heap or

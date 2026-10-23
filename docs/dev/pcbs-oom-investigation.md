@@ -49,7 +49,11 @@ under the evidence root. The 48 GiB GPU MEMORY_AND_DISK cases all stayed in RAM;
 codec wire counters stayed zero and row-group Java/codec read times matched.
 CPU GHArchive had mixed residency; CPU TLC remained in RAM. No whole-cache disk
 ratios are assigned to these partial/no-disk cases. Current execution has advanced
-to 16 GiB DISK_ONLY; the 16/8 GiB results are pending. Historical first baseline: GHArchive existing
+through 16 GiB DISK_ONLY: cases 016–023 also verified PASS and READY FOR REVIEW.
+The first24 combined table and three independent raw/operational audits are preserved.
+Root independently reparsed raw phases, partition rows/buffer totals and completion
+for all 24 cases (root-phase-recheck-024.json). No OOM occurred in these disk cases;
+16 GiB MEMORY_AND_DISK and all 8 GiB cases remain pending. Historical first baseline: GHArchive existing
 PCBS/Java, DISK_ONLY, configured 48 GiB (Runtime maximum 46 GiB), fill 48.511 s,
 read median 14.554 s, payload 23.512 GiB, serialized disk 23.512 GiB and observed
 fill/read peak heap 14.750/21.065 GiB. Actual producer: 128 batches,
