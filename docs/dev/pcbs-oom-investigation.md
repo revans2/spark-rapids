@@ -24,6 +24,15 @@ Writer targets are soft 65,536 rows/8 MiB; measure distributions and compression
 rather than treating target adherence as success. Java100/unroll16 and codec100/
 unroll16 retain identical data, large GPU targets and memory controls.
 
+The encoded-row-group helper and observation counters are READY FOR REVIEW at
+CPU scope. Root read their source and independently reran exact 40,000-row
+ParquetMR dictionary/null roundtrips under NONE/SNAPPY and concurrent counter/
+shim-observer checks: /data/pcbs-oom/pcbs-rowgroup-stitch-spike/root-cpu-rerun003/.
+Each row group is independently framed with relocated dictionary/data offsets;
+the lazy splitter borrows writer host buffers until exhaustion/task cleanup.
+GPU staging, full PCBS integration, compression comparisons and full-size timing
+remain unverified. All workers and root confirmed MCP-only operations.
+
 ## Controlled serialization and record-size experiments (2026-10-23)
 
 Status: STOPPED_BY_USER at 24 completed cases; completed evidence READY FOR REVIEW. Architect approved the first two benchmark questions.
