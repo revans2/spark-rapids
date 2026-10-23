@@ -38,8 +38,31 @@ rejection of a single allocation larger than the configured 15 GiB pool. This
 last check is not a pressure/admission benchmark. The inferred header dependency
 lock remains an explicit research assumption. Earlier gate failures were fixture
 classpath and randomized library-filename assumptions; raw evidence is retained.
-Full PCBS integration, compression comparisons and full-size timing remain
-unverified. All workers and root confirmed MCP-only operations.
+Generated PCBS integration and both small cache arms are READY FOR REVIEW:
+smoke-java002/ and smoke-codec002/ pass exact rows/all 16 sums, stock BlockManager/
+MemoryStore, expected serializer origins and no failed/retried tasks. The first
+smoke's sole verifier failure assumed value bytes equaled GPU bytes; its nullable
+input also has validity masks. Preserve smoke-java001 as failed-verifier evidence;
+only smoke permits the measured 128–130 byte/row interval. Full proof keeps the
+historical exact 128 byte/row, 112-batch and min/max fingerprint.
+
+Root-writer-gate001 independently passes cuDF in-memory writer -> row-group
+reconstruction -> multi-source decode for 262,144 identical nullable dictionary/
+numeric rows, including projection, under NONE and SNAPPY. Default versus small
+writer files: NONE 4,068,215 -> 4,070,218 bytes; SNAPPY 1,959,220 -> 1,961,095.
+Independent-file framing adds 579/584 bytes respectively to the small outputs.
+This small compression fixture does not establish production compression ratios.
+
+The generated research consumer must return a lazy iterator instead of the old
+list: materializing all small arrays before returning would retain the entire
+encoded input on heap. It keeps writer host regions alive through exhaustion or
+task completion. The reader copies one record at a time into RAPIDS-managed
+spillable host buffers, with separate encoded and estimated-decoded 1 GiB bundle
+budgets. These are research overlays, not changes to production source/defaults.
+
+Full 96 GiB Java/codec pair is IN PROGRESS under full-pair001-supervisor/; fill,
+read and peak occupancy results are not yet established. No new broad sweep or
+profiles started. All workers and root confirmed MCP-only operations.
 
 ## Controlled serialization and record-size experiments (2026-10-23)
 

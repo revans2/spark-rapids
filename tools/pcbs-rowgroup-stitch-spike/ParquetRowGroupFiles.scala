@@ -278,12 +278,17 @@ object ParquetRowGroupFiles {
     def getHostBuffer(): HostMemoryBuffer = buffer.getDataHostBuffer()
   }
 
-  /** Caller closes every returned file, including on task interruption or failed decode. */
+  /**
+   * Caller closes every returned file, including on task interruption or failed decode.
+   * The same configured target independently limits estimated decoded bytes and encoded bytes.
+   * An indivisible file may exceed the decoded estimate target, but never the encoded budget.
+   */
   def stageNextGroup(input: BufferedIterator[CachedBatch], schema: StructType,
       targetDecodedBytes: Long, maxRecordBytes: Int): Array[StagedFile] = {
     require(targetDecodedBytes > 0 && maxRecordBytes >= FramingBytes)
     closeOnExcept(ArrayBuffer.empty[StagedFile]) { files =>
       var estimatedBytes = 0L
+      var encodedBytes = 0L
       var expectedSchema: Option[String] = None
       var finished = false
       while (!finished && input.hasNext) {
@@ -293,8 +298,11 @@ object ParquetRowGroupFiles {
         }
         require(next.buffer.length <= maxRecordBytes, "Encoded record exceeds its hard guard")
         val info = describe(next, schema)
+        require(info.encodedBytes <= targetDecodedBytes,
+          "Indivisible encoded record exceeds bundle byte budget")
         val sameSchema = expectedSchema.forall(_ == info.parquetSchema)
-        val fits = info.estimatedDecodedBytes <= targetDecodedBytes - estimatedBytes
+        val fits = info.estimatedDecodedBytes <= targetDecodedBytes - estimatedBytes &&
+          info.encodedBytes <= targetDecodedBytes - encodedBytes
         if (files.nonEmpty && (!sameSchema || !fits)) {
           finished = true
         } else {
@@ -309,6 +317,7 @@ object ParquetRowGroupFiles {
           files += StagedFile(info, spillable)
           expectedSchema = Some(info.parquetSchema)
           estimatedBytes = Math.addExact(estimatedBytes, info.estimatedDecodedBytes)
+          encodedBytes = Math.addExact(encodedBytes, info.encodedBytes.toLong)
         }
       }
       files.toArray

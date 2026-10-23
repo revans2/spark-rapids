@@ -65,6 +65,17 @@ object ParquetRowGroupFilesCpuChecks {
       var encodedBytes = 0L
       var largest = 0
       ParquetRowGroupFiles.split(source, 1024 * 1024).foreach { record =>
+        if (records == 0) {
+          var bundleRejected = false
+          try {
+            ParquetRowGroupFiles.stageNextGroup(
+              Iterator[org.apache.spark.sql.columnar.CachedBatch](record).buffered,
+              new org.apache.spark.sql.types.StructType(), 1L, 1024 * 1024)
+          } catch {
+            case _: IllegalArgumentException => bundleRejected = true
+          }
+          require(bundleRejected, "Singleton encoded bundle must fail before native allocation")
+        }
         val footer = ParquetRowGroupFiles.readFooter(
           ParquetRowGroupFiles.fromBytes(record.buffer))
         require(footer.getBlocks.size == 1)
