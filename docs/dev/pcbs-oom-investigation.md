@@ -68,7 +68,15 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   Long matrices use a detached supervisor with observable checkpoints, avoiding
   long MCP commands that prevent status reads on the same tool session.
   See tools/pcbs-real-data-comparison/controlled-experiments.md.
-  Current stage: ready to launch full 96 GiB matrix; large results pending.
+  Current stage: full 96 GiB matrix RUNNING. Supervisor PID 302093;
+  /data/pcbs-oom/controlled-cache-comparison/matrix1/status.json reports current
+  case and completed/84 count; plan.json freezes controls/hashes; results.csv
+  and results.json populate after completed cases. Launched from
+  /data/pcbs-oom/controlled-cache-comparison/launch_matrix.py with fixture commit
+  f5dd974700. First case: 1 GiB records, Java 100/16, DISK_ONLY. Large results,
+  selected diagnostic profiles and independent large-result review remain pending.
+  Unexpected failures park the supervisor; expected heap OOM remains a negative
+  measurement. Do not edit frozen fixture sources while this matrix is running.
 
 ## Consolidated performance inventory (2026-10-23)
 
