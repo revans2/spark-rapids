@@ -153,6 +153,29 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   18 synthetic checks, including a late quiet observation. Peer review passed;
   root/peer fresh validation passed all 21 recorded results. Original five frozen
   sources and measured controls remain. This orchestration fix is READY FOR REVIEW.
+  Serialization checkpoint READY FOR REVIEW: all 24 cases complete, 18 PASS and
+  6 genuine read HEAP_OOM (all three default-settings MEMORY_AND_DISK repetitions
+  for each serializer). All DISK_ONLY cases and both 1/1 MEMORY_AND_DISK groups
+  pass. Root read/reran audit_serialization_24.py, verifying three JVMs/group,
+  identical producer/stored-layout metrics and manifests. Evidence:
+  serialization-24-audit.{json,md}. MEMORY_AND_DISK PASS medians fill/read:
+  Java1/1 138.164/37.626 s; codec1/1 147.545/42.558 s. Heap occupancy ranges overlap;
+  no codec-only OOM fix or timing causality is established. Record-size stage now
+  runs the 64 MiB Java DISK_ONLY case with all three consumer targets on one cache.
+  Quiescence fix exercised on case023: captured orphan rm -rf PID326655 deleting
+  its blockmgr directory for about four seconds, then completed cleanup and
+  continued. This identifies that case's transient actor, not earlier unknown PIDs.
+  MemoryStore-policy research: root independently read live PluginContext.conf ->
+  SparkEnv/BlockManager/MemoryStore shared reference and per-put lookup in 3.5.5.
+  Workers checked the same path in 3.5.3 and relevant 4.0.1 bytecode. A plugin can
+  technically set the executor-wide period for future puts without replacing
+  BlockManager; SparkConf explicitly disclaims runtime configuration mutation.
+  There is no per-cache policy hook. A narrow per-cache hook is MODIFY SPARK;
+  temporary global set/restore races other puts. JavaSerializer captures reset at
+  construction, so executor-init mutation does not update its existing instances.
+  No override or configuration change was implemented/tested. Evidence:
+  unroll-policy-audit/findings.md. Runtime mechanism validation and any policy
+  decision are separate from the unchanged 84-case benchmark schedule.
   Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING resumed
   at case 021 with supervisor PID 324318 (resumer commit d4ac9c0c5c). Previous
   supervisors are exited; frozen fixture commit 424f34bada remains unchanged.
