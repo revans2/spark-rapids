@@ -40,7 +40,19 @@ read back their records during fill. The corrected exact accounting is verified;
 old failure/raw evidence and verifier bytes are preserved. Fill includes that work.
 The frozen 48-case schedule and guarded supervisor are ready at
 /data/pcbs-oom/pcbs-real-world-cache/matrix001/schedule.json. Large-case execution
-and final comparison remain IN PROGRESS; no full-run result is claimed yet.
+and final comparison remain IN PROGRESS. Root supervisor PID 365757 is executing
+matrix001/schedule.json sequentially; monitor matrix001/progress.json and root_status.py.
+At the first checkpoint 1/48 full cases is verified PASS: GHArchive existing
+PCBS/Java, DISK_ONLY, configured 48 GiB (Runtime maximum 46 GiB), fill 48.511 s,
+read median 14.554 s, payload 23.512 GiB, serialized disk 23.512 GiB and observed
+fill/read peak heap 14.750/21.065 GiB. Actual producer: 128 batches,
+98,879,350,738 device bytes; source/value bytes and cache compression differ.
+Root inspected the result and workers independently checked raw arrays, phase/GC
+metrics, exact oracles, physical block files and first-attempt successful tasks.
+Remaining cases and any comparative conclusions are pending. Source fixtures are
+frozen; future agents must keep using MCP docker_exec and must not start a second
+benchmark JVM alongside the active supervisor. Read-only first-eight audits are
+running independently and will write audit/comparison evidence under the same root.
 
 ## Row-group storage and combined decode prototype (2026-10-23)
 
