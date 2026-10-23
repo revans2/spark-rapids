@@ -86,6 +86,14 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   seven negative mutations proving changed producer fingerprints/targets fail.
   Evidence: producer-contract-independent-negative-review.json; original result
   remains ERROR, separate producer-contract-recheck.json passes.
+  Mechanism audit READY FOR REVIEW: root independently read the actual benchmark
+  JDK 17.0.20.1 object-stream and channel bytecode plus Spark disk-stream code.
+  Java byte-array serialization uses reusable 1 KiB staging; codec bulk calls
+  still use heap arrays and may create/cache record-sized temporary direct
+  buffers through FileChannel IOUtil. Neither lower RSS nor zero-copy follows.
+  Planned JFR DirectBufferStatistics and execution samples must test these
+  hypotheses; no timing causality is claimed. Evidence: jdk17-serialization-trace/
+  and direct-buffer-followup.md. Root is still using MCP docker_exec exclusively.
   Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING with
   supervisor PID 303699 and fixture commit 424f34bada. Active status is
   /data/pcbs-oom/controlled-cache-comparison/matrix2/status.json; matrix1 remains

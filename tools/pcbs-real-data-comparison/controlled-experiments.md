@@ -88,5 +88,25 @@ status retained separately. Profile selected cases with JFR/Nsight separately
 from primary timing repetitions; do not sum overlapping operator times as wall
 time. Neither serialization choice moves payload arrays off the Java heap.
 
+## Mechanisms to check against the profiles
+
+Root and a worker traced the actual benchmark JDK 17.0.20.1 bytecode and the
+Spark 3.5.5 disk-stream path. Java object serialization stages byte-array data
+through a reusable 1 KiB buffer on both write and read. The research codec uses
+bulk stream calls but still allocates a payload-sized heap array. With fixed
+total bytes, the smaller Java staging loop is byte-proportional; it alone cannot
+explain a record-size effect.
+
+Bulk disk writes have another cost: Spark uses a file channel, whose JDK heap
+buffer path obtains a temporary direct buffer and copies into it. Those buffers
+can be cached per writing thread. Larger codec writes may therefore increase
+direct memory even if serialization CPU improves. Codec is neither zero-copy nor
+a native cache. Compare phase-aligned RSS and JFR DirectBufferStatistics with
+execution/allocation samples before attributing timings or memory differences.
+These are code-supported mechanisms, not established causes of the measurements.
+Bytecode evidence is under `jdk17-serialization-trace/`, including
+`direct-buffer-followup.md`; actual native occupancy and JNI internals are not
+established by that trace.
+
 Evidence root: `/data/pcbs-oom/controlled-cache-comparison/`. The committed
 investigation tracker owns task status, verification and any parked findings.
