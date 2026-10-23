@@ -5,6 +5,49 @@ research, scheduler-token research, newer-version audit and upstream proposal ve
 results remain READY FOR REVIEW. Production implementation and architect
 acceptance are pending.
 
+## Controlled serialization and record-size experiments (2026-10-23)
+
+Status: IN PROGRESS. Architect approved the first two benchmark questions.
+Substantial downstream GPU workloads are explicitly DEFERRED; retain the existing
+all-column sum/count consumer. This supersedes the earlier no-new-runs restriction
+for these bounded experiments only. No memory-fraction tuning, native storage,
+production code/default changes, public configuration or external posting.
+
+Controls: immutable canonical 96 GiB values, 16 partitions, 6 GiB/partition,
+local[8], 48 GiB configured heap, same JVM/ParallelGC four workers, global GPU
+target 1 GiB, fixed GPU pool 15 GiB, GPU concurrency two, host limit 40 GiB,
+pinned pool 2 GiB. Same source hashes/page-cache preparation and observer code.
+No forced GC between reads. Report actual usable heap, record/device sizes and
+MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
+
+- Serialization gate: record target 1 GiB, downstream target 1 GiB; Java and
+  custom codec each with reset/unroll 100/16 and 1/1. DISK_ONLY first, then
+  MEMORY_AND_DISK. Three fresh-JVM repetitions per setting in alternating order.
+  Expected Java heap OOM is a measured negative result, not a correctness pass.
+- Record-size matrix: private PCBS caps 64/128/256/512/1024 MiB, same global
+  target/data/partitions. Java 1/1 versus codec defaults. Reuse matching gate
+  cases, three fresh JVMs per setting/storage. Hold downstream target 1 GiB
+  for matched comparison. Then measure no coalescing, 256 MiB and 1 GiB output
+  from the SAME populated cache, using fresh query plans and target-aligned
+  warmup plus three reads. Do not silently substitute rebuilt caches.
+- Primary results: fill/read wall time and separate maximum fill/read heap.
+  Supporting evidence: cache residency/bytes serialized, producer/stored/decoded/
+  combined batch distributions, allocation/GC, RSS/CPU/physical IO, GPU wait/spill.
+  Heavy JFR/Nsight diagnostics separate from primary wall-time repetitions.
+- Build/smoke correctness gates precede large runs. Preserve fresh output dirs,
+  artifact/source/control hashes, raw logs, phase markers, result/verifier JSON.
+  Exact rows/all-column oracle and blocking cleanup required. Park unexpected
+  non-fixture failures; never weaken checks or tune controls to obtain passes.
+- Existing Spark/PCBS/StorageLevel contracts are RELEASED (existing main and
+  deployed behavior) and preserved. Research codec/overlays/fixtures are
+  UNRELEASED; adapt directly without compatibility scaffolding.
+- Root coordinates, reads decisive code and independently verifies worker changes.
+  Separate workers own generated artifacts, launcher/verifier, and prerequisite
+  audit. All project operations MUST use MCP docker_exec; require confirmation
+  at every handoff/checkpoint. Commit completed tasks and tracker together,
+  mark verified work READY FOR REVIEW, not DONE. GPU runs serialize under root
+  coordination. Current stage: fixture preparation; no new benchmark launched.
+
 ## Consolidated performance inventory (2026-10-23)
 
 READY FOR REVIEW — historical data presentation only. Architect requested a
