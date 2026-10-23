@@ -120,6 +120,21 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   issues empty, exit52, no timeout. This is negative evidence, not a passing read.
   Matrix continues at 13/84 with Java1/1; further repetitions/storage/record-size
   comparisons and all profiles remain pending. No controls or frozen files changed.
+  Second orchestration finding: matrix2 PARKED after case016 because Python3.6
+  shutil.rmtree encountered ENOENT for a child directory while removing completed
+  case scratch. The deleting actor is not established. All 17 recorded results
+  remain valid; status16 lagged the persisted seventeenth result. Root and a peer
+  independently reparsed case016 (genuine read HEAP_OOM, fixed controls, no issues),
+  and found no remaining JVM/GPU process. New companion resume_controlled_matrix.py
+  leaves the five frozen sources, original schedule and plan hashes unchanged.
+  It checks the ordered prefix with fresh verifier processes, archives original
+  status/results/raw hashes, and tolerates only ENOENT during guarded local scratch
+  cleanup. Other cleanup failures still park. Root's read-only validation passed
+  all 17 existing cases; eleven synthetic checks and focused peer review passed,
+  including all 67 remaining commands, non-ENOENT propagation and a complete-prefix
+  dry run. Root read the full resumer and reran its tests. Evidence:
+  resumer-independent-review.json and resumer-negative-tests.json. Resumer fixture
+  is READY FOR REVIEW. No production behavior or measured controls are changed.
   Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING with
   supervisor PID 303699 and fixture commit 424f34bada. Active status is
   /data/pcbs-oom/controlled-cache-comparison/matrix2/status.json; matrix1 remains
