@@ -90,6 +90,23 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   supervisor PID 303699 and fixture commit 424f34bada. Active status is
   /data/pcbs-oom/controlled-cache-comparison/matrix2/status.json; matrix1 remains
   the preserved parked run. Root is actively monitoring to completion.
+
+Reporting and diagnostic preparation READY FOR REVIEW: new summarize_controlled.py
+keeps a single sparse table (204 case/consumer rows, 68 setting groups), completed
+fill observations across outcomes, separate fill/read heap, read peak including
+warmup, per-consumer residency, explicit unknown Java wire-byte counts, failure
+observations and same-JVM reuse estimates. Independent peer and root round-trip/
+mutation checks passed, including actual JSON/CSV/Markdown parsing. Do not validate
+only in-memory values; emitted artifacts also need round-trip checks. It is a
+reporter, not a runtime verifier. New run_controlled_profiles.py prepares at most
+eight separate diagnostic JVMs (four representative Java/codec/cap cases, JFR and
+Nsight each), gated on all 84 primary runs finishing. Independent gate/evidence
+negative tests and benign actual JFR/Nsight version checks passed; real profiling
+and interpretation remain UNVERIFIED. Python 3.6 requires universal_newlines,
+not subprocess text=. No benchmark data/config/producer/frozen source changed.
+All operations MCP docker_exec. Evidence: test_summary_script.py,
+independent-summary-review/, independent-profiles-review.json and
+profile-plan-preview/tool-preflight.json under the controlled experiment root.
   Previous launch: Supervisor PID 302093;
   /data/pcbs-oom/controlled-cache-comparison/matrix1/status.json reports current
   case and completed/84 count; plan.json freezes controls/hashes; results.csv
