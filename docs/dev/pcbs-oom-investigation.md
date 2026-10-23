@@ -107,6 +107,19 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   Planned JFR DirectBufferStatistics and execution samples must test these
   hypotheses; no timing causality is claimed. Evidence: jdk17-serialization-trace/
   and direct-buffer-followup.md. Root is still using MCP docker_exec exclusively.
+  Timing checkpoint: all 12 DISK_ONLY serialization cases PASS (three fresh
+  JVMs/setting), identical producer and stored-layout measurements. Median fill /
+  median of JVM read medians in seconds: Java100/16 172.108/50.391, Java1/1
+  166.781/48.195, codec1/1 159.819/45.409, codec100/16 165.404/45.180.
+  Observed read heap ranges overlap; no lower-memory or causal claim. Root read
+  and reran disk_serialization_12_audit.py; evidence disk-serialization-12-audit.json.
+  First MEMORY_AND_DISK Java100/16 case filled, then HEAP_OOM on warmup read,
+  ObjectInputStream.readArray -> MemoryStore.putIterator ->
+  BlockManager.maybeCacheDiskValuesInMemory, matching the reported failure path.
+  Root independently inspected the stack and reran the verifier: shape valid,
+  issues empty, exit52, no timeout. This is negative evidence, not a passing read.
+  Matrix continues at 13/84 with Java1/1; further repetitions/storage/record-size
+  comparisons and all profiles remain pending. No controls or frozen files changed.
   Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING with
   supervisor PID 303699 and fixture commit 424f34bada. Active status is
   /data/pcbs-oom/controlled-cache-comparison/matrix2/status.json; matrix1 remains
