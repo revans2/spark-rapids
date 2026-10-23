@@ -31,6 +31,27 @@ import org.apache.spark.sql.execution.columnar.SqlCacheCodecProvider
 
 /** Research counters are process-local, cumulative attempts; local-mode fixtures only. */
 object PcbsCodecCounters {
+  @volatile private var consumerTarget = 1024L * 1024 * 1024
+  def consumerTargetBytes: Long = consumerTarget
+  def setConsumerTargetBytes(bytes: Long): Unit = {
+    require(Set(0L, 256L * 1024 * 1024, 1024L * 1024 * 1024).contains(bytes))
+    consumerTarget = bytes
+  }
+  private val producedBatches = new LongAdder
+  private val producedRows = new LongAdder
+  private val producedBytes = new LongAdder
+  private val producedMaxBytes = new AtomicLong
+  private val producedMinBytes = new AtomicLong(Long.MaxValue)
+  def recordProduced(rows: Long, bytes: Long): Unit = {
+    producedBatches.increment()
+    producedRows.add(rows)
+    producedBytes.add(bytes)
+    maximum(producedMaxBytes, bytes)
+    var previous = producedMinBytes.get()
+    while (bytes < previous && !producedMinBytes.compareAndSet(previous, bytes)) {
+      previous = producedMinBytes.get()
+    }
+  }
   private val writtenRecords = new LongAdder
   private val writtenBytes = new LongAdder
   private val readRecords = new LongAdder
@@ -52,6 +73,13 @@ object PcbsCodecCounters {
       previous = counter.get()
     }
   }
+  def resetReadExtrema(): Unit = {
+    decodedMaxBytes.set(0L)
+    combinedMaxBytes.set(0L)
+    combinedMaxRows.set(0L)
+    combinedMinBytes.set(Long.MaxValue)
+  }
+
   def recordCombined(rows: Long, bytes: Long): Unit = {
     combinedBatches.increment()
     combinedRows.add(rows)
@@ -77,6 +105,11 @@ object PcbsCodecCounters {
   }
   def snapshotJson(): String = {
     val fields = Seq(
+      "gpu_produced_batches" -> producedBatches.sum(),
+      "gpu_produced_rows" -> producedRows.sum(),
+      "gpu_produced_bytes" -> producedBytes.sum(),
+      "gpu_produced_max_bytes" -> producedMaxBytes.get(),
+      "gpu_produced_min_bytes" -> (if (producedBatches.sum() == 0L) 0L else producedMinBytes.get()),
       "codec_write_records" -> writtenRecords.sum(),
       "codec_write_bytes" -> writtenBytes.sum(),
       "codec_read_records" -> readRecords.sum(),
@@ -90,7 +123,9 @@ object PcbsCodecCounters {
       "gpu_combined_bytes" -> combinedBytes.sum(),
       "gpu_combined_max_rows" -> combinedMaxRows.get(),
       "gpu_combined_max_bytes" -> combinedMaxBytes.get(),
-      "gpu_combined_min_bytes" -> (if (combinedBatches.sum() == 0L) 0L else combinedMinBytes.get()))
+      "gpu_combined_min_bytes" -> (if (combinedMinBytes.get() == Long.MaxValue) {
+        0L
+      } else combinedMinBytes.get()))
     fields.map { case (key, value) => "\"" + key + "\":" + value }
       .mkString("{", ",", "}")
   }
@@ -99,6 +134,8 @@ object PcbsCodecCounters {
 /** No compile-time dependency on plugin-internal classes is required by the harness. */
 class PcbsCodecSnapshot {
   def snapshotJson(): String = PcbsCodecCounters.snapshotJson()
+  def setConsumerTargetBytes(bytes: Long): Unit = PcbsCodecCounters.setConsumerTargetBytes(bytes)
+  def resetReadExtrema(): Unit = PcbsCodecCounters.resetReadExtrema()
 }
 
 /** Resolve the actual shim-loaded record, never a duplicate class from a fixture jar. */

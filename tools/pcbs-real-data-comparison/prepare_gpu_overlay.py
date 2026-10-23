@@ -59,7 +59,17 @@ def main():
     parser.add_argument("--spark-codec-overlay", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--include-baseline", action="store_true")
+    parser.add_argument("--caps-mib", type=int, nargs="+", default=[32],
+                        help="Private PCBS budgets; global producer target remains 1 GiB")
+    parser.add_argument("--coalesce-targets-mib", type=int, nargs="+", default=[0, 1024],
+                        help="0 disables immediate scan coalescing; other values override only it")
+    parser.add_argument("--dynamic-consumer", action="store_true",
+                        help="Use process-local research target for reads of one populated cache")
     args = parser.parse_args()
+    assert len(set(args.caps_mib)) == len(args.caps_mib)
+    assert all(cap in (16, 32, 64, 128, 256, 512, 1024) for cap in args.caps_mib)
+    assert len(set(args.coalesce_targets_mib)) == len(args.coalesce_targets_mib)
+    assert all(target in (0, 256, 1024) for target in args.coalesce_targets_mib)
     assert sha(args.baseline_plugin) == BASE_SHA256, "Frozen baseline plugin mismatch"
     assert args.spark_codec_overlay.is_file()
     jars = sorted((args.spark_home / "assembly/target/scala-2.12/jars").glob("*.jar"))
@@ -73,7 +83,9 @@ def main():
         "spark_codec_overlay": str(args.spark_codec_overlay),
         "spark_codec_overlay_sha256": sha(args.spark_codec_overlay),
         "script_sha256": sha(Path(__file__)),
-        "include_baseline": args.include_baseline}, indent=2) + "\n")
+        "include_baseline": args.include_baseline,
+        "caps_mib": args.caps_mib, "dynamic_consumer": args.dynamic_consumer,
+        "coalesce_targets_mib": args.coalesce_targets_mib}, indent=2) + "\n")
     source = out / "sources"
     source.mkdir()
     for name in ("PcbsRecordCodec.scala", "prepare_gpu_overlay.py"):
@@ -108,16 +120,23 @@ def main():
     fixture = out / "pcbs-record-codec.jar"
     command(["jar", "cf", str(fixture), "-C", str(fixture_classes), "."],
             log=out / "package-fixture.log")
-    cap_pcbs = replace_once(original_pcbs,
-        "  private def getGpuBytesAllowedPerBatch(conf: SQLConf): Long =\n"
-        "    math.min(getBytesAllowedPerBatch(conf), maxGpuBytesAllowedPerBatch)",
-        "  private def getGpuBytesAllowedPerBatch(conf: SQLConf): Long = {\n"
-        "    // Research overlay: reserve metadata within a private 32 MiB cache-record budget.\n"
-        "    val cacheTargetBytes = 32L * 1024 * 1024\n"
-        "    val cacheBytesAllowed = (cacheTargetBytes - cacheTargetBytes * 0.5 / 100).toLong\n"
-        "    math.min(math.min(getBytesAllowedPerBatch(conf), maxGpuBytesAllowedPerBatch),\n"
-        "      cacheBytesAllowed)\n"
-        "  }")
+    # Observe the GPU producer before PCBS applies its private splitting policy.
+    observed_pcbs = replace_once(original_pcbs,
+        "          withResource(putOnGpuIfNeeded(batch)) { gpuCB =>\n",
+        "          withResource(putOnGpuIfNeeded(batch)) { gpuCB =>\n"
+        "            org.apache.spark.sql.pcbsrealdata.PcbsCodecCounters.recordProduced(\n"
+        "              gpuCB.numRows().toLong, GpuColumnVector.getTotalDeviceMemoryUsed(gpuCB))\n")
+    def capped_pcbs(cap_mib):
+        return replace_once(observed_pcbs,
+            "  private def getGpuBytesAllowedPerBatch(conf: SQLConf): Long =\n"
+            "    math.min(getBytesAllowedPerBatch(conf), maxGpuBytesAllowedPerBatch)",
+            "  private def getGpuBytesAllowedPerBatch(conf: SQLConf): Long = {\n"
+            "    // Research-only cache budget; the global producer batch target is unchanged.\n"
+            f"    val cacheTargetBytes = {cap_mib}L * 1024 * 1024\n"
+            "    val cacheBytesAllowed = (cacheTargetBytes - cacheTargetBytes * 0.5 / 100).toLong\n"
+            "    math.min(math.min(getBytesAllowedPerBatch(conf), maxGpuBytesAllowedPerBatch),\n"
+            "      cacheBytesAllowed)\n"
+            "  }")
     # Observe only decoded batches, with caller ownership unchanged even if observation fails.
     observed_scan = replace_once(original_scan,
         "      numOutputRows += cb.numRows()\n      cb",
@@ -150,29 +169,54 @@ def main():
         '          }\n        case batchingGoal: BatchedByKey =>')
     variants = {}
     # The baseline variant changes observation only, never the original PCBS split policy.
-    requested = [("cap32-only", True, False), ("cap32-combine", True, True)]
+    requested = []
+    for cap in args.caps_mib:
+        for target in args.coalesce_targets_mib:
+            suffix = "only" if target == 0 else (
+                "combine" if target == 1024 else "combine" + str(target))
+            requested.append((f"cap{cap}-{suffix}", cap, target))
+    if args.dynamic_consumer:
+        requested += [(f"cap{cap}-dynamic", cap, "dynamic") for cap in args.caps_mib]
     if args.include_baseline:
-        requested.insert(0, ("baseline-codec", False, False))
-    for name, cap, combine in requested:
+        requested.insert(0, ("baseline-codec", None, 0))
+    for name, cap, combine_target in requested:
+        dynamic = combine_target == "dynamic"
+        combine = combine_target != 0
         variant_source = source / name
         variant_source.mkdir()
         pcbs_path = variant_source / "ParquetCachedBatchSerializer.scala"
         scan_path = variant_source / "GpuInMemoryTableScanExec.scala"
-        pcbs_path.write_text(cap_pcbs if cap else original_pcbs)
+        pcbs_path.write_text(capped_pcbs(cap) if cap else observed_pcbs)
         scan_text = observed_scan
         if combine:
             scan_text = replace_once(scan_text,
                 "  override def output: Seq[Attribute] = attributes",
-                "  // Research overlay: reuse the normal transition/coalescing rule.\n"
-                "  override def coalesceAfter: Boolean = true\n\n"
+                "  // Research overlay: reuse the normal transition/coalescing rule.\n" +
+                ("  override def coalesceAfter: Boolean =\n"
+                 "    org.apache.spark.sql.pcbsrealdata.PcbsCodecCounters.consumerTargetBytes > 0L\n\n"
+                 if dynamic else "  override def coalesceAfter: Boolean = true\n\n") +
                 "  override def output: Seq[Attribute] = attributes")
         scan_path.write_text(scan_text)
         coalesce_path = variant_source / "GpuCoalesceBatches.scala"
-        coalesce_path.write_text(observed_coalesce)
+        coalesce_text = observed_coalesce
+        if combine:
+            target_expression = ("org.apache.spark.sql.pcbsrealdata.PcbsCodecCounters."
+                                 "consumerTargetBytes" if dynamic else
+                                 f"{combine_target}L * 1024 * 1024")
+            coalesce_text = replace_once(coalesce_text,
+                "    val batches = child.executeColumnar()",
+                f"    val researchConsumerTarget = {target_expression}\n"
+                "    val batches = child.executeColumnar()")
+            coalesce_text = replace_once(coalesce_text,
+                "              iter, dataTypes, sizeGoal, decompressMemoryTarget,",
+                "              iter, dataTypes,\n"
+                "              if (observeCachedOutput) TargetSize(researchConsumerTarget)\n"
+                "                else sizeGoal, decompressMemoryTarget,")
+        coalesce_path.write_text(coalesce_text)
         classes = out / (name + "-classes")
         classes.mkdir()
-        # The baseline needs only the scan observation class, leaving PCBS bytecode untouched.
-        compile_sources = [scan_path, coalesce_path] + ([pcbs_path] if cap else [])
+        # Every mode has identical observations, including ordinary Java PCBS.
+        compile_sources = [scan_path, coalesce_path, pcbs_path]
         compile_argv = ["java", "-Xmx3g", "-cp", cp, "scala.tools.nsc.Main",
                         "-classpath", str(fixture) + ":" + cp, "-d", str(classes)]
         compile_argv += list(map(str, compile_sources))
@@ -195,7 +239,10 @@ def main():
                     target.write(path, entry, compress_type=zipfile.ZIP_DEFLATED)
         variants[name] = {
             "plugin": str(artifact), "plugin_sha256": sha(artifact),
-            "cap_mib": 32 if cap else None, "coalesce_after": combine,
+            "cap_mib": cap, "record_mib": cap, "coalesce_after": combine,
+            "consumer_target_mib": combine_target or None,
+            "consumer_mib": combine_target or 0,
+            "serializer_independent_plugin": True,
             "compile_argv": compile_argv,
             "sources": {str(path): sha(path) for path in (pcbs_path, scan_path, coalesce_path)},
             "replaced_entries": sorted(replacements)}
@@ -209,6 +256,8 @@ def main():
         "serializer": "org.apache.spark.sql.pcbsrealdata.ResearchParquetCachedBatchSerializer",
         "snapshot_class": "org.apache.spark.sql.pcbsrealdata.PcbsCodecSnapshot",
         "fixed_global_batch_bytes": 1073741824,
+        "serializer_independent_plugin": True,
+        "timing_scope": "Existing GPU SQL metrics; no extra CUDA synchronization",
         "fixture_compile_argv": fixture_compile,
         "sources": {str(path): sha(path) for path in source.glob("*") if path.is_file()},
         "runtime_jars": {str(path): sha(path) for path in jars},

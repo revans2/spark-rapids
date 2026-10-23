@@ -26,7 +26,11 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   Expected Java heap OOM is a measured negative result, not a correctness pass.
 - Record-size matrix: private PCBS caps 64/128/256/512/1024 MiB, same global
   target/data/partitions. Java 1/1 versus codec defaults. Reuse matching gate
-  cases, three fresh JVMs per setting/storage. Hold downstream target 1 GiB
+  cases only when the read schedule matches, three fresh JVMs per setting/storage.
+  The concrete schedule uses 24 serialization-only JVMs plus 60 record/consumer
+  JVMs (84 total); the latter repeat the 1 GiB reference to keep the first
+  question's four-read schedule separate from the twelve-read consumer matrix.
+  Hold downstream target 1 GiB
   for matched comparison. Then measure no coalescing, 256 MiB and 1 GiB output
   from the SAME populated cache, using fresh query plans and target-aligned
   warmup plus three reads. Do not silently substitute rebuilt caches.
@@ -46,7 +50,25 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   audit. All project operations MUST use MCP docker_exec; require confirmation
   at every handoff/checkpoint. Commit completed tasks and tracker together,
   mark verified work READY FOR REVIEW, not DONE. GPU runs serialize under root
-  coordination. Current stage: fixture preparation; no new benchmark launched.
+  coordination. Fixture preparation is READY FOR REVIEW: harness and all ten
+  generated plugin variants compile; root independently rehashed all five dynamic
+  variants, sources and runtime inputs. Ten fresh small gates pass both cache
+  wrappers/settings/storage levels and consumer directions. Independent raw audit
+  (also rerun by root) checked 120 exact all-column reads, no recomputation,
+  coalescer placement/counts, cleanup and 2,360 successful tasks. Evidence under
+  /data/pcbs-oom/controlled-cache-comparison/{root-artifact-audit.json,
+  independent-raw-smoke-audit.json,smoke-r2-*/}. Smoke is 96 MiB/partition and
+  cannot prove the 256 MiB versus 1 GiB coalescing ceilings; full runs must.
+  Initial failed compile and verifier-error run remain preserved. Corrected
+  verifier assumptions: actual JVM options include requested controls plus Spark
+  defaults; BlockManager/MemoryStore remain stock, only SerializerManager comes
+  from the codec overlay. Do not infer class origins without inspecting artifacts.
+  Source reviews and whitespace checks passed. JFR/Nsight launch support is
+  prepared separately; profiling runtime/tool behavior remains unverified.
+  Long matrices use a detached supervisor with observable checkpoints, avoiding
+  long MCP commands that prevent status reads on the same tool session.
+  See tools/pcbs-real-data-comparison/controlled-experiments.md.
+  Current stage: ready to launch full 96 GiB matrix; large results pending.
 
 ## Consolidated performance inventory (2026-10-23)
 

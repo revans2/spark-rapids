@@ -29,6 +29,9 @@ import org.apache.spark.storage.StorageLevel
 /** Standalone real-row CPU/PCBS comparison; never pads logical rows with synthetic payloads. */
 object RealCacheBench {
   private val mapper = new ObjectMapper
+  private var consumerTargetMiB = 1024
+  private def observer: AnyRef = Class.forName(
+    "org.apache.spark.sql.pcbsrealdata.PcbsCodecSnapshot").getConstructor().newInstance().asInstanceOf[AnyRef]
   private def emit(fields: (String, Any)*): Unit =
     println("REAL_CACHE " + mapper.writeValueAsString(fields.toMap.asJava))
 
@@ -66,7 +69,8 @@ object RealCacheBench {
       sampler.join(1000)
       emit("event" -> "phase", "phase" -> phase, "iteration" -> iteration,
         "success" -> success, "seconds" -> elapsed, "start_epoch_ms" -> startEpoch,
-        "end_epoch_ms" -> System.currentTimeMillis(), "gc_ms" -> (gcMs - beforeMs),
+        "end_epoch_ms" -> System.currentTimeMillis(),
+        "consumer_target_mib" -> consumerTargetMiB, "gc_ms" -> (gcMs - beforeMs),
         "gc_count" -> (gcCount - beforeCount),
         "sampled_heap_peak" -> math.max(peak.get(), memory.getHeapMemoryUsage.getUsed))
     }
@@ -96,11 +100,12 @@ object RealCacheBench {
         case node if node.getClass.getSimpleName.contains("Coalesce") => node
       }.foreach { node =>
         emit("event" -> "coalescer", "iteration" -> iteration,
-          "class" -> node.getClass.getName,
+          "consumer_target_mib" -> consumerTargetMiB, "class" -> node.getClass.getName,
           "children" -> node.children.map(_.getClass.getName).toArray,
           "metrics" -> node.metrics.map { case (k, v) => k -> v.value }.asJava)
       }
       emit("event" -> "scan", "iteration" -> iteration,
+        "consumer_target_mib" -> consumerTargetMiB,
         "rows" -> scans.head.metrics("numOutputRows").value,
         "columns" -> scans.head.output.length, "class" -> scans.head.getClass.getName,
         "metrics" -> scans.head.metrics.map { case (k, v) => k -> v.value }.asJava)
@@ -173,9 +178,23 @@ object RealCacheBench {
         require(oracle._1 == totalRows)
         emit("event" -> "oracle", "rows" -> oracle._1, "sums" -> oracle._2.toArray)
       } else {
-        val level = if (sys.env.get("REAL_CACHE_DISK_SMOKE").contains("true")) {
-          StorageLevel.DISK_ONLY
-        } else StorageLevel.MEMORY_AND_DISK
+        val level = sys.env.get("REAL_CACHE_STORAGE_LEVEL") match {
+          case Some("DISK_ONLY") => StorageLevel.DISK_ONLY
+          case Some("MEMORY_AND_DISK") => StorageLevel.MEMORY_AND_DISK
+          case Some(other) => throw new IllegalArgumentException("Unknown research storage: " + other)
+          case None if sys.env.get("REAL_CACHE_DISK_SMOKE").contains("true") => StorageLevel.DISK_ONLY
+          case None => StorageLevel.MEMORY_AND_DISK
+        }
+        val controlled = action == "gpu-controlled"
+        val targets = sys.env.get("REAL_CACHE_CONSUMER_TARGETS")
+          .map(_.split(",").map(_.toInt).toSeq).getOrElse(Seq(1024))
+        require(targets.nonEmpty && targets.distinct.size == targets.size &&
+          targets.forall(Set(0, 256, 1024)), "Invalid research consumer target list")
+        if (controlled) {
+          consumerTargetMiB = targets.head
+          observer.getClass.getMethod("setConsumerTargetBytes", java.lang.Long.TYPE)
+            .invoke(observer, Long.box(consumerTargetMiB.toLong * 1024 * 1024))
+        }
         val df = input.persist(level)
         val relation = spark.sharedState.cacheManager.lookupCachedData(df).get.cachedRepresentation
         val buffers = relation.cacheBuilder.cachedColumnBuffers
@@ -190,15 +209,15 @@ object RealCacheBench {
           "replication" -> buffers.getStorageLevel.replication)
         def storage(phase: String, iteration: Int): Unit = {
           if (action.startsWith("gpu")) {
-            val snapshot = Class.forName("org.apache.spark.sql.pcbsrealdata.PcbsCodecSnapshot")
-              .getConstructor().newInstance()
+            val snapshot = observer
             val json = snapshot.getClass.getMethod("snapshotJson").invoke(snapshot).toString
             emit("event" -> "codec", "phase" -> phase, "iteration" -> iteration,
-              "snapshot" -> mapper.readTree(json))
+              "consumer_target_mib" -> consumerTargetMiB, "snapshot" -> mapper.readTree(json))
           }
           val info = sc.getRDDStorageInfo.find(_.id == buffers.id).get
           require(info.numCachedPartitions == parts)
           emit("event" -> "storage", "phase" -> phase, "iteration" -> iteration,
+            "consumer_target_mib" -> consumerTargetMiB,
             "memory_bytes" -> info.memSize, "disk_bytes" -> info.diskSize,
             "cached_partitions" -> info.numCachedPartitions)
         }
@@ -210,6 +229,10 @@ object RealCacheBench {
             var logical = 0L
             var largest = 0L
             var maxRows = 0
+            var smallest = Long.MaxValue
+            val bounds = Array(1L, 8L, 16L, 32L, 64L, 128L, 256L, 512L, 1024L)
+              .map(_ * 1024 * 1024)
+            val histogram = Array.fill(bounds.length + 1)(0L)
             var kind = ""
             it.foreach { batch =>
               val bytes = batch match {
@@ -223,11 +246,15 @@ object RealCacheBench {
               batches += 1
               encoded += bytes
               logical += batch.sizeInBytes
+              smallest = math.min(smallest, bytes)
+              val bucket = bounds.indexWhere(bytes <= _)
+              histogram(if (bucket < 0) bounds.length else bucket) += 1
               largest = math.max(largest, bytes)
               maxRows = math.max(maxRows, batch.numRows)
               kind = batch.getClass.getName
             }
-            Iterator((partition, rows, batches, encoded, logical, largest, maxRows, kind))
+            Iterator((partition, rows, batches, encoded, logical, largest, maxRows, kind,
+              smallest, histogram))
           }.collect().sortBy(_._1)
         }
         require(populations.length == parts)
@@ -238,18 +265,30 @@ object RealCacheBench {
           emit("event" -> "partition", "partition" -> p._1, "rows" -> p._2,
             "records" -> p._3, "encoded_buffer_bytes" -> p._4,
             "cached_batch_size_stats" -> p._5, "max_encoded_bytes" -> p._6,
-            "max_batch_rows" -> p._7, "class" -> p._8)
+            "max_batch_rows" -> p._7, "class" -> p._8, "min_encoded_bytes" -> p._9,
+            "record_histogram_counts" -> p._10,
+            "record_histogram_upper_mib" -> Array(1, 8, 16, 32, 64, 128, 256, 512, 1024, -1))
         }
         storage("fill", 0)
         var expected: Option[Seq[Double]] = None
-        for (iteration <- 0 to 3) {
+        for ((target, targetIndex) <- targets.zipWithIndex; targetIteration <- 0 to 3) {
+          val iteration = targetIndex * 4 + targetIteration
+          consumerTargetMiB = target
+          if (controlled) {
+            val snapshot = observer
+            snapshot.getClass.getMethod("setConsumerTargetBytes", java.lang.Long.TYPE)
+              .invoke(snapshot, Long.box(target.toLong * 1024 * 1024))
+            snapshot.getClass.getMethod("resetReadExtrema").invoke(snapshot)
+          }
           val result = measured("read", iteration) { aggregate(df, cached = true, iteration = iteration) }
           require(result._1 == totalRows)
           expected.foreach { old => require(old.zip(result._2).forall { case (a, b) =>
             math.abs(a - b) <= math.max(1.0, math.abs(a)) * 1e-10
           }, "Cached aggregate changed") }
           expected = Some(result._2)
-          emit("event" -> "read", "iteration" -> iteration, "rows" -> result._1,
+          emit("event" -> "read", "iteration" -> iteration,
+            "consumer_target_mib" -> consumerTargetMiB, "warmup" -> (targetIteration == 0),
+            "rows" -> result._1,
             "sums" -> result._2.toArray, "plan" -> result._3)
           storage("read", iteration)
         }
