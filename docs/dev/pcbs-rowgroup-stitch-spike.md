@@ -1,6 +1,8 @@
 # PCBS row-group storage and combined GPU decode prototype
 
-Status: IN PROGRESS — research/prototype requested by the architect on 2026-10-23.
+Status: READY FOR REVIEW — bounded research/prototype requested on 2026-10-23.
+The small gates and first full-size Java/codec pair pass. See
+[measured results and comparison](pcbs-rowgroup-stitch-results.md).
 Production implementation and final acceptance are not included.
 
 The user redirected work from the controlled sweep to storing smaller Parquet
@@ -67,7 +69,8 @@ cache references remain separate sources of retention.
 
 The selected research binding is
 `ai.rapids.cudf.ParquetMultiFileReader.read(ParquetOptions, HostMemoryBuffer[])`:
-each input buffer is one complete independent Parquet file, inputs remain caller
+each input buffer contains complete independent Parquet framing in memory; this
+"file" does not require filesystem I/O. Inputs remain caller
 owned and the returned table owns decoded columns. The C++ multi-source reader
 already exists. The helper must share cuDF's package/classloader and reuse the
 actual benchmark native library, with no replacement Table.class or second cuDF.
@@ -108,8 +111,9 @@ The existing Java writer exposes row-group row/byte limits; defaults are one
 million rows and 128 MiB uncompressed data. PCBS currently leaves them unchanged.
 The scan reconstructs Parquet files by copying encoded chunks, adjusting column
 metadata and writing a footer. Root has read the consumer, writer, decode and
-scan reconstruction code. Workers are auditing newer true multi-file APIs and
-installed runtime support before selecting the decode route.
+scan reconstruction code. The API/runtime audit selected the existing C++
+multi-source reader and the thin research Java/JNI binding described above;
+small and full-size runtime checks now pass.
 
 Research evidence is under /data/pcbs-oom/controlled-cache-comparison/:
 parquet-rowgroup-fragment-discovery.md, unroll-policy-audit/, and the forthcoming

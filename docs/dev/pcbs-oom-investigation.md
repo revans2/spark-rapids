@@ -7,7 +7,9 @@ acceptance are pending.
 
 ## Row-group storage and combined decode prototype (2026-10-23)
 
-Status: IN PROGRESS. The user redirected work to extracting smaller Parquet
+Status: READY FOR REVIEW for the bounded prototype and first full-size pair.
+See [results and historical comparison](pcbs-rowgroup-stitch-results.md).
+The user redirected work to extracting smaller Parquet
 row-group records from large GPU writer output and combining them for large GPU
 decode, reusing the scan path or newer true multi-file cuDF APIs. Read
 [the spike plan](pcbs-rowgroup-stitch-spike.md) before resuming this work. All
@@ -60,9 +62,32 @@ task completion. The reader copies one record at a time into RAPIDS-managed
 spillable host buffers, with separate encoded and estimated-decoded 1 GiB bundle
 budgets. These are research overlays, not changes to production source/defaults.
 
-Full 96 GiB Java/codec pair is IN PROGRESS under full-pair001-supervisor/; fill,
-read and peak occupancy results are not yet established. No new broad sweep or
-profiles started. All workers and root confirmed MCP-only operations.
+Full 96 GiB pair PASS under full-pair001-supervisor/. Java fill/read median:
+155.278/36.790 seconds; codec: 136.225/21.344 seconds. Observed peak heap was
+39.633 GiB Java and 42.348 GiB codec; codec was faster here but did not reduce the
+observed maximum. Both used default reset 100/unroll 16, identical artifacts/data,
+12,400 records of 7.08–7.94 MiB, and 112 large GPU decodes per read. Each had exact
+row count, all 16 sum oracles within tolerance, and 100 successful first-attempt
+tasks. Codec disk reads were exercised: 9,300 records per read. Root reran the
+verifier and workers independently audited raw phases, GC/heap, sums, tasks and
+paired stored layouts. Evidence: root-rechecked-results.json and independent-
+full-{java,codec,paired-layout}-audit.json under the spike data directory.
+
+The completed pair has one fresh JVM per mode and three measured reads after
+warmup; timings are preliminary. summarize_rowgroup.py and comparison001/ retain
+12 historical reference JVMs, storage/compression/settings, fill/read/heap and
+OOM limitations. Root checked the reporter against actual results and synthetic
+negatives; worker reviewed units and interpretation. No GC matching, memory-
+fraction tuning, broad size sweep or profiling was added.
+
+Partial-writer ownership gate root-consumer-cleanup001 passes against the actual
+005 shim consumer: one record consumed, more remaining, task completion releases
+callback host-buffer references to zero, repeat close is safe, copied record
+survives and RMM returns to baseline. The JNI check and GPU writer gates use
+memory buffers, with no Parquet-file roundtrip. Ordinary cache/spill disk I/O
+remains enabled. Larger failure/concurrency stress, repeated timings and profiles
+remain future work; this is a bounded proof, not production acceptance.
+All workers and root confirmed MCP-only operations.
 
 ## Controlled serialization and record-size experiments (2026-10-23)
 
