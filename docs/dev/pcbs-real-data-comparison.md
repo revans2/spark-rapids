@@ -1,5 +1,8 @@
 # PCBS record splitting, read coalescing and stock CPU caching
 
+For the earlier sizes, fill times, failures, synthetic codec and native shadow
+runs in one table, see the [consolidated experiment results](pcbs-experiment-results.md).
+
 Status: READY FOR REVIEW. Six full runs and independent raw-evidence audits
 passed. Research fixtures only; no production configuration or
 cache contract changes. Existing Spark/PCBS behavior is released and unchanged.

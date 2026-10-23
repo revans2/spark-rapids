@@ -5,6 +5,30 @@ research, scheduler-token research, newer-version audit and upstream proposal ve
 results remain READY FOR REVIEW. Production implementation and architect
 acceptance are pending.
 
+## Consolidated performance inventory (2026-10-23)
+
+READY FOR REVIEW — historical data presentation only. Architect requested a
+single broad table including fill times, 256 MiB cases, other record sizes,
+failures and missing experiments. No new runs or batch-size decision authorized
+or performed. The latest 32 MiB matrix is one measured case, not a selected
+policy or a substitute for the earlier 256 MiB work.
+
+[Consolidated table](pcbs-experiment-results.md) and
+[full-precision CSV](pcbs-experiment-results.csv) contain 75 rows: 74 historical
+settings/groups plus the explicitly unmeasured current real-PCBS codec 256 MiB
+comparison. Real 256 MiB results exist in the small reset sweep; synthetic
+256 MiB results exist at both 24 and 96 GiB totals. The large old global-target
+128/256 MiB cases were planned but never executed. Those gaps remain blank;
+no values are inferred from different workloads.
+
+Root read the prior tracker/source evidence and independently checked delegated
+historical extraction. A separate reviewer checked aggregation against CSV/JSON
+inputs. Preserve fill completed before read OOM; distinguish SQL/raw/validation
+reads, global target versus PCBS cap, data size, heap/slots/GPU concurrency,
+storage/fraction, native shadow versus heap codec, and sampled peak scope.
+Never substitute post-GC occupancy for maximum heap. All operations use MCP
+docker_exec; no benchmark, runtime source or released default changed.
+
 ## PCBS split/coalesce and CPU default-cache comparison (2026-10-23)
 
 READY FOR REVIEW — fixtures, six full runs and independent raw audits passed.
