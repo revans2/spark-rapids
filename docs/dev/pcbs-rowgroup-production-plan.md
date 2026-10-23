@@ -77,6 +77,44 @@ Repair the fixture with equally strong exact-data checks, then rerun Java/Kryo
 in fresh JVMs. Remote/replication, cross-version and production performance remain
 unverified. All temporary fixtures/runtimes are kept outside the production tree.
 
+Core implementation is committed at c385525a51. Two independent agents found no
+blocking resource/format issue; root reread the decisive implementations. The new
+nine SQL cases are READY FOR REVIEW on Java (integration-java003): all nine pass,
+no failures/errors/skips, exact reordered nested/binary/decimal/timestamp values,
+CPU rereads, NONE/SNAPPY and disk/serialized-memory/deserialized-memory+disk levels,
+partial consumption, blocking unpersist and recreation. Root inspected raw JUnit.
+Java001/002 remain failed fixture runs: unsupported hash/binary length, then inert
+CPU scan-predicate metadata in GPU assertions. The corrected tests retain strict
+GPU scan/filter assertions and only exempt those metadata expression classes.
+These failures happened during read validation after cache population; they do
+not establish a cache-format defect. Java003's observed JVM heap was 1 GiB despite
+a requested DRIVER_MEMORY=4g runner setting. This is a correctness-only gate, not
+a performance comparison; later lanes must pass the heap explicitly to SparkSubmit.
+
+The expanded-string correctness gate PASS and root-verifier rerun are READY FOR
+REVIEW (string-chunk-audit/run001). Six 512 MiB GPU inputs contain 3 GiB of strings;
+384 stored records total 665,472 encoded bytes with 12,599,040 estimated decoded
+bytes. One logical bundle decodes to four chunks, exact 98,304 rows/all contents,
+maximum 1,065,353,216 character bytes per chunk. No injected failures. Root verified
+the actual loaded PCBS/helper/reader/native class bytes equal the frozen benchmark
+runtime. This is not a timing result or a universal page/giant-value bound; the
+separate legacy CPU-written expanded-string extreme remains unrun.
+
+Isolated Spark330/Scala2.12 and Spark401/Scala2.13 compile/package gates PASS in
+239.412/273.897 seconds, including production and test-source compilation and
+dist/integration artifact packaging. Tests were explicitly skipped in this CPU-only
+stage; runtime unit/integration and verify/style gates remain pending. Evidence:
+../crossversion/compile{330,401}-002. The first launcher attempts failed before
+Maven due incorrectly shell-quoted inherited MAVEN_OPTS; corrected with no source
+or control changes. Both full logs/build outputs were inspected by root.
+
+A matched production-performance runtime is frozen at ../runtime-matched001.
+Root independently rehashed 246 artifacts and byte-checked all 237 private classes
+in both baseline and patched against the same frozen dependency. Canonical/world
+mode gates and layout fixtures compile; actual production performance remains
+pending. Native/codec overlays are excluded; defaults reset100/unroll16 and memory
+fraction0.6 remain unchanged. Benchmarks must run alone after correctness gates.
+
 ## Scope and compatibility
 
 Use MCP docker_exec for every operation, including workers. Confirm at handoffs

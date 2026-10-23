@@ -72,6 +72,13 @@ performance gates remain IN PROGRESS. The first SQL fixture failed on its own
 unsupported nested xxhash64 bridge before cache validation and is being corrected
 without weakening exact-data checks. See the production plan for evidence/limits.
 
+Additional production gates: Java SQL integration passes all nine exact-data cases
+(integration-java003, actual1 GiB JVM; correctness-only), and the 3 GiB expanded-string
+stress passes native output chunking/content checks. Spark330 and Spark401/Scala2.13
+compile/package gates pass with runtime tests explicitly not yet executed. Core
+commit c385525a51 and detailed evidence/limits are in the production plan. Matched
+production performance remains pending; do not substitute old prototype timings.
+
 ## Row-group storage and combined decode prototype (2026-10-23)
 
 Status: READY FOR REVIEW for the bounded prototype and first full-size pair.

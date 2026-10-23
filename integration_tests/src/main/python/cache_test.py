@@ -742,3 +742,120 @@ def test_cache_partition_with_column_over_2gib(data_type, route):
 
     with_gpu_session(check, conf={'spark.sql.adaptive.enabled': 'true',
                                   'spark.sql.shuffle.partitions': '1'})
+
+
+# Keep the producer target large: these inputs cross the writer's row or byte row-group
+# target within one input partition, rather than creating small GPU input batches.
+_pcbs_row_group_conf = copy_and_update(_pcbs_gpu_scan_conf,
+    {'spark.rapids.sql.batchSizeBytes': '1g'})
+
+
+def _row_group_cache_input(spark, shape):
+    rows = 131073 if shape == 'rows' else 32769
+    source = spark.range(0, rows, 1, 1)
+    text = f.concat(f.lit('key-'), (f.col('id') % 7).cast('string'))
+    payload = f.concat(f.lit('binary-'), f.col('id').cast('string'))
+    if shape == 'bytes':
+        payload = f.rpad(payload, 512, 'x')
+        text = f.rpad(f.col('id').cast('string'), 512, 'y')
+    return source.select(
+        'id',
+        f.when(f.col('id') % 11 != 0, text).alias('text'),
+        f.when(f.col('id') % 13 != 0, payload.cast('binary')).alias('payload'),
+        (f.col('id') - 65536).cast('decimal(12, 2)').alias('amount'),
+        f.col('id').cast('timestamp').alias('ts'),
+        f.when(f.col('id') % 5 != 0, f.struct(
+            f.when(f.col('id') % 3 != 0, f.col('id')).alias('child'),
+            f.array(f.col('id') % 17, f.lit(None).cast('long')).alias('values')))
+            .alias('nested'))
+
+
+def _row_group_cache_reads(spark, cached, on_gpu):
+    # Compare every reordered value, including binary and nested nulls, rather than
+    # hashing types that the GPU hash expression does not support.
+    projected = cached.select('nested', 'payload', 'ts', 'amount', 'text', 'id')
+    summary = projected.agg(f.count('*'), f.sum('id'),
+        *[f.count(f.when(f.col(name).isNull(), 1)) for name in projected.columns])
+    selected = projected.where(f.col('id') % 8191 == 0)
+    payload_only = cached.select('payload')
+    empty = cached.where(f.col('id') < 0).select('payload')
+    result = [sorted(projected.collect(), key=lambda row: row.id), summary.collect(),
+              sorted(selected.collect(), key=lambda row: row.id),
+              sorted(payload_only.collect(),
+                     key=lambda row: (row.payload is not None, row.payload or b'')),
+              cached.select().count(), empty.collect()]
+    if on_gpu:
+        _assert_read_on_gpu_scan(spark, projected)
+        _assert_read_on_gpu_scan(spark, summary)
+        _assert_read_on_gpu_scan(spark, selected)
+        _assert_read_on_gpu_scan(spark, payload_only)
+        _assert_read_on_gpu_scan(spark, empty)
+        for filtered in (selected, empty):
+            spark._jvm.org.apache.spark.sql.rapids.ExecutionPlanCaptureCallback.assertContains(
+                filtered._jdf, 'GpuFilterExec')
+    return result
+
+
+def _check_row_group_cache(spark, shape, storage_level, expected, partial=False):
+    cached = _row_group_cache_input(spark, shape).persist(storage_level)
+    try:
+        relation = _cached_relation(spark, cached)
+        assert relation.cachedPlan().supportsColumnar(), 'expected the GPU columnar writer'
+        if partial:
+            assert len(cached.take(1)) == 1
+        assert cached.count() == (131073 if shape == 'rows' else 32769)
+        assert relation.cacheBuilder().cachedColumnBuffers().count() > 1
+        assert_equal(expected, _row_group_cache_reads(spark, cached, True))
+        spark.conf.set('spark.rapids.sql.enabled', 'false')
+        assert_equal(expected, _row_group_cache_reads(spark, cached, False))
+    finally:
+        cached.unpersist(blocking=True)
+        assert not spark._jsparkSession.sharedState().cacheManager() \
+            .lookupCachedData(cached._jdf).isDefined()
+
+
+@_requires_pcbs_enabled
+# The scan retains CPU pruning predicates as metadata; the actual filter must be GPU.
+@allow_non_gpu('ColumnarToRowExec', 'EqualTo', 'Remainder', 'LessThan')
+@pytest.mark.parametrize('shape', ['rows', 'bytes'])
+def test_cache_gpu_row_groups(shape):
+    expected = with_cpu_session(
+        lambda spark: _row_group_cache_reads(spark, _row_group_cache_input(spark, shape), False),
+        conf=_pcbs_row_group_conf)
+    with_gpu_session(lambda spark: _check_row_group_cache(
+        spark, shape, StorageLevel.DISK_ONLY, expected), conf=_pcbs_row_group_conf)
+
+
+@_requires_pcbs_enabled
+@allow_non_gpu('ColumnarToRowExec', 'EqualTo', 'Remainder', 'LessThan')
+@pytest.mark.parametrize('compressed', ['false', 'true'])
+@pytest.mark.parametrize('storage_level', [
+    pytest.param(StorageLevel.DISK_ONLY, id='disk'),
+    pytest.param(StorageLevel.MEMORY_ONLY, id='memory-serialized'),
+    pytest.param(StorageLevel(True, True, False, True, 1), id='memory-and-disk-deserialized')])
+def test_cache_gpu_row_group_storage(compressed, storage_level):
+    # Java/Kryo are SparkContext settings; run this test in the respective JVM lanes,
+    # rather than pretending that a per-test SQL conf changes the active serializer.
+    conf = copy_and_update(_pcbs_row_group_conf,
+        {'spark.sql.inMemoryColumnarStorage.compressed': compressed})
+    expected = with_cpu_session(
+        lambda spark: _row_group_cache_reads(spark, _row_group_cache_input(spark, 'rows'), False),
+        conf=conf)
+    with_gpu_session(lambda spark: _check_row_group_cache(
+        spark, 'rows', storage_level, expected), conf=conf)
+
+
+@_requires_pcbs_enabled
+@allow_non_gpu('ColumnarToRowExec', 'CollectLimitExec', 'EqualTo', 'Remainder', 'LessThan')
+def test_cache_gpu_row_group_partial_unpersist():
+    expected = with_cpu_session(
+        lambda spark: _row_group_cache_reads(spark, _row_group_cache_input(spark, 'rows'), False),
+        conf=_pcbs_row_group_conf)
+
+    def check(spark):
+        _check_row_group_cache(spark, 'rows', StorageLevel.DISK_ONLY, expected, partial=True)
+        # Recreate the same cache after blocking removal; no previous entry may be reused.
+        spark.conf.set('spark.rapids.sql.enabled', 'true')
+        _check_row_group_cache(spark, 'rows', StorageLevel.DISK_ONLY, expected)
+
+    with_gpu_session(check, conf=_pcbs_row_group_conf)
