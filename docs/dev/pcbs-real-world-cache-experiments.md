@@ -122,7 +122,11 @@ RAPIDS allocations, not a demonstrated whole-process cap on cuDF writer callback
 
 New evidence root: /data/pcbs-oom/pcbs-real-world-cache/.
 Inventory: dataset-audit.json/.md and stable source-file lists.
-Source/API and resource audits are recorded there. Harness, immutable input
-preparation and launcher/verifier are being built in independent worker scopes.
-Root will verify inputs, oracle, class origins and small runtime gates before
+Source/API and resource audits are recorded there. Immutable input preparation is
+READY FOR REVIEW: both datasets preserve all original row groups and column bytes.
+Root independently verified all 561 copied row-group hashes, contiguous complete
+coverage, rows and column totals in root-input-audit001.json. Small decoded-value
+roundtrips also pass; the initial footer-hash-definition mismatch was a fixture
+error and is preserved as failed evidence. Harness and launcher/verifier remain in
+review. Root will verify the oracle, class origins and small runtime gates before
 starting the frozen large-case schedule.
