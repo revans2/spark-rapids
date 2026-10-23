@@ -47,7 +47,9 @@ Fill consumes all cached RDD partitions in parallel, returning only summaries.
 It includes reading the canonical files and building/persisting cache entries.
 One warmup and three fresh all-column sum/count reads follow. Full file hashing
 before each JVM warms the OS page cache; these are not cold-disk measurements.
-Heap samples measure occupancy, not live payload. Raw GC logs provide collection
+Primary outcomes are maximum heap usage and fill/read wall times. Matching CPU
+GC behavior is not an experimental goal. Heap samples measure occupancy, not
+live payload. Raw GC logs provide collection
 counts, time and observed post-full-GC occupancy. BlockManager memory/disk
 residency and GPU decode/coalescer batch counts and bytes are also recorded.
 
@@ -85,6 +87,55 @@ unsupported text keyword; the first GPU gate exposed a fixture classpath
 error. Both failed attempts remain available. Their fixes change only research
 preparation/launching, with no production change or weakened checks.
 
-Full-data results and independent verification are pending. Expected heap OOM
-will be reported as a negative outcome. Non-fixture correctness failures or
-required production changes must be investigated and escalated before proceeding.
+## First full matrix
+
+All three root-run fresh JVMs passed the full runtime verifier, exact row count
+and canonical sums, retained all 16 cache blocks, and completed blocking
+unpersist. No OOM, failed action or timeout occurred. The immutable canonical
+manifest SHA256 is `e5484fe01a568ba9708479d6bf311fa0dd82173595a451097c9a8713a902858b`.
+Actual source Parquet bytes are 103,135,540,973. Source generation took 88.02 s
+and its CPU oracle took 23.47 s; neither is cache-fill time.
+
+| Mode | Fill wall s | Three read walls s | Read median s | Sampled fill heap peak GiB | Sampled read heap peak GiB |
+|---|---:|---|---:|---:|---:|
+| CPU/default | 114.32 | 18.91, 18.64, 18.62 | 18.64 | 41.78 | 42.73 |
+| GPU/PCBS codec, split only | 138.37 | 29.45, 26.84, 26.12 | 26.84 | 41.63 | 42.01 |
+| GPU/PCBS codec, split and coalesce | 113.52 | 27.22, 26.96, 25.55 | 26.96 | 41.70 | 36.22 |
+
+Heap is observed occupancy, including garbage. The 20 ms sampler can miss a
+burst: for example, CPU fill's largest logged pre-GC occupancy was 41.91 GiB,
+slightly above its 41.78 GiB sample. Logged pre-GC observations will accompany
+final heap maxima; they are not a proof of an absolute allocation bound.
+
+CPU produced 80,544 default records containing 103,089,524,736 encoded buffer
+bytes, maximum 1,280,128 bytes per record. Both GPU modes produced exactly
+3,184 records containing 103,105,342,960 encoded bytes, maximum 33,395,036
+bytes. Each GPU read decoded 3,184 batches with maximum device size 33,908,864
+bytes. Coalescing reduced this to 112 batches (seven per cache partition),
+maximum 1,039,425,024 bytes (991.27 MiB), mean 877.71 MiB including tails.
+The plan places the standard 1 GiB-target coalescer directly above the cache
+scan and below the GPU aggregate.
+
+Decoded GPU device buffers totaled 104,691,630,080 bytes (97.5 GiB), while
+combined buffers totaled 103,079,215,104 bytes (96 GiB). Logical rows and values
+are unchanged. A validity-buffer/allocation difference is a plausible cause;
+this experiment has not independently attributed the difference to cuDF code.
+These are measured device bytes, separate from logical values and Parquet bytes.
+
+BlockManager residency remained stable through all four reads. CPU reported
+25,658,721,280 memory bytes and 77,384,389,608 disk bytes; both GPU modes
+reported 25,776,390,048 memory bytes and 77,329,035,876 disk bytes. These are
+Spark's recorded sizes, not additional isolated live-heap measurements.
+
+At this stage coalescing restores large GPU batches with essentially unchanged
+median read time. Overall observed heap peaks remain similar because fill
+peaks dominate the combined case. Do not attribute its lower fill wall time
+to read coalescing: the two GPU artifacts have the same fill path. To check
+run-to-run variation, the same three cases are being repeated in reverse order
+with unchanged files, artifacts and controls. Peak heap and wall times remain
+the primary results; no GC matching or tuning is performed. Full independent
+post-run hash/GC/event audits are deferred until timing ends, avoiding competing
+I/O. No final cross-run performance claim is made yet.
+
+Expected heap OOM remains a negative outcome. Non-fixture correctness failures
+or required production changes must be investigated and escalated before proceeding.

@@ -9,7 +9,13 @@ acceptance are pending.
 
 IN PROGRESS — research fixtures READY FOR REVIEW; full-data timings pending.
 Stock-only compilation, CPU smoke/root rerun, both common GPU smokes and
-separate real PCBS disk/wire/coalescer gates passed. See
+separate real PCBS disk/wire/coalescer gates passed. First full 96 GiB matrix
+also passed all three runtime verifiers: CPU fill/read-median 114.32/18.64 s,
+GPU split 138.37/26.84 s, GPU split/coalesce 113.52/26.96 s. Sampled overall
+heap peaks 42.73/42.01/41.70 GiB. Coalescing restored up to 991.27 MiB batches.
+Identical GPU fill-path timing variance and lower combined read-phase heap
+motivate one unchanged reverse-order repeat; final hash/event audits follow
+all timing. No GC matching/tuning or final causal performance claim. See
 [comparison evidence](pcbs-real-data-comparison.md). Architect requests PCBS-only
 pre-splitting with the global 1 GiB target unchanged, optionally recombining
 decoded records near 1 GiB, plus a pure CPU default-cache comparison at the
@@ -27,6 +33,9 @@ same input volume and task layout.
   GPU uses the research per-cache codec, fixed 15 GiB pool, concurrency 2,
   host limit 40 GiB and pinned pool 2 GiB; CPU has no RAPIDS or overlay jars.
   Prior split-fill timings were sequential and are not directly comparable.
+  Architect clarification: primary outcomes are maximum heap usage and
+  fill/read wall times. GC is supporting evidence, not a target to match.
+  Keep experimental controls fixed; do not tune to match CPU GC behavior.
 - Reuse the prior real PCBS split experiment and standard GPU coalescing code.
   Keep baseline, split-only and split-plus-coalesce distinguishable. Measure
   actual encoded record sizes, decoded and downstream GPU batch sizes,
