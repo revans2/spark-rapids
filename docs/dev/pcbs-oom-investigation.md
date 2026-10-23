@@ -145,11 +145,13 @@ MEMORY_AND_DISK residency; keep DISK_ONLY experiments separate.
   root/peer fresh validation passed all 21 recorded results. Original five frozen
   sources and measured controls remain. This orchestration fix is READY FOR REVIEW.
   Current stage: fixture correction READY FOR REVIEW; matrix2 RUNNING resumed
-  at case 017 with supervisor PID 320699 (resumer commit 2b664428f3). The original
-  supervisor PID 303699 is exited; frozen fixture commit 424f34bada remains unchanged.
-  Resume provenance/log: matrix2-resume-001/ and matrix2-resume-001.log. Original
-  parked status/results and raw-prefix hashes are archived there. Root verified
-  case016 cleanup proof and case017 launch, with no JVM/GPU contention. Active status is
+  at case 021 with supervisor PID 324318 (resumer commit d4ac9c0c5c). Previous
+  supervisors are exited; frozen fixture commit 424f34bada remains unchanged.
+  Latest provenance/log: matrix2-resume-002/ and matrix2-resume-002.log; earlier
+  continuation remains archived under matrix2-resume-001/. Original parked
+  status/results and raw-prefix hashes are retained in each continuation. Root
+  verified case020 cleanup proof and case021 launch, with no JVM/GPU contention.
+  This checkpoint still uses MCP docker_exec exclusively. Active status is
   /data/pcbs-oom/controlled-cache-comparison/matrix2/status.json; matrix1 remains
   the preserved parked run. Root is actively monitoring to completion.
 
