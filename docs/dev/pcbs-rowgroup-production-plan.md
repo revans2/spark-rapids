@@ -10,9 +10,11 @@ for final review.
 
 Current checkpoint: the c385 production comparison is independently verified
 (15 synthetic JVMs and 16 public-data cases). The byte-only 8 MiB candidate at
-d9ba8787f6 is committed separately. The byte8 and byte16 candidate builds have
-passed full 53-Scala/9-Java verify and matched artifact audits in builds004;
-byte32 is building. Root's final independent three-artifact replay is pending.
+d9ba8787f6 is committed separately. All three byte-only candidates passed full 53-Scala/9-Java verify and matched
+artifact audits in builds004. Root independently replayed all reports, checked
+9,304 frozen source entries, actual JNI dependencies, all 237 private classes and
+all 36 implementation-family classes against fresh module/distribution bytes,
+and confirmed final quiescence. These candidate artifacts are READY FOR REVIEW.
 Decoded-layout diagnostics passed; 8/16/32 MiB screening and final selected-source
 compatibility remain gates.
 Earlier checkpoint paragraphs below retain historical failures and pending states;
@@ -127,6 +129,17 @@ building; root's final three-artifact replay remains pending. All operations rem
 only, with one owned build/runtime at a time. The lesson from the two audit
 repairs is to test real dependency classifier and Gitlink metadata as well as
 synthetic happy paths before trusting admission checks.
+
+Three-candidate independent acceptance is READY FOR REVIEW:
+../support-audit/root-byte-builds004.json. Actual owned Maven durations are
+415.474 seconds (byte8 original build, explicitly recovered), 406.700 (byte16)
+and 407.949 (byte32). All three ran all 53 Scala and nine Java tests without
+failure/skip. Root's independent replay required exact retained test-evidence
+agreement, actual JNI hash agreement, complete classifier-derived implementation
+class coverage, unchanged source hashes/commits and exact fresh/module/distribution
+bytes; no worker completion summary substituted for those checks. This is build
+and focused correctness evidence, not all-version or performance acceptance.
+Next gates are byte8 Java/Kryo SQL and the fixed full-size 12-cell screen.
 
 ## Historical implementation checkpoints
 
