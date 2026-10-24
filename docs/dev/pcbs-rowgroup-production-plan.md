@@ -21,7 +21,19 @@ DISK case passed: fill 154.756 s, median read 50.624 s, observed peak about
 bytes, versus approximately 100 GB per read in earlier cases. That timing drop
 is confounded by changed physical I/O/page-cache conditions; it is not evidence
 of a clean target-size speedup. These remain worker receipts awaiting root's
-closed-matrix replay. The queue is starting the memory-and-disk cases.
+closed-matrix replay. All eight canonical cases have now passed the queue checks.
+For memory-and-disk, byte8 filled in 161.659 s/read median 38.262 s/observed peak
+43,063,262,704 B; byte16 143.309 s/39.571 s/42,104,520,704 B; byte32
+164.830 s/40.973 s/46,826,258,432 B. The old control was 148.849 s/38.428 s/
+44,010,831,872 B. Most measured mixed-storage reads had zero physical read bytes;
+byte32's first measured read recorded about 1.62 GB. These are single-JVM
+receipts, not a confidence interval or minimum-heap result. Full TLC cases remain.
+After the closed screen is independently verified, a bounded six-case full-GH
+pressure check is planned: byte8/16/32 at the previously requested 8 GiB heap,
+each DISK_ONLY and MEMORY_AND_DISK. Data, partitions, threads, GPU/host controls
+and defaults remain fixed; only the heap dimension changes. Root will use the
+existing unchanged world runner, one case at a time, and preserve genuine OOMs.
+No new launcher framework or production change is required.
 The passive OS sampler missed the first fill and started partway through the
 first warmup; missing history will remain unknown.
 Root read the new final-only OS phase adapter and its original metric decoder,
