@@ -498,6 +498,15 @@ is reconciled in ../layout-queue/README.md; only stale pending wording changed.
 Root plans that diagnostic after the repeat replay; its times are excluded from
 performance comparisons and its runtime remains unverified.
 
+A minimal future world-compression adapter at ../compression-profiles is also
+source-reviewed by root and an independent worker; both reran six tiny tests PASS.
+It changes only spark.rdd.compress and an explicit spark.io.compression.codec
+in the unchanged runner's complete launch evidence. Parquet SNAPPY and all other
+controls remain fixed; the unchanged verifier checks both actual runtime values.
+No selected artifact, twenty-case owner, actual integration or codec availability
+is claimed. Execution remains deferred until byte-target selection. Retained
+review: ../compression-profiles/independent-review001.md.
+
 All operations and worker checkpoints continue via MCP docker_exec. Root owns
 scheduling and actual acceptance checks. Preparations are READY FOR REVIEW;
 production and measurement acceptance remain IN PROGRESS.
