@@ -119,8 +119,26 @@ root-rat-tool-result.json retains the actual command and output. No exclusion,
 skipped check, POM, runtime, test or configuration change was introduced.
 Frozen fa29 worktrees, measured artifacts and original raw evidence are unchanged
 and retain their identities. Fresh grouped attempts require the new license-only
-source commit and separate output; both groups and actual vendor attempts remain
-open.
+source commit and separate output. That commit is
+8ab82c90a6a01ac5eae5f5057bd3f545efb2b8fb. Root's committed-tree comparison is
+empty outside docs and the exact ten licensed reports:
+../support-audit/research-json-license001/root-committed-source-equivalence001.json.
+The accepted fa29 focused tests and original d9 measurements therefore cover
+unchanged runtime/build/test behavior; their source/artifact labels are retained.
+The unused group acceptance helper now pins only the new commit, with no adapter;
+root and independent review passed all twelve pure tests. Existing fa29 SQL
+helpers and evidence are untouched. The failed worktree was preserved at
+../crossversion/selected-grouped-worktree212-failed001; its original maps still
+name the old location, and the replacement directory must not be mistaken for
+its source. Root independently checked all five new/unused group/vendor
+worktrees: clean detached new commit, no target directories; the failed fa29
+worktree and RAT report remain. Receipts:
+../support-audit/prepare-license-source-worktrees001.json and
+../support-audit/root-check-license-worktrees001.json.
+The fresh Scala2.12 retry is RUNNING under supervisor678251 at
+../crossversion/selected-grouped212-002, exact twenty targets, unchanged normal
+serial buildall and 10,800-second total deadline. No group pass is claimed;
+Scala2.13 and actual vendor attempts remain open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first

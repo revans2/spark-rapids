@@ -41,6 +41,17 @@ Manual target 500 (`5.0.0-SNAPSHOT`, Scala 2.13) is enforcer-admitted through
 if included in acceptance. Older annotation entries such as 330db/332db do not add
 release targets.
 
+## License-only source identity
+
+Source `8ab82c90a6a01ac5eae5f5057bd3f545efb2b8fb` adds Apache license metadata
+to ten unreleased research JSON reports plus tracker/docs. Root verified that
+all existing report values and every other tracked non-doc file match fa29;
+production source, tests, build files and runtime policy are unchanged. The
+unchanged tools RAT check passes. New grouped/vendor attempts use this source;
+accepted fa29 tests and d9 measurements retain their actual source identities.
+Proofs: `support-audit/research-json-license001/` under the evidence root.
+This is not new runtime coverage.
+
 ## Affected API boundaries
 
 - `GpuParquetUtils.newBlockMeta` delegates to existing shims: spark330 for 3.3.x,
@@ -80,7 +91,7 @@ prototype is excluded. Evidence is under the production evidence root
 | 401 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 243 actual target-private classes | READY FOR REVIEW |
 | 413 / Scala 2.13 | Fresh normal fa29 verify after ordinary dependency refresh: 53 Scala and nine Java tests; root replayed reports, tracked source, fresh implementation bytes and all 243 actual target-private classes | READY FOR REVIEW |
 | 420 / Scala 2.13 | Fresh normal fa29 verify after ordinary dependency refresh: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation bytes and all 243 actual target-private classes | READY FOR REVIEW |
-| 39 OSS compile/package pairs | First Scala2.12 attempt stopped on ten research JSON license notices in tools; metadata-only repair passes unchanged RAT; fresh source/output retries required. Compile/package only, no runtime credit | Pending fresh attempts |
+| 39 OSS compile/package pairs | Scala2.12 twenty-target retry `crossversion/selected-grouped212-002` running at license-only source8ab82c90a6; failed001 preserved; Scala2.13 nineteen-target group pending. Compile/package only, no runtime credit | IN PROGRESS |
 | Three DBR pairs | Real vendor dependency-resolution/compile attempts and matching runtime coverage required; no OSS substitution | Not yet attempted |
 | 330 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |
 | 330 Kryo SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/registrator/origins and initial/final frozen/raw content | READY FOR REVIEW |
