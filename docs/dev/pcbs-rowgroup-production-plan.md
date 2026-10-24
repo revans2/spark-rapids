@@ -417,8 +417,9 @@ The old cap reaches 8 MiB at 128 value-bytes per row and underfills narrow group
 our sixteen-double canonical schema largely hides that constraint. No byte-size
 choice is final before the measurements and architect review.
 
-A separate ../byte-target-worktree at 572fe681f3423465e6366ae1e19fe68400168ef4
-contains the prepared next 8 MiB candidate. Production changes are exactly two
+The isolated ../byte-target-worktree now commits the next 8 MiB candidate at
+d9ba8787f609656395cdb3f127dd47325965c167 (based on 572fe681f3423465e6366ae1e19fe68400168ef4).
+It remains unbuilt and has not replaced the frozen benchmark artifacts. Production changes are exactly two
 deletions: TargetRowGroupRows and its writer-builder call. A new GPU test encodes
 200,000 int rows through the production factory, requires one group over 65,536
 rows, checks every decoded value and host-handle cleanup. Fixed deterministic
@@ -450,6 +451,38 @@ worktrees and fixed-commit plans remain preparations; update them explicitly to
 the final source and new test count before execution. The eleven-run c385 series
 remains the sole active JVM/GPU job and its files/controls stay frozen. Root
 continues sole scheduling; workers continue MCP docker_exec only.
+
+## Repeat verification and next-build preparation checkpoint
+
+Six of the eleven repeat JVMs have completed: five PASS and one genuine heap OOM.
+Both completed baseline 1/1 runs pass; the additional default baseline memory/disk
+run OOMs, while the additional patched default memory/disk run passes. The second
+DISK_ONLY pair reverses the initial timing ordering, so no fixed disk speedup or
+regression is established. Remaining cases, final original-verifier replay and
+independent content checks must finish before the aggregate is accepted.
+
+The idle-only canonical15 replay helper at
+../canonical-repeat-queue/reverify_repeats_v1.py is prepared and source-reviewed.
+Root and an independent worker each reran six tiny tests successfully. It retains
+raw prefix ERROR/OOM evidence, requires exact original and approved normalized
+results, checks every declared input/artifact content and rehashes unique files
+at completion. It has NOT run against the real fifteen cases; the live queue
+retains exclusive admission. The repeat report's eight tiny tests also pass.
+
+The next three-artifact build owner at ../crossversion/build_byte_targets_v1.py
+and its starter/freezer are prepared and source-reviewed by root and an
+independent worker. Seven new tiny tests and the old boundary checks pass. The
+candidate owner requires exact 53 Scala tests (9/4/10/5/8/17) plus nine Java tests,
+clean actual source commits and fresh module/distribution class equality. The
+existing report parser defaults remain 52 for old preparations; neither count
+can masquerade as the other. New manifests must preserve the actual common
+JNI/private artifacts and original baseline. No actual candidate Maven build,
+artifact freezing, runtime gate or new benchmark has run. See
+../crossversion/BYTE-TARGET-BUILD-PREP.md for exact prerequisites and limitations.
+
+All operations and worker checkpoints continue via MCP docker_exec. Root owns
+scheduling and actual acceptance checks. Preparations are READY FOR REVIEW;
+production and measurement acceptance remain IN PROGRESS.
 
 ## Scope and compatibility
 
