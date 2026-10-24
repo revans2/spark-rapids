@@ -32,11 +32,19 @@ Spark 3.4.0 is also READY FOR REVIEW: its normal verify passed all 53 Scala
 and nine Java tests without skips, failures, timeout, changed source or remaining
 owned processes. Root independently replayed the reports and checked tracked
 source, fresh implementation bytes and all 237 actual target-private classes:
-../crossversion/selected-verify340-001-accepted.json. The next boundary, Spark
-3.5.0 / Scala 2.13, is RUNNING alone under supervisor 632845 at
-../crossversion/selected-verify350-001 on clean explicit fa29 source, using the
-same exact 53-plus-nine normal verify and owned 1800-second deadline. Six fresh
-fa29 boundary/group worktrees are prepared; preparation is not build evidence.
+../crossversion/selected-verify340-001-accepted.json. Spark 3.5.0 / Scala 2.13
+is also READY FOR REVIEW: normal full verify passed 53 Scala and nine Java tests,
+and root independently replayed reports, source and fresh packaged classes,
+including all 237 classes from its actual target-private dependency:
+../crossversion/selected-verify350-001-accepted.json. No skips, failures, timeout,
+source changes or owned residuals occurred. Spark 4.0.1 / Scala 2.13 is RUNNING
+alone under supervisor 640961 at ../crossversion/selected-verify401-001 on clean
+explicit fa29 source, using the same exact 53-plus-nine normal verify and owned
+1800-second deadline. Six fresh fa29 boundary/group worktrees and three vendor
+worktrees are prepared; preparation is not compilation or runtime evidence.
+A narrow selected-SQL acceptance helper reuses the existing nine-case, heap,
+class-origin, runtime-audit and frozen-content checks; root and independent
+review passed its three synthetic tests. Actual SQL replay remains unrun.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
