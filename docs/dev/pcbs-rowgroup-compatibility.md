@@ -75,8 +75,9 @@ prototype is excluded. Evidence is under the production evidence root
 |---|---|---|
 | 330 / Scala 2.12 | Fresh normal verify: 53 Scala and nine Java tests; root replayed reports and checked all 36 implementation classes and 237 actual target-private classes against fresh packaged bytes | READY FOR REVIEW |
 | 355 / Scala 2.12 | Independently accepted d9ba full 53-plus-nine build and Java/Kryo SQL lanes, nine cases each at 4 GiB; explicit non-doc source equivalence to fa29 | READY FOR REVIEW for these gates |
-| 340 / Scala 2.12 | Fresh fa29 normal verify at `crossversion/selected-verify340-001` | RUNNING |
-| 350 / Scala 2.13; 401 / Scala 2.13; 413 / Scala 2.13; 420 / Scala 2.13 | Prepared exact 53-plus-nine focused boundary owners | Pending actual execution |
+| 340 / Scala 2.12 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 237 actual target-private classes | READY FOR REVIEW |
+| 350 / Scala 2.13 | Fresh fa29 normal verify at `crossversion/selected-verify350-001` | RUNNING |
+| 401 / Scala 2.13; 413 / Scala 2.13; 420 / Scala 2.13 | Prepared clean fa29 worktrees and exact 53-plus-nine focused boundary owners | Pending actual execution |
 | 39 OSS compile/package pairs | Prepared serial grouped owners; compile/package only, no runtime credit | Pending actual execution |
 | Three DBR pairs | Real vendor dependency-resolution/compile attempts and matching runtime coverage required; no OSS substitution | Not yet attempted |
 | 330 / 401 Java and Kryo SQL | Four prepared selected-source nine-case lanes | Pending actual execution |

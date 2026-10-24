@@ -251,11 +251,11 @@ follows from one JVM per cell.
 
 The benchmark source identities remain d9ba8787f6, cebb9206d5 and abec8b6da5;
 the selected 8 MiB policy is committed in fa29f4d90c without relabeling any
-measured artifact as that commit. Final-source correctness and all-supported-version
-validation remain unrun gates. The separate TLC diagnostic pair below is closed
-and analyzed; its profiled wall times are not primary performance evidence.
-Outer Spark-compression experiments remain pending; native off-heap storage is
-optional, with no Spark-core or Spark OFF_HEAP change.
+measured artifact as that commit. Remaining supported-version gates are in
+progress. The separate TLC diagnostic pair below is closed and analyzed; its
+profiled wall times are not primary performance evidence. The twenty-case outer Spark-compression comparison is
+complete and independently replayed, as reported above. Native off-heap storage
+remains optional, with no Spark-core or Spark OFF_HEAP change.
 
 Evidence: ../gh8-byte-target-screen/reverified001/summary.{json,csv,md}. The JSON
 retains the exact six-case original results, CPU-oracle proof, source identities,
@@ -317,8 +317,9 @@ files, all 36 implementation-family class bytes and 237 private class bytes.
 This is a verified isolated build, not all-version or final-source acceptance.
 Main fa29f4d90c retains the selected 8 MiB policy and its separate 53-plus-nine
 compatibility gate. The prototype is not promoted to main or substituted into
-the earlier timing/profile cohorts. Its three-case bracket is below; outer
-compression and final selected-source compatibility remain pending.
+the earlier timing/profile cohorts. Its three-case bracket is below. The separate
+outer-compression comparison is complete; remaining selected-source compatibility
+gates are in progress.
 
 ## Adjacent-view prototype: matched TLC bracket
 
@@ -382,23 +383,75 @@ Receipt: ../selected-world-profiling/contiguous-analysis001.json, retaining
 exact units, raw copyCount fields, boundary/outside rows and proof hashes.
 Profiled wall times remain diagnostic-only and are not pooled into the bracket.
 
-The baseline JFR diagnostic completed with original verifier PASS and a readable
-recording at ../jfr-host-profile/case000-baseline. Attachment began about thirteen
-seconds into fill; missing fill history remains unknown. The patched diagnostic
-also completed with original verifier PASS and JVM exit zero, with no remaining
-owned processes. Its recording starts before fill. Both recordings have zero
-DataLoss events and successful selected-event exports, but precise phase coverage
-and CPU/allocation interpretation remain pending. Root separately replayed both
-complete original benchmark results, including sixteen real inputs and
-9,590,376,664 content bytes checked initially and finally:
-../jfr-host-profile/reverified001/result.json. The first interpreter missed
-static Spark worker names in the patched capture; its output is retained but
-cannot support cross-arm worker comparisons. The reviewed version2 repair and
-seven pure tests pass; actual interpretation remains pending. CPU stacks/context
-switches were disabled in the Nsight captures.
+## Host-side read work observed by JFR
+
+Two separately labelled full-TLC diagnostics compare original PCBS with the
+measured byte8/default-row artifact d9ba8787f6, using stock Java serialization,
+DISK_ONLY and the same 48 GiB/resource/query controls. Both complete original
+benchmark results and all four read oracles were replayed exactly, with sixteen
+inputs and 9,590,376,664 content bytes checked initially and finally. Evidence:
+`../jfr-host-profile/reverified001/result.json`. These are diagnostic JVMs,
+separate from primary timings and the unpromoted contiguous-view prototype.
+
+The corrected worker classification in `interpretation002.json` recognizes both
+observed Spark worker-name forms; interpretation001 must not be used for this
+cross-arm comparison. Timestamp-attributed worker allocation samples estimate:
+
+| Read | Original PCBS: estimated allocated bytes | Byte8 d9: estimated allocated bytes |
+|---|---:|---:|
+| 1 | 6,454,458,144 | 8,011,877,520 |
+| 2 | 6,346,770,952 | 7,961,649,504 |
+| 3 | 6,434,683,176 | 7,900,105,208 |
+
+That is approximately 5.91–6.01 GiB/read versus 7.36–7.46 GiB/read of represented
+allocation, not live heap, required heap or exact allocated bytes. Baseline
+recording began about thirteen seconds into fill; fill is excluded from this
+comparison. Both recordings extend across the read windows, but selected-event
+endpoints and absence of exported DataLoss events do not prove continuous
+sampling or complete stacks.
+
+Both arms still show the Java array-deserialization path. In read3, recorded
+native-method stacks include
+`FileInputStream.available0 → FileInputStream.available → BufferedInputStream.read
+→ ObjectInputStream$PeekInputStream.read → BlockDataInputStream.readFully
+→ ObjectInputStream.readArray` (leaf-to-caller direction, intermediate frames
+omitted). The native leaf appears in five baseline and six byte8 worker samples;
+those are samples, not syscall counts or time measurements. Byte8 also has
+allocation/execution stacks through `ParquetCachedBatchFiles.describe`,
+`logicalFile` and Parquet/Thrift footer reading/writing. For example, read3
+allocation weights include 675,224,368 bytes on the describe path and
+671,217,520 on the logicalFile path. These inclusive paths overlap and must not
+be added. They identify extra host metadata/wrapper work as a candidate cost;
+they do not assign a fraction of the wall-time regression to it.
+
+The separate four-case GH task report records read3 task-thread CPU sums of
+31.79/30.57 seconds with outer compression OFF (baseline/byte8), versus
+25.18/23.16 seconds with SNAPPY. These are sums across seventeen tasks, not
+phase wall time or all process CPU. The global compression codec also affects
+task broadcasts, result collection and applicable shuffle/spill; OFF retains
+global LZ4 while disabling RDD-cache compression. Therefore this comparison
+does not isolate cache decompression or explain the change by file size alone.
+RAPIDS spill/retry fields are absent for all seventeen read3 task reports in
+these four cases: their values remain unknown, not measured zeros.
+
+Samples are sparse and often truncated: read3 baseline execution has 12 samples
+(10 truncated), and byte8 has 33 (30 truncated); byte8 allocation has 232 samples
+(231 truncated). Native-method samples can include native waits and are not
+native C++ backtraces. Allocation weights can represent allocations preceding
+the event timestamp, including across phase boundaries. One diagnostic JVM per
+arm and profiler perturbation preclude a causal or confidence claim. This is
+evidence of observed paths and estimated allocation work, not exact CPU
+percentages, GPU utilization or a demonstrated optimization.
+
+Evidence:
+`../jfr-host-profile/interpretation002.json` (initial/final content checks each
+992,931,558 bytes);
+`../support-audit/jfr-tlc-overhead-explanation001.md`;
+`../support-audit/gh-compression-tasks001.json`.
+
 The prototype remains isolated/unpromoted. Main fa29 and the reported original
-runtime remain unchanged; outer compression and final main-policy53-plus-nine
-compatibility remain pending.
+runtime remain unchanged. The separate outer-compression comparison is complete;
+remaining main-policy53-plus-nine supported-version gates remain open.
 
 ## Returned GPU batch sizes
 

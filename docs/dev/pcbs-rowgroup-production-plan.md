@@ -28,22 +28,32 @@ Gitlink, all 36 implementation-family classes and all 237 classes from the actua
 Spark330 private dependency against fresh module/distribution bytes. Evidence:
 ../crossversion/selected-verify330-001-accepted.json. Its target-private hash is
 not the Spark355 private hash; the common JNI retains the pinned shared hash.
-The next boundary, Spark 3.4.0, is RUNNING alone under supervisor 623875 at
-../crossversion/selected-verify340-001 on clean explicit fa29 source, using the
-same exact 53-plus-nine normal verify and owned 1800-second deadline.
+Spark 3.4.0 is also READY FOR REVIEW: its normal verify passed all 53 Scala
+and nine Java tests without skips, failures, timeout, changed source or remaining
+owned processes. Root independently replayed the reports and checked tracked
+source, fresh implementation bytes and all 237 actual target-private classes:
+../crossversion/selected-verify340-001-accepted.json. The next boundary, Spark
+3.5.0 / Scala 2.13, is RUNNING alone under supervisor 632845 at
+../crossversion/selected-verify350-001 on clean explicit fa29 source, using the
+same exact 53-plus-nine normal verify and owned 1800-second deadline. Six fresh
+fa29 boundary/group worktrees are prepared; preparation is not build evidence.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
 interpreter completed, but root found its thread grouping missed the patched
 capture's static worker names. Interpretation001 is retained and must not be
-used for cross-arm worker comparisons. A narrow version2 repair recognizes both
-observed Spark worker-name forms; root and independent review passed seven pure
-tests. Actual version2 interpretation awaits the next idle slot. No CPU or
-allocation conclusion follows yet. A four-case existing-event-log spill/CPU
-reporter is also source-reviewed with three passing pure tests, but unrun.
-MCP docker_exec remains mandatory for root and workers. JFR interpretation and
-final supported-version gates remain open; the optional adjacent-view prototype
-stays isolated because its bracket did not establish a wall-time improvement.
+used for cross-arm worker comparisons. Root executed interpretation002 after
+the worker-name repair and independent source review. Its sampled allocation/path
+evidence is READY FOR REVIEW; interpretation001 remains unsuitable for cross-arm
+worker comparisons. The four-case GH task report also completed at
+../support-audit/gh-compression-tasks001.json. These diagnostics identify observed
+Java/metadata paths and task-thread CPU differences, not exact CPU percentages,
+live heap, proven spill absence or a causal bottleneck. The results section
+[Host-side read work observed by JFR](pcbs-rowgroup-production-results.md#host-side-read-work-observed-by-jfr)
+retains the measurements and limits.
+MCP docker_exec remains mandatory for root and workers. Final supported-version
+gates remain open; the optional adjacent-view prototype stays isolated because
+its bracket did not establish a wall-time improvement.
 Root rechecked the full committed d9ba-to-fa29 diff outside docs: it is empty,
 including source, tests, integration fixtures and build contracts. Receipt:
 ../support-audit/final-byte8-source-equivalence001.json. The accepted d9ba
