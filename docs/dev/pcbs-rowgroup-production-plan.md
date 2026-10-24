@@ -229,6 +229,39 @@ layout remain pending. Evidence is
 under ../production-runs and ../support-audit/first-pair-*-audit.json. All workers
 remain MCP docker_exec only; benchmark jobs own the sole JVM/GPU/build slot.
 
+Public-data checkpoint: the first nine production cases completed without
+unexpected errors: eight PASS and GHArchive 8 GiB MEMORY_AND_DISK HEAP_OOM on the
+baseline. Patched GHArchive 8 GiB mixed storage passes (fill 47.466 s, read median
+16.406 s, observed heap 6.425 GiB), while baseline fill 50.296 s precedes the
+ObjectInputStream.readArray failure. TLC 8 GiB mixed storage passes both arms:
+baseline/patched fill 14.370/14.661 s, read median 3.888/5.518 s, observed heap
+7.308/5.740 GiB; patched encoded payload is about 9% larger. These are tradeoffs,
+not universal speed/heap wins. Root generated explicit partial reports; an
+independent agent rederived all first-four row/hash/null/value/schema oracles,
+heap/GC peaks, layout and timings from raw evidence (world-first-four-raw002.json).
+The initial raw001 also passed; 002 extends only missing-data handling for later
+negative outcomes and keeps all first-four checks unchanged. World matrix001 is
+still running; final verifier reexecution and complete report remain pending.
+
+A separately owned OS sampler now records future host/cgroup cache/pressure
+counters every two seconds, without changing the frozen benchmark. PID/start
+identity was independently matched and actual sample availability/units checked.
+History starts at 1792807172708375464 epoch ns, after the first world's phases;
+it cannot explain past canonical cache misses. Native-RSS inflation is not supported
+by that disk pair: patched read RSS was 22.4–23.1 GiB versus baseline 50.1–51.7 GiB.
+Report adapter review raised a false formatting alarm from nested tool escaping;
+actual file bytes and JSON/CSV/Markdown round-trip checks disproved it. The reporter
+implementation never changed; six checks now include real output parsing.
+
+Layout v2 fixture preflight is READY FOR REVIEW (21 root/independent Python checks):
+original compiled workload/controls stay unchanged; the sole known canonical Java
+options metadata issue uses the approved strict correction and all original base
+and layout checks remain, with exact artifact/task linkage added. Actual decoded
+layout runs remain pending. The optional owned Nsight adapter is also prepared
+and reviewed (nine root/independent checks), not executed. Any captures require
+further schema/phase/completeness review and supply no primary timing comparison.
+All work continues through MCP docker_exec only; no production source changed.
+
 The next eleven canonical repeat/control JVMs are PREPARED, not run:
 ../canonical-repeat-queue. Root read the full launcher and reran its eight tiny
 Python checks; an independent agent found no material issue. Default orders are
