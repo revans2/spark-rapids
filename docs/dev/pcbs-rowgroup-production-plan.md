@@ -10,8 +10,10 @@ for final review.
 
 Current checkpoint: the c385 production comparison is independently verified
 (15 synthetic JVMs and 16 public-data cases). The byte-only 8 MiB candidate at
-d9ba8787f6 is committed separately but unbuilt; decoded-layout diagnostics,
-8/16/32 MiB screening and final selected-source compatibility remain gates.
+d9ba8787f6 is committed separately and its Maven verify has passed 53 Scala plus
+nine Java tests; post-build classifier auditing is being corrected before artifact
+acceptance. Decoded-layout diagnostics passed; 8/16/32 MiB screening and final
+selected-source compatibility remain gates.
 Earlier checkpoint paragraphs below retain historical failures and pending states;
 the completed repeat checkpoint and current byte-target section supersede them.
 
@@ -81,6 +83,20 @@ small tests; independent review passed. Actual permissions, capture completeness
 export schema, timestamps and phase attribution remain unverified. No profiler
 run or new Spark setting is claimed. Native GPU activity must not be inferred
 from semaphore-held task time.
+
+Byte-target-builds002 then completed byte8 Maven verify successfully (6m54s),
+with 53 Scala tests and nine Java tests and zero failures/skips. The queue parked
+before artifact freezing: inspect_reports counted Spark SQL's matching tests.jar
+as an extra main runtime jar. Root independently replayed the raw XML classpaths
+and jar member inventory: all six suites use exactly the expected 3.5.5 main/test
+pair, the same pair as build010, and the two jars share no class names (2,842 main
+classes versus 6,501 test-support classes). This is a checker bug, not a production
+or runtime test failure. Evidence: ../support-audit/root-sql-classifier-evidence001.json.
+All original logs, reports and frozen owner sources remain intact. A narrow
+versioned classifier-aware checker and explicit recovery of the completed build
+are being prepared; byte16/32 builds have not started and no byte8 artifact or
+benchmark is accepted yet. The checker must still reject wrong versions,
+classifiers, duplicate main/test jars and incomplete/skipped test execution.
 
 ## Historical implementation checkpoints
 
