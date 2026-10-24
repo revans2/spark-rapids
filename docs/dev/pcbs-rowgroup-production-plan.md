@@ -55,6 +55,15 @@ independently passed all six pure tests, and obtained independent source review.
 Preparation is READY FOR REVIEW; actual plan creation/admission/capture waits
 for the closed verified screen and explicit root target selection.
 No optimized source or profiler run has been introduced.
+The closed-screen rendering checker is prepared and independently reviewed; root
+read it and passed four pure tests. It requires exact JSON equality with the
+independent raw replay and checks every CSV field and Markdown cell/limit note.
+The selected-boundary acceptance helper is also prepared and reviewed; root
+read it and passed six pure tests. Its private dependency proof uses each target's
+actual Scala/Spark-classified dependency, with all embedded class bytes checked.
+Only 3.5.5/Scala 2.12 has the historical 237-class/SHA reference; asserting that
+reference unchanged across Scala/Spark targets would be incorrect. The shared
+JNI still requires its frozen common hash. Actual acceptance remains unrun.
 All root and worker project operations remain MCP docker_exec only.
 
 Current implementation checkpoint: the c385 production comparison is independently verified
