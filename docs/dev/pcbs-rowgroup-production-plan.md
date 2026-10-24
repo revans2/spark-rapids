@@ -58,6 +58,16 @@ frozen profiler owner cannot select new artifacts; any later adaptation must
 preserve its controls, ownership and strict verifier. CUDA activity time and host
 GPU-semaphore holding time must be reported separately.
 
+The first byte-target build parked after 29.328 seconds before production
+compilation/tests: Scala's compiler bridge tried to create a cache in read-only
+/home/roberte/.sbt. This is a launcher environment failure, not a candidate result.
+The failed queue/log/source hashes remain intact; its three generated target
+folders were moved into its preserved-generated-targets directory after checking
+clean committed sources and quiescence. A versioned v2 owner adds only the writable
+-DsecondaryCacheDir setting already used by earlier supported-version builds;
+root passed its seven small tests. Fresh retry scheduling and independent review
+remain pending. No source, benchmark control or acceptance threshold changed.
+
 ## Historical implementation checkpoints
 
 The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,

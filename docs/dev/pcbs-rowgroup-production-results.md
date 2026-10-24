@@ -1,10 +1,32 @@
 # PCBS row-group production measurements
 
 Status: IN PROGRESS. All fifteen synthetic JVM runs and all sixteen production
-public-data cases are independently verified and READY FOR REVIEW. Decoded batch-
-layout diagnostics and the new byte-only target sweep remain pending. These
+public-data cases are independently verified and READY FOR REVIEW. The decoded
+batch-layout diagnostic pair is also verified; the new byte-only target sweep
+remains pending. These
 measurements use the production logical-buffer reader, separately from the older
 research multi-file prototype.
+
+## Returned GPU batch sizes
+
+A separate full-size diagnostic pair confirms small cached records still return
+large GPU batches. Both paths produce 112 batches (seven per partition), with
+805,306,368 rows and all 16 columns. The actual scan plans contain no separate
+full-row coalescer; the patched reader itself combines stored records.
+
+| Path | Batches | Represented buffer min bytes | Median bytes | Max bytes |
+|---|---:|---:|---:|---:|
+| Baseline | 112 | 819,467,520 | 953,942,144 | 953,942,144 |
+| Row-group patch c385 | 112 | 109,667,584 | 1,072,241,792 | 1,072,241,792 |
+
+The patched path has a smaller final batch per partition. These sizes represent
+returned device buffers, including column overhead; they are not live residency,
+allocation peaks or encoded storage sizes. Separate diagnostic actions add
+instrumentation, so their timings are excluded from the performance comparison.
+Root independently replayed both complete strict verifiers, checked actual task
+identities, artifact origins and exact row/column contracts, required exact
+retained-result equality, and verified final quiescence. Evidence:
+../layout-queue/pair001 and ../support-audit/root-layout-pair001.json.
 
 ## Repeated synthetic comparison
 
