@@ -16,17 +16,29 @@
 
 package com.nvidia.spark.rapids.parquet
 
+import java.io.OutputStream
 import java.util.Locale
 
 import scala.collection.JavaConverters._
 
 import com.nvidia.spark.rapids.shims.parquet.GpuParquetUtilsShims
-import org.apache.parquet.hadoop.metadata.{BlockMetaData, ColumnChunkMetaData, ColumnPath}
+import org.apache.parquet.format.converter.ParquetMetadataConverter
+import org.apache.parquet.hadoop.metadata.{BlockMetaData, ColumnChunkMetaData, ColumnPath, FileMetaData, ParquetMetadata}
 import org.apache.parquet.schema.MessageType
 
 import org.apache.spark.internal.Logging
 
 object GpuParquetUtils extends Logging {
+  def writeFooter(
+      out: OutputStream,
+      fileMetadata: FileMetaData,
+      blocks: Seq[BlockMetaData]): Unit = {
+    val footer = new ParquetMetadata(fileMetadata, blocks.asJava)
+    val metadata = new ParquetMetadataConverter()
+      .toParquetMetadata(ParquetPartitionReader.PARQUET_VERSION, footer)
+    org.apache.parquet.format.Util.writeFileMetaData(metadata, out)
+  }
+
   /**
    * Trim block metadata to contain only the column chunks that occur in the specified schema.
    * The column chunks that are returned are preserved verbatim

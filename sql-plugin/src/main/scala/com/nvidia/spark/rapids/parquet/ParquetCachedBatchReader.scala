@@ -20,7 +20,7 @@ import scala.collection.mutable.ArrayBuffer
 
 import ai.rapids.cudf.{ParquetChunkedReader => CudfParquetChunkedReader, ParquetOptions, Table}
 import com.nvidia.spark.rapids.{GpuSemaphore, RetryableTableProducer}
-import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
+import com.nvidia.spark.rapids.Arm.closeOnExcept
 import com.nvidia.spark.rapids.RapidsPluginImplicits._
 import com.nvidia.spark.rapids.RmmRapidsRetryIterator.{withRestoreOnRetry, withRetryNoSplit}
 import com.nvidia.spark.rapids.parquet.ParquetCachedBatchFiles.{FileInfo, StagedFile}
@@ -56,35 +56,12 @@ private[rapids] object ParquetCachedBatchReader {
       next.estimatedDecodedBytes <= target - estimated
   }
 
-  /**
-   * Adapt the scan reader's checkpoint/replay mechanism without its schema evolution or
-   * filesystem-specific postprocessing. Encoded inputs remain owned until the producer closes.
-   */
+  /** Encoded inputs remain owned until the producer closes. */
   private[parquet] final class TableProducer(
-      createReader: () => ChunkedReader,
-      resources: Seq[AutoCloseable]) extends RetryableTableProducer {
-    private var activeReader: ChunkedReader = _
-    private var completedChunks = 0
-    private var checkpointedChunks = 0
-    private var closed = false
-
-    private def reader: ChunkedReader = {
-      require(!closed, "Cached Parquet reader is closed")
-      if (activeReader == null) {
-        val opened = createReader()
-        closeOnExcept(opened) { _ =>
-          var replayed = 0
-          while (replayed < completedChunks) {
-            require(opened.hasNext,
-              s"Unable to restore cached Parquet reader to chunk $completedChunks")
-            withResource(opened.next)(_ => ())
-            replayed += 1
-          }
-          activeReader = opened
-        }
-      }
-      activeReader
-    }
+      openReader: () => ChunkedReader,
+      resources: Seq[AutoCloseable]) extends ParquetChunkedTableProducer {
+    override protected def createReader(): ChunkedReader = openReader()
+    override protected def readerResources: Seq[AutoCloseable] = resources
 
     private def retry[T](body: => T): T = {
       checkpoint()
@@ -97,36 +74,15 @@ private[rapids] object ParquetCachedBatchReader {
     }
 
     override def hasNext: Boolean = closeOnExcept(this) { _ =>
-      retry { reader.hasNext }
+      retry { super.hasNext }
     }
 
     override def next: Table = closeOnExcept(this) { _ =>
       retry {
-        val current = reader
-        if (!current.hasNext) {
+        if (!getReader.hasNext) {
           throw new NoSuchElementException("Cached Parquet reader exhausted")
         }
-        val table = current.next
-        completedChunks += 1
-        table
-      }
-    }
-
-    override def checkpoint(): Unit = checkpointedChunks = completedChunks
-
-    override def restore(): Unit = {
-      completedChunks = checkpointedChunks
-      val previous = activeReader
-      activeReader = null
-      Option(previous).foreach(_.close())
-    }
-
-    override def close(): Unit = {
-      if (!closed) {
-        closed = true
-        val previous = activeReader
-        activeReader = null
-        (Option(previous).toSeq ++ resources).safeClose()
+        super.next
       }
     }
   }

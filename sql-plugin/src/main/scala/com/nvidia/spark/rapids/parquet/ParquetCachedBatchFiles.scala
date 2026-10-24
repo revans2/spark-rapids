@@ -15,7 +15,7 @@
  */
 package com.nvidia.spark.rapids.parquet
 
-import java.io.{ByteArrayOutputStream, EOFException, IOException}
+import java.io.{ByteArrayOutputStream, InputStream, IOException}
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 
@@ -31,7 +31,7 @@ import org.apache.parquet.bytes.BytesUtils
 import org.apache.parquet.format.converter.ParquetMetadataConverter
 import org.apache.parquet.hadoop.ParquetFileReader
 import org.apache.parquet.hadoop.metadata.{BlockMetaData, ColumnChunkMetaData, ParquetMetadata}
-import org.apache.parquet.io.{InputFile, SeekableInputStream}
+import org.apache.parquet.io.{DelegatingSeekableInputStream, InputFile, SeekableInputStream}
 import org.apache.parquet.schema.MessageType
 
 import org.apache.spark.sql.types.StructType
@@ -100,63 +100,36 @@ private[rapids] object ParquetCachedBatchFiles {
     }
   }
 
-  private def inputFile(source: EncodedSource): InputFile = new InputFile {
+  private[parquet] def inputFile(source: EncodedSource): InputFile = new InputFile {
     override def getLength: Long = source.length
-    override def newStream(): SeekableInputStream = new SeekableInputStream {
-      private var position = 0L
-      override def getPos: Long = position
-      override def seek(offset: Long): Unit = {
-        checkRange(offset, 0, source.length)
-        position = offset
-      }
-      override def read(): Int = {
-        val one = new Array[Byte](1)
-        if (read(one, 0, 1) < 0) -1 else one(0) & 0xff
-      }
-      override def read(bytes: Array[Byte], start: Int, count: Int): Int = {
-        checkRange(start, count, bytes.length)
-        if (count == 0) {
-          0
-        } else if (position == source.length) {
-          -1
-        } else {
-          val amount = math.min(count.toLong, source.length - position).toInt
-          source.readFully(position, bytes, start, amount)
-          position += amount
-          amount
+    override def newStream(): SeekableInputStream = {
+      var position = 0L
+      val input = new InputStream {
+        override def read(): Int = {
+          val one = new Array[Byte](1)
+          if (read(one, 0, 1) < 0) -1 else one(0) & 0xff
         }
-      }
-      override def readFully(bytes: Array[Byte]): Unit = readFully(bytes, 0, bytes.length)
-      override def readFully(bytes: Array[Byte], start: Int, count: Int): Unit = {
-        if (count > source.length - position) {
-          throw new EOFException("Truncated encoded Parquet source")
-        }
-        source.readFully(position, bytes, start, count)
-        position += count
-      }
-      override def read(destination: ByteBuffer): Int = {
-        if (!destination.hasRemaining) {
-          0
-        } else if (position == source.length) {
-          -1
-        } else {
-          val amount = math.min(destination.remaining.toLong, source.length - position).toInt
-          val scratch = new Array[Byte](math.min(8192, amount))
-          var remaining = amount
-          while (remaining > 0) {
-            val next = math.min(remaining, scratch.length)
-            readFully(scratch, 0, next)
-            destination.put(scratch, 0, next)
-            remaining -= next
+
+        override def read(bytes: Array[Byte], start: Int, count: Int): Int = {
+          checkRange(start, count, bytes.length)
+          if (count == 0) {
+            0
+          } else if (position == source.length) {
+            -1
+          } else {
+            val amount = math.min(count.toLong, source.length - position).toInt
+            source.readFully(position, bytes, start, amount)
+            position += amount
+            amount
           }
-          amount
         }
       }
-      override def readFully(destination: ByteBuffer): Unit = {
-        if (destination.remaining > source.length - position) {
-          throw new EOFException("Truncated encoded Parquet source")
+      new DelegatingSeekableInputStream(input) {
+        override def getPos: Long = position
+        override def seek(offset: Long): Unit = {
+          checkRange(offset, 0, source.length)
+          position = offset
         }
-        read(destination)
       }
     }
   }
@@ -184,10 +157,8 @@ private[rapids] object ParquetCachedBatchFiles {
   }
 
   private def footerBytes(metadata: ParquetMetadata, blocks: Seq[BlockMetaData]): Array[Byte] = {
-    val footer = new ParquetMetadata(metadata.getFileMetaData, blocks.asJava)
-    val converted = new ParquetMetadataConverter().toParquetMetadata(1, footer)
     val output = new ByteArrayOutputStream()
-    org.apache.parquet.format.Util.writeFileMetaData(converted, output)
+    GpuParquetUtils.writeFooter(output, metadata.getFileMetaData, blocks)
     output.toByteArray
   }
 

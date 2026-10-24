@@ -543,13 +543,9 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
         .includeColumn(selectedAttributes.map(_.name).asJavaCollection).build()
       val reader = new ParquetCachedBatchReader(records, cacheSchema, options,
         targetBytes, readerMemoryBytes)
-      new Iterator[ColumnarBatch] with AutoCloseable {
+      new GpuColumnarBatchIterator(true) {
         private var current: Option[GpuColumnarBatchIterator] = None
         private var closed = false
-
-        Option(TaskContext.get()).foreach { tc =>
-          onTaskCompletion(tc) { close() }
-        }
 
         private def closeCurrent(): Unit = {
           val previous = current
@@ -595,7 +591,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
           }
         }
 
-        override def close(): Unit = {
+        override def doClose(): Unit = {
           if (!closed) {
             closed = true
             val resources: Seq[AutoCloseable] = current.toSeq :+ reader

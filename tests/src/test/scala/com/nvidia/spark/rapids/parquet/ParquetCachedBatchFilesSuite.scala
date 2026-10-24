@@ -15,7 +15,7 @@
  */
 package com.nvidia.spark.rapids.parquet
 
-import java.io.ByteArrayOutputStream
+import java.io.{ByteArrayOutputStream, EOFException}
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -125,6 +125,36 @@ class ParquetCachedBatchFilesSuite extends AnyFunSuite {
     intercept[IllegalArgumentException] { source.readFully(0, destination, 4, 1) }
     assert(destination.sameElements(Array.fill[Byte](4)(0)))
     source.readFully(3, destination, 4, 0)
+  }
+
+  test("encoded streams support seeking, heap and direct reads, and exact EOF handling") {
+    val bytes = Array.tabulate[Byte](16385)(_.toByte)
+    val file = ParquetCachedBatchFiles.inputFile(ParquetCachedBatchFiles.fromBytes(bytes))
+    withResource(file.newStream()) { stream =>
+      val heap = ByteBuffer.allocate(bytes.length)
+      stream.readFully(heap)
+      assert(heap.array().sameElements(bytes))
+      assert(stream.getPos == bytes.length)
+      assert(stream.read() == -1)
+      assert(stream.read(new Array[Byte](0)) == 0)
+
+      stream.seek(1)
+      val direct = ByteBuffer.allocateDirect(bytes.length - 1)
+      stream.readFully(direct)
+      direct.flip()
+      val actual = new Array[Byte](direct.remaining())
+      direct.get(actual)
+      assert(actual.sameElements(bytes.drop(1)))
+      assert(stream.getPos == bytes.length)
+      assert(stream.read(ByteBuffer.allocateDirect(1)) == -1)
+
+      stream.seek(bytes.length - 1)
+      intercept[EOFException] { stream.readFully(new Array[Byte](2)) }
+      stream.seek(bytes.length - 1)
+      intercept[EOFException] { stream.readFully(ByteBuffer.allocateDirect(2)) }
+      intercept[IllegalArgumentException] { stream.seek(-1) }
+      intercept[IllegalArgumentException] { stream.seek(bytes.length + 1L) }
+    }
   }
 
   test("invalid magic and footer lengths are rejected") {

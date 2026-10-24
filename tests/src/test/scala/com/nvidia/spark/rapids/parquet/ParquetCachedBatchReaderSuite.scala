@@ -22,7 +22,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
 import ai.rapids.cudf.{ParquetOptions, Rmm, RmmAllocationMode, RmmEventHandler, Table}
-import com.nvidia.spark.rapids.Arm.withResource
+import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
 import com.nvidia.spark.rapids.RapidsConf
 import com.nvidia.spark.rapids.jni.{GpuRetryOOM, RmmSpark}
 import com.nvidia.spark.rapids.parquet.ParquetCachedBatchReader.TableProducer
@@ -240,6 +240,65 @@ class ParquetCachedBatchReaderSuite extends AnyFunSuite with BeforeAndAfterEach 
     assert(!ParquetCachedBatchReader.fits(Int.MaxValue, 0, 0, info, Long.MaxValue))
     assert(!ParquetCachedBatchReader.fits(1, 0, 0,
       info.copy(rows = Int.MaxValue), Long.MaxValue))
+  }
+
+  test("shared reader replay skips output postprocessing and closes readers before inputs") {
+    val decoded = ArrayBuffer.empty[Int]
+    val returned = ArrayBuffer.empty[Int]
+    val closes = ArrayBuffer.empty[String]
+    var opened = 0
+    val input = new AutoCloseable {
+      override def close(): Unit = closes += "input"
+    }
+    withResource(new ParquetChunkedTableProducer {
+      override protected def readerResources: Seq[AutoCloseable] = Seq(input)
+
+      override protected def createReader(): ChunkedReader = {
+        opened += 1
+        val readerId = opened
+        new ChunkedReader {
+          private var index = 0
+          override def hasNext: Boolean = index < 3
+          override def next: Table = {
+            val value = index
+            index += 1
+            new Table.TestBuilder().column(Array[java.lang.Long](value.toLong): _*).build()
+          }
+          override def close(): Unit = closes += s"reader-$readerId"
+        }
+      }
+
+      override protected def decodeNext(reader: ChunkedReader): Table = {
+        closeOnExcept(super.decodeNext(reader)) { table =>
+          withResource(table.getColumn(0).copyToHost())(host => decoded += host.getLong(0).toInt)
+          table
+        }
+      }
+
+      override protected def readNext(reader: ChunkedReader): Table = {
+        closeOnExcept(super.readNext(reader)) { table =>
+          withResource(table.getColumn(0).copyToHost())(host => returned += host.getLong(0).toInt)
+          table
+        }
+      }
+    }) { producer =>
+      assert(opened == 0)
+      withResource(producer.next)(_ => ())
+      producer.checkpoint()
+      withResource(producer.next)(_ => ())
+      producer.restore()
+      assert(closes.toVector == Vector("reader-1"))
+      assert(producer.hasNext)
+      withResource(producer.next)(_ => ())
+      withResource(producer.next)(_ => ())
+      assert(!producer.hasNext)
+      assert(decoded.toVector == Vector(0, 1, 0, 1, 2))
+      assert(returned.toVector == Vector(0, 1, 1, 2))
+      producer.close()
+      producer.close()
+      assert(closes.toVector == Vector("reader-1", "reader-2", "input"))
+      intercept[IllegalArgumentException](producer.hasNext)
+    }
   }
 
   test("retry after advancing native input replays only previously completed chunks") {

@@ -751,12 +751,12 @@ _pcbs_row_group_conf = copy_and_update(_pcbs_gpu_scan_conf,
 
 
 def _row_group_cache_input(spark, shape):
-    rows = 131073 if shape == 'rows' else 32769
+    rows = 131073 if shape == 'narrow' else 32769
     source = spark.range(0, rows, 1, 1)
     text = f.concat(f.lit('key-'), (f.col('id') % 7).cast('string'))
     # Unique binary values alone exceed the byte target without a small row-count cap.
     payload = f.rpad(f.concat(f.lit('binary-'), f.col('id').cast('string')), 128, 'x')
-    if shape == 'bytes':
+    if shape == 'wide':
         payload = f.rpad(payload, 512, 'x')
         text = f.rpad(f.col('id').cast('string'), 512, 'y')
     return source.select(
@@ -804,7 +804,7 @@ def _check_row_group_cache(spark, shape, storage_level, expected, partial=False)
         assert relation.cachedPlan().supportsColumnar(), 'expected the GPU columnar writer'
         if partial:
             assert len(cached.take(1)) == 1
-        assert cached.count() == (131073 if shape == 'rows' else 32769)
+        assert cached.count() == (131073 if shape == 'narrow' else 32769)
         assert relation.cacheBuilder().cachedColumnBuffers().count() > 1
         assert_equal(expected, _row_group_cache_reads(spark, cached, True))
         spark.conf.set('spark.rapids.sql.enabled', 'false')
@@ -818,13 +818,12 @@ def _check_row_group_cache(spark, shape, storage_level, expected, partial=False)
 @_requires_pcbs_enabled
 # The scan retains CPU pruning predicates as metadata; the actual filter must be GPU.
 @allow_non_gpu('ColumnarToRowExec', 'EqualTo', 'Remainder', 'LessThan')
-@pytest.mark.parametrize('shape', ['rows', 'bytes'])
-def test_cache_gpu_row_groups(shape):
+def test_cache_gpu_row_groups_wide():
     expected = with_cpu_session(
-        lambda spark: _row_group_cache_reads(spark, _row_group_cache_input(spark, shape), False),
+        lambda spark: _row_group_cache_reads(spark, _row_group_cache_input(spark, 'wide'), False),
         conf=_pcbs_row_group_conf)
     with_gpu_session(lambda spark: _check_row_group_cache(
-        spark, shape, StorageLevel.DISK_ONLY, expected), conf=_pcbs_row_group_conf)
+        spark, 'wide', StorageLevel.DISK_ONLY, expected), conf=_pcbs_row_group_conf)
 
 
 @_requires_pcbs_enabled
@@ -840,23 +839,23 @@ def test_cache_gpu_row_group_storage(compressed, storage_level):
     conf = copy_and_update(_pcbs_row_group_conf,
         {'spark.sql.inMemoryColumnarStorage.compressed': compressed})
     expected = with_cpu_session(
-        lambda spark: _row_group_cache_reads(spark, _row_group_cache_input(spark, 'rows'), False),
+        lambda spark: _row_group_cache_reads(spark, _row_group_cache_input(spark, 'narrow'), False),
         conf=conf)
     with_gpu_session(lambda spark: _check_row_group_cache(
-        spark, 'rows', storage_level, expected), conf=conf)
+        spark, 'narrow', storage_level, expected), conf=conf)
 
 
 @_requires_pcbs_enabled
 @allow_non_gpu('ColumnarToRowExec', 'CollectLimitExec', 'EqualTo', 'Remainder', 'LessThan')
 def test_cache_gpu_row_group_partial_unpersist():
     expected = with_cpu_session(
-        lambda spark: _row_group_cache_reads(spark, _row_group_cache_input(spark, 'rows'), False),
+        lambda spark: _row_group_cache_reads(spark, _row_group_cache_input(spark, 'narrow'), False),
         conf=_pcbs_row_group_conf)
 
     def check(spark):
-        _check_row_group_cache(spark, 'rows', StorageLevel.DISK_ONLY, expected, partial=True)
+        _check_row_group_cache(spark, 'narrow', StorageLevel.DISK_ONLY, expected, partial=True)
         # Recreate the same cache after blocking removal; no previous entry may be reused.
         spark.conf.set('spark.rapids.sql.enabled', 'true')
-        _check_row_group_cache(spark, 'rows', StorageLevel.DISK_ONLY, expected)
+        _check_row_group_cache(spark, 'narrow', StorageLevel.DISK_ONLY, expected)
 
     with_gpu_session(check, conf=_pcbs_row_group_conf)
