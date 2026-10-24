@@ -194,12 +194,85 @@ equality; no benchmark control or production runtime was changed by analysis.
 The resulting adjacent-view experiment is isolated at 8d14ea52cd in
 ../contiguous-view-worktree. It preserves stored records and payload bytes while
 merging only ordered physically contiguous extents within the same materialized
-parent. Its 3.5.5 build is active (parent 582845); no prototype build result,
-runtime correctness or performance improvement is claimed. Its future gate is
-55 Scala plus nine Java tests; main fa29f4d90c remains the selected 8 MiB policy
-with the separate 53-plus-nine gate. The prototype is not promoted to main or
-substituted into any reported timing/profile. Outer compression and final
-selected-source compatibility remain pending.
+parent. Its 3.5.5 build passed all 55 Scala and nine Java tests. Root independently
+replayed the reports and checked 3,110 frozen entries, 3,095 tracked regular
+files, all 36 implementation-family class bytes and 237 private class bytes.
+This is a verified isolated build, not all-version or final-source acceptance.
+Main fa29f4d90c retains the selected 8 MiB policy and its separate 53-plus-nine
+compatibility gate. The prototype is not promoted to main or substituted into
+the earlier timing/profile cohorts. Its three-case bracket is below; outer
+compression and final selected-source compatibility remain pending.
+
+## Adjacent-view prototype: matched TLC bracket
+
+The isolated prototype8d14 was measured between two fresh-JVM current-policy
+controls (d9ba), using the same full239,470,448-row TLC data, sixteen files and
+query. All three retain DISK_ONLY/48 GiB/local8, GPU target1 GiB/pool15 GiB/
+concurrency2, host40/pinned2 GiB, default reset100/unroll16/fraction0.6,
+innerSNAPPY/outerOFF. No stored-record size, format or data-volume control changes
+between these arms; adjacent-view coalescing changes internal host views only.
+
+All three cases PASS. Times are seconds; heap is observed occupancy in GiB and
+RSS is sampled GiB. Warmup is excluded from the three-read median.
+
+| Artifact / order | Storage | Fill s | Warmup s | Read1 s | Read2 s | Read3 s | Median s | Heap GiB | RSS GiB | Encoded payload bytes | Records |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Current byte8 d9ba / before | DISK_ONLY | 17.963 | 6.924 | 5.771 | 7.027 | 6.604 | 6.604 | 15.957 | 19.138 | 6,727,149,448 | 5,346 |
+| Adjacent-view8d14 | DISK_ONLY | 17.966 | 7.425 | 6.129 | 6.936 | 6.548 | 6.548 | 15.919 | 19.111 | 6,727,013,536 | 5,346 |
+| Current byte8 d9ba / after | DISK_ONLY | 17.867 | 7.103 | 5.965 | 7.256 | 6.369 | 6.369 | 15.964 | 19.065 | 6,727,054,205 | 5,346 |
+
+There is no clear gain: the prototype median lies between the before/after
+controls. One prototype JVM and two bracketing controls do not establish
+independent-run confidence or a causal result. Sampled physical read-byte deltas
+are zero in measured read intervals for all three cases; sampling gaps and
+unmeasured host/native work remain, and zero process IO is not file-residency
+proof. Small encoded-payload differences are retained rather than relabeled as
+exact byte identity. Occupancy is not live heap or minimum required memory.
+
+Root independently replayed all three original world verifiers with entire
+retained-result equality and the original four-hash/null/value/schema CPU
+oracles; initial and final real content checks cover frozen inputs/artifacts and
+raw evidence. Evidence: ../contiguous-view-screen/reverified001/summary.{json,csv,md}.
+Per-phase IO, block residency, semantic sizes, exact file lengths and sources
+remain in JSON; no old cohort or profiled timing is pooled here.
+
+The single optimized capture in
+../selected-world-profiling/contiguous-diagnostic001 is complete and analyzed
+READY FOR REVIEW. It uses the same verified8d14 artifact and fullTLC/DISK48
+controls. The table compares read3 with the earlier d9ba byte8 capture, not with
+the original unsplit PCBS baseline. API columns count exported cudaMemcpyAsync
+runtime events after the existing non-null-callchain exclusion.
+
+| Actual artifact | Pinned H2D event rows | H2D bytes | Summed transfer ns | cudaMemcpyAsync events | Summed API elapsed ns |
+|---|---:|---:|---:|---:|---:|
+| Current byte8 d9ba, PID580827 | 196,954 | 7,135,673,140 | 523,016,220 | 245,724 | 920,050,434 |
+| Adjacent-view8d14, PID593922 | 73,996 | 7,135,801,653 | 363,811,389 | 122,766 | 539,169,655 |
+
+The optimized trace contains fewer actual transfer and runtime-API event rows,
+rather than only fewer Java/native host-view objects. This does not equate
+transfer rows with DMA operations or assign each event to a view. Bytes are
+retained as measured, not forced equal; copyCount remains raw and unweighted.
+Transfer and API elapsed sums can overlap with each other and other work, and
+neither is wall time, utilization or on-core CPU time. The unprofiled bracket
+above still shows no clear wall-time gain; a count reduction alone does not
+establish that copies caused the regression or that the prototype is beneficial.
+
+Root executed the separate read-only analyzer after independent source review,
+checked exact process/sampled PID/source/result closure and reused the reviewed
+epoch/schema/phase queries. Root independently matched read3 raw SQL totals.
+Initial and final real content checks each verified 1,130,626,586 bytes.
+Receipt: ../selected-world-profiling/contiguous-analysis001.json, retaining
+exact units, raw copyCount fields, boundary/outside rows and proof hashes.
+Profiled wall times remain diagnostic-only and are not pooled into the bracket.
+
+The baseline JFR diagnostic completed with original verifier PASS and a readable
+recording at ../jfr-host-profile/case000-baseline. Attachment began about thirteen
+seconds into fill; missing fill history remains unknown. The patched diagnostic
+is active under runner596266. Event coverage and CPU/allocation interpretation
+remain pending; CPU stacks/context switches were disabled in the Nsight captures.
+The prototype remains isolated/unpromoted. Main fa29 and the reported original
+runtime remain unchanged; outer compression and final main-policy53-plus-nine
+compatibility remain pending.
 
 ## Returned GPU batch sizes
 

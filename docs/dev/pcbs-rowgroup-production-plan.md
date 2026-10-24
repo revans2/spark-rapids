@@ -97,11 +97,33 @@ from primary comparisons. These observations do not prove the cause of a slowdow
 The separate contiguous-view prototype at 8d14ea52cd is committed only in
 ../contiguous-view-worktree, not promoted to main fa29f4d90c or the measured runtime.
 It merges only physically adjacent ordered column extents within one parent,
-without payload copying or a stored-format change. Its bounded 3.5.5 build is
-active (parent 582845); no build/runtime acceptance or performance result is claimed.
-Future prototype gates require 55 Scala tests plus nine Java tests, separately
-from the main policy's 53 plus nine. Outer compression and final selected-source
-compatibility remain pending.
+without payload copying or a stored-format change. Its bounded 3.5.5 build passed all 55 Scala and nine Java tests; root independently
+replayed that evidence and checked 3,110 frozen entries, 3,095 tracked regular
+files, all 36 implementation-family classes and 237 private classes. The clean
+8d14 prototype remains isolated and unpromoted; this does not replace the main
+policy's separate 53-plus-nine final-source compatibility gates.
+
+The matched full-TLC DISK48 bracket is independently replayed READY FOR REVIEW:
+current byte8 d9ba / prototype8d14 / current byte8 d9ba read medians are
+6.604 / 6.548 / 6.369 s, with all three PASS. The prototype supplies no clear
+speedup relative to the two current-policy controls. Sampled physical read-byte
+deltas were zero in the measured read intervals, but this one prototype JVM is
+not independent-run confidence or causal proof. Evidence/table:
+../contiguous-view-screen/reverified001/summary.{json,csv,md}.
+The separately scheduled optimized capture is closed and analyzed READY FOR
+REVIEW at ../selected-world-profiling/contiguous-analysis001.json, using the same
+full-TLC/DISK48 controls and verified8d14 artifact. Read3 pinned Host-to-Device
+rows fell from d9ba's 196,954 to 73,996, with bytes 7,135,673,140 versus
+7,135,801,653; exported cudaMemcpyAsync runtime events fell from 245,724 to
+122,766. This is a measured event-count reduction, not a demonstrated wall-time
+gain. Root matched the raw SQL totals; initial and final analysis content checks
+each verified 1,130,626,586 bytes. Profiled times remain diagnostic-only.
+The baseline JFR diagnostic completed with original verifier PASS and a readable
+recording at ../jfr-host-profile/case000-baseline. Attachment began partway through
+fill, so that history is partial. The patched diagnostic is active under runner
+596266; CPU/allocation interpretation and full event-coverage checks remain pending. Outer
+compression and final selected-source compatibility remain pending, and main
+fa29's runtime is unchanged.
 The closed-screen rendering checker is independently reviewed; root read it,
 passed four pure tests and executed it successfully on report001. Exact JSON
 replay equality and every CSV field/Markdown cell/limit note passed.
@@ -124,7 +146,11 @@ Decoded-layout diagnostics, the closed 8/16/32 MiB screen and all six GH8 cases
 passed. Root selected byte8/default rows and committed that code policy in
 fa29f4d90c. The TLC profiling pair is closed/analyzed READY FOR REVIEW; outer
 compression and final selected-source correctness/compatibility remain gates.
-The isolated coalescing prototype build is active, with no result or main promotion.
+The isolated coalescing prototype passed its 55-plus-nine build and three-case
+TLC bracket replay; no clear timing gain or main promotion follows. Its separate
+diagnostic capture is closed/analyzed with fewer transfer/runtime events but no
+clear primary wall gain. Baseline JFR completed with a readable recording and
+partial fill coverage; patched JFR is active. No CPU conclusion is established.
 Earlier checkpoint paragraphs below retain historical failures and pending states;
 the completed repeat checkpoint and current byte-target section supersede them.
 
