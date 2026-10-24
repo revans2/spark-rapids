@@ -120,10 +120,12 @@ gain. Root matched the raw SQL totals; initial and final analysis content checks
 each verified 1,130,626,586 bytes. Profiled times remain diagnostic-only.
 The baseline JFR diagnostic completed with original verifier PASS and a readable
 recording at ../jfr-host-profile/case000-baseline. Attachment began partway through
-fill, so that history is partial. The patched diagnostic is active under runner
-596266; CPU/allocation interpretation and full event-coverage checks remain pending. Outer
-compression and final selected-source compatibility remain pending, and main
-fa29's runtime is unchanged.
+fill, so that history is partial. The patched diagnostic also completed with
+original verifier PASS, JVM exit zero and no remaining owned process. Its JFR recording is readable, starts before fill,
+and contains no DataLoss events; baseline fill remains partial. Both selected-event
+exports completed successfully. CPU/allocation interpretation and precise phase
+coverage remain pending. Outer compression and final selected-source compatibility
+remain pending, and main fa29's runtime is unchanged.
 The closed-screen rendering checker is independently reviewed; root read it,
 passed four pure tests and executed it successfully on report001. Exact JSON
 replay equality and every CSV field/Markdown cell/limit note passed.
@@ -149,8 +151,9 @@ compression and final selected-source correctness/compatibility remain gates.
 The isolated coalescing prototype passed its 55-plus-nine build and three-case
 TLC bracket replay; no clear timing gain or main promotion follows. Its separate
 diagnostic capture is closed/analyzed with fewer transfer/runtime events but no
-clear primary wall gain. Baseline JFR completed with a readable recording and
-partial fill coverage; patched JFR is active. No CPU conclusion is established.
+clear primary wall gain. Both JFR diagnostics completed with readable recordings
+and original verifier PASS. Baseline fill coverage is partial; patched attachment preceded fill.
+No CPU conclusion is established.
 Earlier checkpoint paragraphs below retain historical failures and pending states;
 the completed repeat checkpoint and current byte-target section supersede them.
 

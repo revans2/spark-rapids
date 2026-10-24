@@ -268,8 +268,11 @@ Profiled wall times remain diagnostic-only and are not pooled into the bracket.
 The baseline JFR diagnostic completed with original verifier PASS and a readable
 recording at ../jfr-host-profile/case000-baseline. Attachment began about thirteen
 seconds into fill; missing fill history remains unknown. The patched diagnostic
-is active under runner596266. Event coverage and CPU/allocation interpretation
-remain pending; CPU stacks/context switches were disabled in the Nsight captures.
+also completed with original verifier PASS and JVM exit zero, with no remaining
+owned processes. Its recording starts before fill. Both recordings have zero
+DataLoss events and successful selected-event exports, but precise phase coverage
+and CPU/allocation interpretation remain pending. CPU stacks/context switches were
+disabled in the Nsight captures.
 The prototype remains isolated/unpromoted. Main fa29 and the reported original
 runtime remain unchanged; outer compression and final main-policy53-plus-nine
 compatibility remain pending.
