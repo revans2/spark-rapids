@@ -8,7 +8,22 @@ REVIEW. The research real-data sweep is complete. The production implementation 
 committed; its separate measurements and supported-version checks remain gates
 for final review.
 
-Current checkpoint: the c385 production comparison is independently verified
+Current runtime checkpoint: the fixed 12-case byte-target screen remains the sole
+benchmark in ../byte-target-screen/matrix001. Its first two DISK_ONLY cases passed:
+old c385 settings filled in 151.324 s with median read 72.578 s; byte8 with the
+normal cuDF row cap filled in 149.122 s with median read 72.074 s. Both produced
+12,400 records. These are provisional single-JVM receipts, pending root replay of
+the closed matrix; they establish no clear timing difference. No selection has
+been made. The passive OS sampler missed the first fill and started partway
+through the first warmup; missing history will remain unknown.
+Root read the new final-only OS phase adapter and its original metric decoder,
+independently passed its four pure tests, and obtained independent source review.
+Actual analysis waits for 12 READY receipts, a closed sampler and idle locks.
+Workers are preparing only narrow, versioned final-source compatibility launchers
+while the benchmark runs. No compilation or other workload runs concurrently.
+All root and worker project operations remain MCP docker_exec only.
+
+Current implementation checkpoint: the c385 production comparison is independently verified
 (15 synthetic JVMs and 16 public-data cases). The byte-only 8 MiB candidate at
 d9ba8787f6 is committed separately. All three byte-only candidates passed full 53-Scala/9-Java verify and matched
 artifact audits in builds004. Root independently replayed all reports, checked
