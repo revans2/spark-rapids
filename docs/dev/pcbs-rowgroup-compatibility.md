@@ -79,8 +79,8 @@ prototype is excluded. Evidence is under the production evidence root
 | 350 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 237 actual target-private classes | READY FOR REVIEW |
 | 401 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 243 actual target-private classes | READY FOR REVIEW |
 | 413 / Scala 2.13 | Fresh normal fa29 verify after ordinary dependency refresh: 53 Scala and nine Java tests; root replayed reports, tracked source, fresh implementation bytes and all 243 actual target-private classes | READY FOR REVIEW |
-| 420 / Scala 2.13 | First attempt failed on cached BOM mirror403; ordinary refresh succeeded; fresh unchanged verify at `crossversion/selected-verify420-002` | RUNNING |
-| 39 OSS compile/package pairs | Prepared serial grouped owners; compile/package only, no runtime credit | Pending actual execution |
+| 420 / Scala 2.13 | Fresh normal fa29 verify after ordinary dependency refresh: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation bytes and all 243 actual target-private classes | READY FOR REVIEW |
+| 39 OSS compile/package pairs | Exact twenty-target Scala2.12 group running at `crossversion/selected-grouped212-001`; Scala2.13 nineteen-target group pending; compile/package only, no runtime credit | IN PROGRESS |
 | Three DBR pairs | Real vendor dependency-resolution/compile attempts and matching runtime coverage required; no OSS substitution | Not yet attempted |
 | 330 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |
 | 330 Kryo SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/registrator/origins and initial/final frozen/raw content | READY FOR REVIEW |

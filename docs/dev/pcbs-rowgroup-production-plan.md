@@ -85,9 +85,13 @@ the normal verify passed all 53 Scala and nine Java tests with no failures,
 skips, timeout, changed sources or remaining owned processes. Root independently
 replayed exact reports and source coverage and checked all 36 implementation
 classes and all 243 actual target-private classes against fresh packaged bytes.
-Spark4.2.0 is RUNNING under supervisor665799 at
-../crossversion/selected-verify420-002, retaining the unchanged clean fa29
-worktree and normal 53-plus-nine verify/1800-second deadline. No420 pass is claimed.
+Spark4.2.0 is also READY FOR REVIEW at
+../crossversion/selected-verify420-002-accepted.json: normal verify passed all
+53 Scala and nine Java tests without failures, skips, timeout, changed sources or
+remaining owned processes. Root independently replayed reports, source coverage
+and fresh implementation bytes, including all 243 actual target-private classes.
+All seven selected focused version gates are verified; this does not establish
+runtime coverage for every release pair or vendor target.
 The grouped compile/package acceptance helper is prepared and independently
 reviewed. Before its first run, the unreleased selected-group owner was minimally
 adapted to retain actual child return codes; acceptance rejects missing/nonzero
@@ -98,8 +102,10 @@ The selected-group command now includes `-nsu` alongside writable
 `secondaryCacheDir` in the same single `--option` value, matching the boundary
 owners without losing buildall's last-option semantics. Root independently read
 the exact delta and reran all twelve pure tests (0.022 s); independent review
-passed. No grouped build has executed. Both compile/package groups and the actual
-vendor attempts remain open.
+passed. The Scala2.12 group is now RUNNING under supervisor673257 at
+../crossversion/selected-grouped212-001, with the exact twenty release targets,
+normal serial buildall and a 10,800-second total deadline. No group pass is
+claimed. The Scala2.13 group and actual vendor attempts remain open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
