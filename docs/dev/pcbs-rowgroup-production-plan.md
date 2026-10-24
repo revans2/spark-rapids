@@ -20,6 +20,12 @@ ratios remain specific to the captured cache representation. Evidence:
 ../compression-queue/report001/summary.json and
 ../compression-queue/reverified001/result.json. Runtime policy remains fa29;
 the optional adjacent-view prototype is not promoted.
+The compression results now define observed heap precisely and retain the four
+GH LZ4/ZSTD phase sequences. Root read the sampler, GC parser, verifier and report
+code and independently matched all twenty phase observations; independent source
+review passed. Baseline maxima occur in read3, not fill, and also appear in direct
+heap samples. Occupancy is not a live set, leak proof or minimum required heap;
+../support-audit/compression-heap-measurement001.md records the limits.
 The final-source Spark 3.3.0 focused verify is READY FOR REVIEW: all 53 Scala
 and nine Java tests passed in the normal full reactor, with no failures, skips,
 timeout, source changes or surviving owned processes. Root independently

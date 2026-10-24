@@ -101,6 +101,26 @@ and [JSON](/data/pcbs-oom/pcbs-rowgroup-production/compression-queue/report001/s
 The JSON also retains per-phase IO windows, GC observations, storage checkpoints,
 record counts and exact source/artifact identities.
 
+Heap occupancy is sampled through `MemoryMXBean` every 20 ms during each action,
+including readings before and after it. The verifier supplements that peak with
+rounded whole-heap occupancy before collections that finish within the phase.
+The headline takes the maximum over fill, warmup and reads1–3; it does not sum
+memory-pool peaks or cover every instant of the JVM's lifetime. The high GH
+baseline peaks occur in read3 and are also present in direct heap samples:
+
+| GH arm/profile | Fill heap GiB | Warmup heap GiB | Read1 heap GiB | Read2 heap GiB | Read3 heap GiB |
+|---|---:|---:|---:|---:|---:|
+| Baseline LZ4 | 18.933 | 20.240 | 22.493 | 26.489 | 38.505 |
+| Byte8 LZ4 | 16.019 | 16.017 | 16.157 | 15.961 | 16.129 |
+| Baseline ZSTD | 19.850 | 28.905 | 33.161 | 40.780 | 43.734 |
+| Byte8 ZSTD | 16.093 | 16.330 | 16.518 | 16.651 | 16.490 |
+
+These locate observed pressure, rather than proving a leak or a required heap.
+Later actions can inherit garbage; samples can miss spikes and GC logs are
+rounded. Object ownership and surviving live data were not measured here.
+Measurement source and exact byte values:
+[heap measurement note](/data/pcbs-oom/pcbs-rowgroup-production/support-audit/compression-heap-measurement001.md).
+
 SNAPPY versus OFF reduced the observed read median by 21.35% for GH baseline,
 26.07% for GH patched, 10.64% for TLC baseline and 12.94% for TLC patched. Fill was
 6.64–7.84% lower across those four comparisons. Yet SNAPPY cache files were only
