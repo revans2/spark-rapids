@@ -190,10 +190,26 @@ The retained original verifier reports ERROR solely because SparkContext prefixe
 standard module/IPv6 compatibility options to spark.driver.extraJavaOptions.
 Root read the decisive stock SparkContext code; two independent raw audits prove
 the exact prefix, unchanged requested options and actual 48 GiB heap/GC flags.
-A separate strict verification sidecar is being prepared; do not overwrite the
-original case/result or claim its original verifier passed. The matched patched
-MEMORY_AND_DISK case is now running with the same original frozen runner. Evidence
-is under ../production-runs and ../support-audit/first-baseline-raw-audit.json.
+Root ran the independently reviewed strict verification sidecar successfully for
+both completed cases, preserving the original ERROR results and frozen runners.
+It reproduces the original checks, proves the exact known prefix and JVM arguments,
+and changes only one copied configuration field for classification; every metric
+is unchanged. Verified outcomes are baseline HEAP_OOM and patched PASS. Patched
+fill is 181.988 seconds, warmup 60.319 seconds, and measured reads are 45.764,
+47.327 and 40.242 seconds (median 45.764). Peak observed heap is 38.696 GiB versus
+45.248 GiB for the failed baseline. Actual patched layout is 12,400 records,
+7,428,469–8,323,781 bytes each, while retaining the 1 GiB GPU target.
+
+The [first production results](pcbs-rowgroup-production-results.md) are READY FOR
+REVIEW; an independent agent rechecked raw phase numbers, GC/sample peaks and all
+four sixteen-column sum/row oracles. Root also generated the explicit audited
+comparison canonical-first-pair001.json. This is one fresh JVM per arm, not a
+statistical speed estimate or minimum-heap result. Baseline has no successful
+read median; patched fill was about 11% slower in this pair. Remaining default
+DISK_ONLY baseline/patched cases are running serially in remaining-default002;
+repeats, public data and decoded-layout diagnostics remain pending. Evidence is
+under ../production-runs and ../support-audit/first-pair-*-audit.json. All workers
+remain MCP docker_exec only; benchmark jobs own the sole JVM/GPU/build slot.
 
 Existing build/buildall can compile/package the 39 OSS Scala/build pairs, grouped
 by Scala line, then assemble each multi-shim distribution. It hardcodes skipped
