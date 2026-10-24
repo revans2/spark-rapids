@@ -78,8 +78,8 @@ prototype is excluded. Evidence is under the production evidence root
 | 340 / Scala 2.12 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 237 actual target-private classes | READY FOR REVIEW |
 | 350 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 237 actual target-private classes | READY FOR REVIEW |
 | 401 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 243 actual target-private classes | READY FOR REVIEW |
-| 413 / Scala 2.13 | Fresh fa29 normal verify at `crossversion/selected-verify413-001` | RUNNING |
-| 420 / Scala 2.13 | Prepared clean fa29 worktree and exact 53-plus-nine focused boundary owner | Pending actual execution |
+| 413 / Scala 2.13 | First attempt failed dependency resolution before compilation; ordinary BOM refresh succeeded; fresh unchanged verify at `crossversion/selected-verify413-002` | RUNNING |
+| 420 / Scala 2.13 | First attempt failed on the same cached BOM mirror403; dependency refresh succeeded, fresh verification still required | Pending fresh verification |
 | 39 OSS compile/package pairs | Prepared serial grouped owners; compile/package only, no runtime credit | Pending actual execution |
 | Three DBR pairs | Real vendor dependency-resolution/compile attempts and matching runtime coverage required; no OSS substitution | Not yet attempted |
 | 330 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |

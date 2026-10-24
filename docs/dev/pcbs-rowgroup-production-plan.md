@@ -73,11 +73,23 @@ checks of 1,785,490,238 bytes each and 3,174 frozen entries. Proof:
 lanes passed their 36 case executions; no failures, errors, skips or remaining
 case JVM/GPU processes. They do not grant other-version or full-suite credit.
 The narrow selected-SQL acceptance helper reuses existing checks; root and
-independent review passed its three synthetic tests. Spark 4.1.3 / Scala 2.13 is
-now RUNNING alone under supervisor 656516 at ../crossversion/selected-verify413-001,
-using clean fa29 source and the normal exact 53-plus-nine focused verify with
-an owned 1800-second deadline. Spark420, both compile/package groups and the
-actual vendor attempts remain open.
+independent review passed its three synthetic tests. The first selected413 and
+420 attempts stopped before compilation on a cached mirror HTTP403 for the exact
+Jackson BOM2.21.2 POM. Both exit1/no timeout/changed source/residuals; failed outputs
+remain at ../crossversion/selected-verify413-001 and selected-verify420-001.
+Root's ordinary exact-coordinate forced refresh succeeded through the unchanged
+wrapper/settings: ../crossversion/resolver-jackson001/result.json. No dependency
+version, source, settings or repository metadata was edited by hand. Spark4.1.3
+is RUNNING again under supervisor657449 at ../crossversion/selected-verify413-002,
+using the same clean fa29 worktree with no target directories and unchanged
+53-plus-nine normal verify/1800-second deadline. No new413/420 pass is claimed.
+The grouped compile/package acceptance helper is prepared and independently
+reviewed. Before its first run, the unreleased selected-group owner was minimally
+adapted to retain actual child return codes; acceptance rejects missing/nonzero
+or Boolean codes. Root read the decisive paths and passed all twelve pure tests
+across the selected owner, acceptance and historical grouped-check modules.
+Historical owners, production source, commands and controls are unchanged.
+Both compile/package groups and the actual vendor attempts remain open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
