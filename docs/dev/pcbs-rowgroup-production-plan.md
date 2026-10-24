@@ -110,6 +110,22 @@ class and fresh module/distribution audits before accepting the artifact. Only
 byte16/32 subsequently compile. Original attempts remain unchanged. Recovery and
 remaining build acceptance are pending; no new benchmark result is claimed.
 
+The first v3 recovery attempt (builds003) stopped before output creation or
+Maven because its coverage guard treated Gitlink directories as missing files.
+Root independently enumerated all 9,285 tracked entries: the only three absent
+from the original file-only hash map are stage-0 mode-160000
+thirdparty/parquet-testing directories, one per worktree. No regular file is
+missing. V4 retains coverage for every tracked file and explicitly records those
+Gitlinks; missing files and unexpected non-files still fail. Root and independent
+review passed its five tests. Root launched builds004 (supervisor 539010), preserving
+003 evidence. Its byte8 strict test/JNI/private/module/distribution audit has now
+passed and its immutable artifact is recorded READY FOR REVIEW, explicitly reused
+from the successful original reactor. Byte16 is building next; byte32 and root's
+final three-artifact replay remain pending. All operations remain MCP docker_exec
+only, with one owned build/runtime at a time. The lesson from the two audit
+repairs is to test real dependency classifier and Gitlink metadata as well as
+synthetic happy paths before trusting admission checks.
+
 ## Historical implementation checkpoints
 
 The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,
