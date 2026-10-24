@@ -172,8 +172,38 @@ lanes remain required. Their vendor artifacts/runtimes are absent locally; no
 OSS substitute or all-target success is claimed. The audit is READY FOR REVIEW,
 while all-target validation remains IN PROGRESS.
 Four fresh Java/Kryo SQL lanes on 3.3.0 and 4.0.1 are now scheduled
-serially; matched production performance remains pending. All operations and
-worker handoffs remain MCP docker_exec only.
+serially. The first 330 Java run passed all nine tests but its audit rejected a
+128 MiB Spark launcher bootstrap beside the actual 4 GiB application. A versioned
+main-class-aware checker passed eight independent Python checks; the original
+negative result is retained and fresh lanes remain pending.
+
+Matched production measurement has started with unchanged original frozen
+runners, runtime and default controls. The first baseline MEMORY_AND_DISK case
+filled 96 GiB in 164.011 seconds, then failed read0 with Java heap OOM in
+ObjectInputStream.readArray through MemoryStore disk recaching (exit 52, no
+timeout). Actual baseline layout was 112 records: seven per 6 GiB partition,
+807,025,755–939,457,451 encoded bytes each. The 1 GiB configuration is a target,
+not a claim of exactly six encoded records per task. All sixteen partitions and
+805,306,368 rows were verified from raw markers. No successful read timing exists.
+
+The retained original verifier reports ERROR solely because SparkContext prefixes
+standard module/IPv6 compatibility options to spark.driver.extraJavaOptions.
+Root read the decisive stock SparkContext code; two independent raw audits prove
+the exact prefix, unchanged requested options and actual 48 GiB heap/GC flags.
+A separate strict verification sidecar is being prepared; do not overwrite the
+original case/result or claim its original verifier passed. The matched patched
+MEMORY_AND_DISK case is now running with the same original frozen runner. Evidence
+is under ../production-runs and ../support-audit/first-baseline-raw-audit.json.
+
+Existing build/buildall can compile/package the 39 OSS Scala/build pairs, grouped
+by Scala line, then assemble each multi-shim distribution. It hardcodes skipped
+tests and cannot replace runtime/boundary gates. It also permits packaging fallback
+to Maven artifacts: acceptance must prove every selected target was built from this
+patch, not merely present in a packaged jar. Three DBR lanes require actual vendor
+jar bundles through the existing install_deps.py workflow; no such bundles or DBR
+runtime are available here. No vendor-resolution failure or universal readiness
+is inferred from cache absence. All operations and worker handoffs remain MCP
+docker_exec only.
 
 ## Scope and compatibility
 
