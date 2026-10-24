@@ -49,16 +49,20 @@ root independently replayed reports, tracked source and fresh implementation
 classes, including all 243 classes from its actual target-private dependency:
 ../crossversion/selected-verify401-001-accepted.json. No failures, skips, timeout,
 source changes or owned residuals occurred. Its private-class count is not the
-237-class count in the earlier accepted dependencies. Six fresh fa29 boundary/group worktrees and three vendor
-worktrees are prepared; preparation is not compilation or runtime evidence.
-The selected-source Spark330 Java SQL lane is now RUNNING alone under supervisor
-649397 at ../crossversion/selected-sql330-java001, using its independently accepted
-fa29 artifacts, unchanged nine generated-data cases and actual 4 GiB application
-heap checks. These four SQL lanes run before the remaining longer compile gates;
-acceptance criteria and dependencies are unchanged. A narrow selected-SQL
-acceptance helper reuses the existing nine-case, heap, class-origin, runtime-audit
-and frozen-content checks; root and independent review passed its three synthetic
-tests. Actual selected-SQL replay remains open; no SQL success is claimed yet.
+237-class count in the earlier accepted dependencies. Six fresh fa29 boundary/group
+worktrees and three vendor worktrees are prepared; preparation is not compilation
+or runtime evidence. The selected-source Spark330 Java SQL lane is READY FOR
+REVIEW: nine distinct cases passed with no failures, errors or skips at actual
+4 GiB application heap. Root replayed JUnit groups, runtime/serializer/class
+origins and heap checks, and checked all frozen and raw evidence initially and
+finally: 1,749,926,385 content bytes each, 3,174 frozen entries, no remaining JVMs
+or GPU processes. Proof: ../crossversion/selected-sql330-java001-accepted.json.
+Spark330 Kryo is now RUNNING alone under supervisor 651054 at
+../crossversion/selected-sql330-kryo001, using the same accepted fa29 artifacts and
+unchanged nine cases. These four SQL lanes run before the remaining longer
+compile gates; acceptance criteria and dependencies are unchanged. The narrow
+selected-SQL acceptance helper reuses existing checks; root and independent
+review passed its three synthetic tests. Remaining three SQL lanes are open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
