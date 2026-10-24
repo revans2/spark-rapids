@@ -135,10 +135,18 @@ worktrees: clean detached new commit, no target directories; the failed fa29
 worktree and RAT report remain. Receipts:
 ../support-audit/prepare-license-source-worktrees001.json and
 ../support-audit/root-check-license-worktrees001.json.
-The fresh Scala2.12 retry is RUNNING under supervisor678251 at
-../crossversion/selected-grouped212-002, exact twenty targets, unchanged normal
-serial buildall and 10,800-second total deadline. No group pass is claimed;
-Scala2.13 and actual vendor attempts remain open.
+The fresh Scala2.12 retry is READY FOR REVIEW:
+../crossversion/selected-grouped212-002-accepted.json. All twenty target sections
+and the combined distribution succeeded in 2,559.127 seconds, with actual child
+exit0, no termination actions, changed sources or remaining owned processes.
+Root executed the independent acceptance helper: exact retained target proofs,
+ordered commands, every actual implementation-family raw/module/dist class,
+tracked-source coverage and initial/final content checks of 1,617,647,200 bytes.
+This is COMPILE_PACKAGE_ONLY with runtime_tests_passed=null; no extra unit,
+SQL, runtime or target-private provenance credit is inferred.
+The full nineteen-target Scala2.13 group is RUNNING under supervisor727454 at
+../crossversion/selected-grouped213-001, source8ab82c90a6, unchanged normal serial
+buildall and 10,800-second total deadline. Actual vendor attempts remain open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
