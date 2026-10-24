@@ -8,6 +8,12 @@ matrix result is claimed. No benchmark, build or heavy profile analysis overlaps
 MCP docker_exec remains mandatory for root and workers. JFR interpretation and
 final supported-version gates remain open; the optional adjacent-view prototype
 stays isolated because its bracket did not establish a wall-time improvement.
+Root rechecked the full committed d9ba-to-fa29 diff outside docs: it is empty,
+including source, tests, integration fixtures and build contracts. Receipt:
+../support-audit/final-byte8-source-equivalence001.json. The accepted d9ba
+3.5.5 build53-plus-nine and Java/Kryo SQL evidence can therefore cover unchanged
+final-source behavior; artifact identities remain d9ba. Other version gates
+still require their own actual execution.
 
 The user authorized finishing the real-data sweep, then a
 reviewable production patch with tests, performance checks and independent agent
