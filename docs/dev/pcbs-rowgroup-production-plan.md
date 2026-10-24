@@ -10,10 +10,11 @@ for final review.
 
 Current checkpoint: the c385 production comparison is independently verified
 (15 synthetic JVMs and 16 public-data cases). The byte-only 8 MiB candidate at
-d9ba8787f6 is committed separately and its Maven verify has passed 53 Scala plus
-nine Java tests; post-build classifier auditing is being corrected before artifact
-acceptance. Decoded-layout diagnostics passed; 8/16/32 MiB screening and final
-selected-source compatibility remain gates.
+d9ba8787f6 is committed separately. The byte8 and byte16 candidate builds have
+passed full 53-Scala/9-Java verify and matched artifact audits in builds004;
+byte32 is building. Root's final independent three-artifact replay is pending.
+Decoded-layout diagnostics passed; 8/16/32 MiB screening and final selected-source
+compatibility remain gates.
 Earlier checkpoint paragraphs below retain historical failures and pending states;
 the completed repeat checkpoint and current byte-target section supersede them.
 
@@ -120,8 +121,9 @@ Gitlinks; missing files and unexpected non-files still fail. Root and independen
 review passed its five tests. Root launched builds004 (supervisor 539010), preserving
 003 evidence. Its byte8 strict test/JNI/private/module/distribution audit has now
 passed and its immutable artifact is recorded READY FOR REVIEW, explicitly reused
-from the successful original reactor. Byte16 is building next; byte32 and root's
-final three-artifact replay remain pending. All operations remain MCP docker_exec
+from the successful original reactor. Byte16 subsequently passed its fresh full verify (6m45s), all 53 Scala and nine
+Java tests without failure/skip, and the same strict artifact audit. Byte32 is now
+building; root's final three-artifact replay remains pending. All operations remain MCP docker_exec
 only, with one owned build/runtime at a time. The lesson from the two audit
 repairs is to test real dependency classifier and Gitlink metadata as well as
 synthetic happy paths before trusting admission checks.
