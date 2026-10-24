@@ -15,6 +15,26 @@ d9ba8787f6 is committed separately but unbuilt; decoded-layout diagnostics,
 Earlier checkpoint paragraphs below retain historical failures and pending states;
 the completed repeat checkpoint and current byte-target section supersede them.
 
+## Current instrumentation and candidate gates
+
+All operations remain MCP docker_exec only. The full canonical decoded-layout
+pair is running alone, using the frozen c385 implementation and original baseline.
+The baseline diagnostic passed strict version-2 validation: 112 returned GPU
+batches across 16 partitions, 805,306,368 rows and 16 columns; represented returned
+buffers range from 819,467,520 to 953,942,144 bytes. Its actual plan contains only
+the raw scan, with no full-row coalescer. These are represented buffer sizes,
+not allocation peaks or timing measurements. The patched diagnostic is pending.
+Evidence: ../layout-queue/pair001. Root independent replay remains pending.
+
+The new byte8 Java/Kryo SQL owner is prepared in ../byte-target-sql, independently
+reviewed, and root independently passed its four small acceptance tests. It requires
+actual three-candidate 53-Scala/9-Java build manifests, the clean committed byte8
+source, exactly nine non-skipped cases per lane, observed 4 GiB SparkSubmit heap,
+actual serializer/registrator and exact full-path plugin class origins. Review
+caught and corrected a filename-only origin check before execution. No candidate
+build or SQL runtime result is claimed yet. Next runtime work remains the reviewed
+three-build owner after the layout pair completes and root confirms quiescence.
+
 ## Historical implementation checkpoints
 
 The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,
