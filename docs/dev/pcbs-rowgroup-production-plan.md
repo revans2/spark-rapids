@@ -43,14 +43,22 @@ is also READY FOR REVIEW: normal full verify passed 53 Scala and nine Java tests
 and root independently replayed reports, source and fresh packaged classes,
 including all 237 classes from its actual target-private dependency:
 ../crossversion/selected-verify350-001-accepted.json. No skips, failures, timeout,
-source changes or owned residuals occurred. Spark 4.0.1 / Scala 2.13 is RUNNING
-alone under supervisor 640961 at ../crossversion/selected-verify401-001 on clean
-explicit fa29 source, using the same exact 53-plus-nine normal verify and owned
-1800-second deadline. Six fresh fa29 boundary/group worktrees and three vendor
+source changes or owned residuals occurred. Spark 4.0.1 / Scala 2.13 is also
+READY FOR REVIEW: its normal verify passed all 53 Scala and nine Java tests;
+root independently replayed reports, tracked source and fresh implementation
+classes, including all 243 classes from its actual target-private dependency:
+../crossversion/selected-verify401-001-accepted.json. No failures, skips, timeout,
+source changes or owned residuals occurred. Its private-class count is not the
+237-class count in the earlier accepted dependencies. Six fresh fa29 boundary/group worktrees and three vendor
 worktrees are prepared; preparation is not compilation or runtime evidence.
-A narrow selected-SQL acceptance helper reuses the existing nine-case, heap,
-class-origin, runtime-audit and frozen-content checks; root and independent
-review passed its three synthetic tests. Actual SQL replay remains unrun.
+The selected-source Spark330 Java SQL lane is now RUNNING alone under supervisor
+649397 at ../crossversion/selected-sql330-java001, using its independently accepted
+fa29 artifacts, unchanged nine generated-data cases and actual 4 GiB application
+heap checks. These four SQL lanes run before the remaining longer compile gates;
+acceptance criteria and dependencies are unchanged. A narrow selected-SQL
+acceptance helper reuses the existing nine-case, heap, class-origin, runtime-audit
+and frozen-content checks; root and independent review passed its three synthetic
+tests. Actual selected-SQL replay remains open; no SQL success is claimed yet.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first

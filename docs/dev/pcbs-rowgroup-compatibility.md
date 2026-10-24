@@ -77,11 +77,11 @@ prototype is excluded. Evidence is under the production evidence root
 | 355 / Scala 2.12 | Independently accepted d9ba full 53-plus-nine build and Java/Kryo SQL lanes, nine cases each at 4 GiB; explicit non-doc source equivalence to fa29 | READY FOR REVIEW for these gates |
 | 340 / Scala 2.12 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 237 actual target-private classes | READY FOR REVIEW |
 | 350 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 237 actual target-private classes | READY FOR REVIEW |
-| 401 / Scala 2.13 | Fresh fa29 normal verify at `crossversion/selected-verify401-001` | RUNNING |
+| 401 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 243 actual target-private classes | READY FOR REVIEW |
 | 413 / Scala 2.13; 420 / Scala 2.13 | Prepared clean fa29 worktrees and exact 53-plus-nine focused boundary owners | Pending actual execution |
 | 39 OSS compile/package pairs | Prepared serial grouped owners; compile/package only, no runtime credit | Pending actual execution |
 | Three DBR pairs | Real vendor dependency-resolution/compile attempts and matching runtime coverage required; no OSS substitution | Not yet attempted |
-| 330 / 401 Java and Kryo SQL | Four prepared selected-source nine-case lanes | Pending actual execution |
+| 330 / 401 Java and Kryo SQL | Spark330 Java running at `crossversion/selected-sql330-java001`; the other three selected-source nine-case lanes remain pending | IN PROGRESS; no selected SQL success yet |
 
 The selected330 proof is `crossversion/selected-verify330-001-accepted.json`:
 3,094 tracked regular files plus the explicit Gitlink, exact retained test-report
