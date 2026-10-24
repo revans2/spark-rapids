@@ -1,11 +1,94 @@
 # PCBS row-group production measurements
 
-Status: IN PROGRESS. All fifteen synthetic JVM runs and all sixteen production
-public-data cases are independently verified and READY FOR REVIEW. The decoded
-batch-layout diagnostic pair is also verified; the new byte-only target sweep
-remains pending. These
-measurements use the production logical-buffer reader, separately from the older
-research multi-file prototype.
+Status: IN PROGRESS. All fifteen repeated synthetic JVM runs, sixteen production
+public-data cases and the separate twelve-case byte-target screen are independently
+verified and READY FOR REVIEW. The decoded batch-layout diagnostic pair is also
+verified. Target selection and final selected-source compatibility remain open.
+These measurements use the production logical-buffer reader, separately from the
+older research multi-file prototype.
+
+## Verified byte-only target screen
+
+All twelve cases PASS with no failed Spark tasks. The eight canonical cases use
+the same 96 GiB of semantic values (805,306,368 rows, sixteen columns and sixteen
+partitions); the four TLC cases retain all 239,470,448 rows and sixteen immutable
+input files, totaling 33,401,767,650 semantic value bytes. Every case uses a
+48 GiB heap and the unchanged query/resource controls: local eight slots, GPU
+target 1 GiB, managed pool 15 GiB, concurrent GPU tasks two, managed host 40 GiB,
+pinned pool 2 GiB, memory fraction 0.6 and Java reset100/unroll16. Inner Parquet
+compression is SNAPPY and outer Spark RDD compression is disabled.
+
+The old control is the frozen c385 patch with an 8 MiB uncompressed-byte target
+and a 65,536-row override; it is not the original unsplit PCBS baseline. The new
+byte8/16/32 candidates retain cuDF's default 1,000,000-row cap. Their byte targets
+are soft uncompressed row-group targets, not compressed record sizes or GPU
+allocation limits. Exact source identities are c385525a51 (old control),
+d9ba8787f6 (byte8), cebb9206d5 (byte16) and abec8b6da5 (byte32).
+
+One fresh JVM per row; warmup is separate and the median uses the three listed
+within-JVM reads. Times are seconds and heap is observed phase occupancy in GiB,
+including garbage, not a live set or minimum requirement. Payload/value is
+encoded Parquet-array bytes divided by semantic value bytes.
+
+| Workload | Storage | Arm | Fill s | Warmup s | Read1 s | Read2 s | Read3 s | Median s | Heap GiB | Records | Payload/value |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Canonical | DISK_ONLY | old8/65k | 151.324 | 82.475 | 72.578 | 72.285 | 72.612 | 72.578 | 16.722 | 12,400 | 1.000454 |
+| Canonical | DISK_ONLY | byte8/default rows | 149.122 | 81.608 | 72.074 | 71.345 | 72.135 | 72.074 | 16.187 | 12,400 | 1.000454 |
+| Canonical | DISK_ONLY | byte16/default rows | 156.266 | 80.002 | 71.460 | 71.582 | 71.332 | 71.460 | 20.125 | 6,256 | 1.000320 |
+| Canonical | DISK_ONLY | byte32/default rows | 154.756 | 83.946 | 65.727 | 50.624 | 50.362 | 50.624 | 39.504 | 3,184 | 1.000251 |
+| Canonical | MEMORY_AND_DISK | old8/65k | 148.849 | 49.633 | 38.428 | 39.171 | 38.033 | 38.428 | 40.988 | 12,400 | 1.000454 |
+| Canonical | MEMORY_AND_DISK | byte8/default rows | 161.659 | 41.779 | 38.043 | 39.793 | 38.262 | 38.262 | 40.106 | 12,400 | 1.000454 |
+| Canonical | MEMORY_AND_DISK | byte16/default rows | 143.309 | 54.847 | 39.228 | 39.571 | 41.553 | 39.571 | 39.213 | 6,256 | 1.000320 |
+| Canonical | MEMORY_AND_DISK | byte32/default rows | 164.830 | 41.463 | 41.463 | 38.679 | 40.973 | 40.973 | 43.610 | 3,184 | 1.000251 |
+| TLC | DISK_ONLY | old8/65k | 18.320 | 7.637 | 5.850 | 6.663 | 5.892 | 5.892 | 15.903 | 5,346 | 0.201396 |
+| TLC | DISK_ONLY | byte8/default rows | 18.091 | 7.808 | 5.686 | 6.673 | 6.630 | 6.630 | 15.947 | 5,346 | 0.201399 |
+| TLC | DISK_ONLY | byte16/default rows | 16.985 | 6.612 | 5.633 | 5.726 | 6.100 | 5.726 | 15.859 | 2,561 | 0.190333 |
+| TLC | DISK_ONLY | byte32/default rows | 16.993 | 6.269 | 5.543 | 5.432 | 5.558 | 5.543 | 15.640 | 1,244 | 0.185474 |
+
+The canonical old8 and byte8 arms have identical encoded payload totals and record
+counts in this screen. Byte16/32 reduce record count, but the byte32 DISK timing
+cannot isolate a target-size benefit: its measured physical read samples are
+69,986,586,624 bytes, zero and zero, versus roughly 100 GB on each measured read
+in the preceding three DISK cases. Those are sampled process IO intervals, not
+per-file residency or complete physical IO attribution. Most mixed-storage
+measured reads also sampled zero physical read bytes; byte32's first sampled
+about 1.62 GB. The closed system/cgroup sampler shows observations over these
+intervals, not a causal explanation or equivalent page-cache state. It missed
+the first fill and began partway through its warmup.
+
+TLC byte16/32 have fewer records and smaller encoded payload ratios than byte8.
+The inner codec stays SNAPPY, but row-group layout can change dictionary/page
+encoding and compression. These runs combine that layout change with storage
+and read overhead; they do not isolate Java serialization or prove that fewer
+records alone improve performance. Actual whole Java-cache file lengths, where
+all sixteen positive block files were captured, are separate from these payload
+ratios. Canonical RDDStorageInfo memory/disk values remain estimates, not physical
+file lengths or a known RAM-resident payload subset.
+
+No winner is selected. A single JVM per cell does not provide independent-run
+confidence, and physical IO/order/system history remain confounds. The first
+GH8GiB follow-up case, byte8 DISK, passed its original verifier with empty issues,
+JVM exit0, complete reads and no failed tasks: fill 43.331 s, measured-read median
+15.296 s and observed heap peak 3,223,322,624 bytes. Root checked the raw result;
+final-six independent replay and the remaining five cases are pending. This
+initial receipt is separate from the verified twelve-case table. Heavy downstream
+GPU work and native off-heap storage
+are not requirements of this screen. No Spark-core change, Spark OFF_HEAP setting,
+memory-fraction tuning or public configuration was added.
+
+Evidence: ../byte-target-screen/report001/summary.{json,csv,md} retains full
+precision, sampled RSS/heap, record ranges, exact payloads and storage estimates.
+Root independently replayed all original canonical/world verifiers and the exact
+approved canonical Java-options sidecars, requiring identical complete metrics
+and row/sum or four-hash/null/value/schema CPU oracles. Initial and final content
+checks each covered 114,309,769,065 bytes, including 32 actual input files and
+144 raw-evidence files: ../byte-target-screen/reverified001/result.json.
+Original canonical prefix-only ERROR envelopes remain unchanged; accepted PASS
+classification comes from the strict separate correction, not a rerun or changed
+metrics. ../byte-target-screen/render-check001.json confirms all twelve rows,
+all 28 CSV fields and all 15 Markdown columns against that replay.
+Final OS analysis: ../support-audit/root-byte-screen-os001.json.
+These verified measurements are READY FOR REVIEW, not final target acceptance.
 
 ## Returned GPU batch sizes
 
@@ -271,8 +354,10 @@ run-to-run confidence intervals.
 
 ## Evidence and verification
 
-Production sources are the implementation in commit c385525a51; subsequent
-integration-test and documentation commits do not change that implementation.
+The earlier matched, repeated synthetic and sixteen-case public-data cohorts use
+the implementation in commit c385525a51; subsequent integration-test and
+documentation commits do not change that implementation. The separate byte-target
+screen uses the four source identities listed in its section above.
 Baseline source is 60c28e44f0. Both use the same frozen Spark 3.5.5, JNI/private
 runtime and benchmark harness. Spark 3.5.5 identifies this measurement runtime;
 the patch changes RAPIDS only and must preserve all supported Spark contracts.

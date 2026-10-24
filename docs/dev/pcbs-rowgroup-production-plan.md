@@ -8,37 +8,43 @@ REVIEW. The research real-data sweep is complete. The production implementation 
 committed; its separate measurements and supported-version checks remain gates
 for final review.
 
-Current runtime checkpoint: the fixed 12-case byte-target screen remains the sole
-benchmark in ../byte-target-screen/matrix001. Its first two DISK_ONLY cases passed:
-old c385 settings filled in 151.324 s with median read 72.578 s; byte8 with the
-normal cuDF row cap filled in 149.122 s with median read 72.074 s. Both produced
-12,400 records. These are provisional single-JVM receipts, pending root replay of
-the closed matrix; they establish no clear timing difference. No selection has
-been made. The 16 MiB DISK case also passed: fill 156.266 s, median read
-71.460 s, observed phase heap peak about 20.1 GiB and 6,256 records. The 32 MiB
-DISK case passed: fill 154.756 s, median read 50.624 s, observed peak about
-39.5 GiB and 3,184 records. Its later two reads recorded zero physical read
-bytes, versus approximately 100 GB per read in earlier cases. That timing drop
-is confounded by changed physical I/O/page-cache conditions; it is not evidence
-of a clean target-size speedup. These remain worker receipts awaiting root's
-closed-matrix replay. All eight canonical cases have now passed the queue checks.
-For memory-and-disk, byte8 filled in 161.659 s/read median 38.262 s/observed peak
-43,063,262,704 B; byte16 143.309 s/39.571 s/42,104,520,704 B; byte32
-164.830 s/40.973 s/46,826,258,432 B. The old control was 148.849 s/38.428 s/
-44,010,831,872 B. Most measured mixed-storage reads had zero physical read bytes;
-byte32's first measured read recorded about 1.62 GB. These are single-JVM
-receipts, not a confidence interval or minimum-heap result. Full TLC cases remain.
-After the closed screen is independently verified, a bounded six-case full-GH
-pressure check is planned: byte8/16/32 at the previously requested 8 GiB heap,
-each DISK_ONLY and MEMORY_AND_DISK. Data, partitions, threads, GPU/host controls
-and defaults remain fixed; only the heap dimension changes. Root will use the
-existing unchanged world runner, one case at a time, and preserve genuine OOMs.
-No new launcher framework or production change is required.
-The passive OS sampler missed the first fill and started partway through the
-first warmup; missing history will remain unknown.
-Root read the new final-only OS phase adapter and its original metric decoder,
-independently passed its four pure tests, and obtained independent source review.
-Actual analysis waits for 12 READY receipts, a closed sampler and idle locks.
+Current runtime checkpoint: the fixed 12-case byte-target screen is complete and
+READY FOR REVIEW: all twelve PASS, with no failed Spark tasks. Root replayed all
+original verifiers and the exact approved canonical Java-options sidecars,
+requiring entire retained-result equality, CPU-oracle checks and initial/final
+content verification. Evidence: ../byte-target-screen/reverified001/result.json.
+Root also checked all 28 CSV fields and 15 Markdown columns against the complete
+replayed report: ../byte-target-screen/render-check001.json. The full table is in
+[production results](pcbs-rowgroup-production-results.md#verified-byte-only-target-screen).
+This supersedes the provisional case receipts below; no target is selected.
+
+The eight canonical cases keep 96 GiB of semantic values and the four TLC cases
+keep all 239,470,448 rows. All use 48 GiB heap, ordinary Java serialization and
+default reset100/unroll16. Canonical stored records fall from 12,400 at byte8 to
+6,256 at byte16 and 3,184 at byte32. The byte32 DISK median of 50.624 s is
+confounded: its last two reads sampled zero physical read bytes while earlier
+DISK cases sampled about 100 GB per read. Its observed heap peak is 39.504 GiB,
+versus 16.187 GiB for byte8. TLC byte16/32 produce fewer records and smaller
+encoded payloads than byte8; changes in encoding/compression layout accompany
+any read-time differences. One fresh JVM per cell and three within-JVM reads
+provide screening evidence, not independent-run confidence or a universal winner.
+
+The final OS analysis is READY FOR REVIEW at
+../support-audit/root-byte-screen-os001.json. Its sampler is closed; system/cgroup
+counters and per-phase JVM physical IO remain observations, not file-residency or
+causal proof. It missed the first fill and started partway through the first
+warmup, so that history remains unknown.
+
+Root has started the bounded six-case full-GH pressure follow-up: byte8/16/32 at
+8 GiB heap, each DISK_ONLY and MEMORY_AND_DISK. The first byte8 DISK case passed
+its original verifier (issues empty, JVM exit0, complete, no failed tasks): fill
+43.331 s, measured-read median 15.296 s and observed heap peak 3,223,322,624 bytes.
+Root read the raw result; final-six independent replay remains pending, as do
+the remaining five cases. Data, sixteen input partitions, threads, GPU/host
+controls and defaults remain fixed. Root uses the
+unchanged world runner one case at a time and will preserve genuine OOMs. No new
+launcher framework, Spark-core change, Spark OFF_HEAP setting or production change
+is required; native off-heap storage remains optional.
 The versioned final-source boundary/grouped and vendor/SQL launchers are now
 source-reviewed by root and independent agents; root independently passed all
 18 new pure tests. Preparation is READY FOR REVIEW in ../crossversion/
@@ -67,9 +73,9 @@ independently passed all six pure tests, and obtained independent source review.
 Preparation is READY FOR REVIEW; actual plan creation/admission/capture waits
 for the closed verified screen and explicit root target selection.
 No optimized source or profiler run has been introduced.
-The closed-screen rendering checker is prepared and independently reviewed; root
-read it and passed four pure tests. It requires exact JSON equality with the
-independent raw replay and checks every CSV field and Markdown cell/limit note.
+The closed-screen rendering checker is independently reviewed; root read it,
+passed four pure tests and executed it successfully on report001. Exact JSON
+replay equality and every CSV field/Markdown cell/limit note passed.
 The selected-boundary acceptance helper is also prepared and reviewed; root
 read it and passed six pure tests. Its private dependency proof uses each target's
 actual Scala/Spark-classified dependency, with all embedded class bytes checked.
@@ -85,8 +91,8 @@ artifact audits in builds004. Root independently replayed all reports, checked
 9,304 frozen source entries, actual JNI dependencies, all 237 private classes and
 all 36 implementation-family classes against fresh module/distribution bytes,
 and confirmed final quiescence. These candidate artifacts are READY FOR REVIEW.
-Decoded-layout diagnostics passed; 8/16/32 MiB screening and final selected-source
-compatibility remain gates.
+Decoded-layout diagnostics and the closed 8/16/32 MiB screen passed. Target
+selection, the GH8 follow-up and final selected-source compatibility remain gates.
 Earlier checkpoint paragraphs below retain historical failures and pending states;
 the completed repeat checkpoint and current byte-target section supersede them.
 
