@@ -1,37 +1,48 @@
 # Parquet cache production tracker
 
-Status: READY FOR REVIEW. Only the architect marks work DONE.
+Status: IN PROGRESS. Only the architect marks work DONE.
+All project operations, worker handoffs and checkpoints use MCP docker_exec.
+Work in the main checkout on pcbs-rowgroup-production; no new worktrees.
 
-Existing PCBS, Spark caching, StorageLevel and Parquet scan behavior is RELEASED
-(present on main and in deployed artifacts). Preserve CPU/GPU reads, supported
-types, projection/reordering, row counts, compression and persistence. Keep
-ParquetCachedBatch(numRows, Array[Byte]) and actual encoded-byte accounting.
-The row-group implementation and research tooling are UNRELEASED and need no
-compatibility adapters.
+Human decisions (2026-10-24): both CPU and GPU writers are in scope, since CPU
+records can still approach the large GPU input budget. Add an internal,
+undocumented cache-record byte target (default 8 MiB) so tests can use small data.
+Remove the specified storage/compression matrix, partial-unpersist and filter
+checks; retain focused size, type and CPU/GPU read coverage.
+These decisions supersede the former CPU-writer/config exclusions.
 
-Scope: GPU-written row-group records and combined GPU reads, with existing CPU
-reader/writer compatibility. Retain the soft 8 MiB uncompressed target and cuDF
-row limit. No Spark changes, Spark OFF_HEAP, public config or CPU-writer redesign.
-Escalate supported-input regressions or architecture changes; never weaken checks.
-Use MCP docker_exec for every project operation and worker checkpoint. Work in
-the main checkout; no new worktrees.
+RELEASED: PCBS CPU/GPU read/write behavior, supported types, projection/reordering,
+row counts, compression, storage levels, ParquetCachedBatch(numRows, Array[Byte])
+and sizeInBytes, and ordinary Parquet scan behavior (present on main/deployments).
+UNRELEASED: row-group splitting, read bundling, the internal conf and branch-added
+tests; change directly without compatibility shims. No Spark changes or Spark
+OFF_HEAP storage. Escalate unavoidable released-contract changes.
 
-- Removed 103 research tools and 36 research documents; retained this tracker.
-  Reports/tooling remain in Git history at 91d748957d; user files are untouched.
-- Shared scan/cache chunk-reader replay and cleanup, Parquet footer serialization,
-  seekable-stream handling and columnar iterator task cleanup. Production code
-  is 40 lines smaller. Retained distinct dictionary/data offsets and ownership.
-- Added stream-boundary and shared-reader replay regression tests; removed one
-  redundant integration case. Independent cross-reviews found no blocking issues.
+1. Shared internal target: IMPLEMENTED; runtime verification pending. Internal
+   spark.rapids.sql.cache.serializer.rowGroupSizeBytes defaults to 8 MiB (min 1 KiB).
+   Both GPU entry paths capture the query conf and pass the target explicitly;
+   large GPU input budgets and cuDF's default row limit are preserved. Existing
+   internal helper callers were updated together; no compatibility overloads.
+   Independent diff/caller review and git diff --check pass.
+2. CPU cap: PENDING. Use min(existing budget, target), retain the splitting loop,
+   and admit an oversized first row. The current loop instead postpones it forever.
+   UnsafeRows use actual row bytes; generic rows use schema estimates, so neither
+   this budget nor the GPU target is a universal encoded-size bound.
+3. Focused tests: PENDING. Real GPU and CPU writes must produce multiple records
+   with explicit size bounds and exact data. One ~20k-row GPU Python case retains
+   nested/binary/decimal/timestamp/null/projection/reordering and CPU/GPU reads.
+   Reuse the existing converted-row CPU test if it exercises the cap. Remove the
+   storage matrix, partial-unpersist, filter checks/allowances and unused narrow shape.
 
-Fresh verification: normal Spark 3.5.5 verify passed 55 Scala and nine Java tests;
-27 default-serializer integration cases passed (eight cache, nineteen scan), plus
-eight cache cases with Kryo and GpuKryoRegistrator. No failures or skips.
-Spark 4.0.1 / Scala 2.13 SQL-plugin package passed; no 4.0.1 runtime claim.
-Checks remained enabled. The main checkout's license check found 22 unrelated
-untracked files, so validation used a matching tracked-source export, not a Git
-worktree. Evidence: /data/pcbs-oom/production-cleanup-verify.
+Acceptance: builds for the Maven default (330), another 3.3.x and a 4.x target;
+ParquetCachedBatch*Suite, ParquetBufferConsumerSuite, CachedGpuBatchIteratorSuite,
+CachedBatchWriterSuite; full cache_test.py with PCBS and default parallel settings,
+recording the new test duration. No weakened assertions. Record each rule's case,
+commands, results and independent review; mark completed tasks READY FOR REVIEW.
+Park for non-fixture CPU regressions, unaffordable GPU fragments, unavoidable
+released behavior changes or an unresolved contradiction.
 
-Earlier 39 OSS compile/package pairs predate this refactor; they are not fresh
-coverage. Databricks dependencies/runtimes remain unavailable. Performance was
-not retimed during cleanup; historical measurements remain in Git and /data.
+Prior cleanup removed 103 research tools/36 documents and shared reader lifecycle,
+footer/stream/task cleanup. Its verification predates this follow-up. Historical
+reports remain in Git; raw evidence is under /data/pcbs-oom. Databricks dependencies
+and runtimes remain unavailable; no vendor validation claim.

@@ -54,6 +54,8 @@ import org.apache.spark.unsafe.types.UTF8String
  * Unit tests for cached batch writing
  */
 class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
+  private val rowGroupSizeBytes = new RapidsConf(Map.empty[String, String])
+    .parquetCacheRowGroupSizeBytes
 
   class TestResources extends AutoCloseable {
     assert(Rmm.isInitialized, "Need to use this within Spark GPU session, or it may fail to " +
@@ -82,7 +84,7 @@ class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
             StructField("empty", ByteType, false)))
         val listOfPCB = ser.compressColumnarBatchWithParquet(
           cb, dummySchema, dummySchema,
-          BYTES_ALLOWED_PER_BATCH, false)
+          BYTES_ALLOWED_PER_BATCH, false, rowGroupSizeBytes)
         assert(listOfPCB.isEmpty)
       })
   }
@@ -145,7 +147,7 @@ class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
     val ser = new ParquetCachedBatchSerializer()
     val schema = new StructType().add("value", "string")
     List(false, true).foreach { comp =>
-      val opts = ser.getParquetWriterOptions(comp, schema)
+      val opts = ser.getParquetWriterOptions(comp, schema, rowGroupSizeBytes)
       assert(
         (if (comp) {
           CompressionType.SNAPPY
@@ -198,7 +200,7 @@ class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
       val listOfPCB = withResource(
         buildNullTypeBatch(values, nestedType, arrayType, mapType, arrayOfStructType)) {
         gpuCB => ser.compressColumnarBatchWithParquet(gpuCB, cachedSchema, origSchema,
-          BYTES_ALLOWED_PER_BATCH, useCompression = false).toList
+          BYTES_ALLOWED_PER_BATCH, useCompression = false, rowGroupSizeBytes = rowGroupSizeBytes).toList
       }
 
       val conf = TrampolineUtil.getSparkConf(spark)
@@ -541,7 +543,7 @@ class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
       val dummySchema = new StructType(
         gpuCols.map( _ => StructField("empty", ByteType, false)))
       ser.compressColumnarBatchWithParquet(cb, dummySchema, dummySchema,
-        BYTES_ALLOWED_PER_BATCH, false)
+        BYTES_ALLOWED_PER_BATCH, false, rowGroupSizeBytes)
     } finally {
       theTableMock.close()
       gpuCols(0).close()

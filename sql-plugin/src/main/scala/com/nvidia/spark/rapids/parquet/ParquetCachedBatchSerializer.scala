@@ -117,10 +117,6 @@ private class ByteArrayOutputFile(stream: ByteArrayOutputStream) extends OutputF
   override def defaultBlockSize(): Long = ByteArrayOutputFile.BLOCK_SIZE
 }
 
-private object ParquetBufferConsumer {
-  val TargetRowGroupBytes: Long = 8L * 1024 * 1024
-}
-
 private class ParquetBufferConsumer(val numRows: Int) extends HostBufferConsumer with
     AutoCloseable {
   private val regions = mutable.ArrayBuffer.empty[(SpillableHostBuffer, Long)]
@@ -274,6 +270,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
     val rapidsConf = new RapidsConf(conf)
     val useCompression = conf.useCompression
     val bytesAllowedPerBatch = getGpuBytesAllowedPerBatch(conf)
+    val rowGroupSizeBytes = rapidsConf.parquetCacheRowGroupSizeBytes
     val (schemaWithUnambiguousNames, _) = getSupportedSchemaFromUnsupported(schema)
     val structSchema = schemaWithUnambiguousNames.toStructType
     if (rapidsConf.isSqlEnabled && rapidsConf.isSqlExecuteOnGPU &&
@@ -306,7 +303,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
         } else {
           withResource(putOnGpuIfNeeded(batch)) { gpuCB =>
             compressColumnarBatchWithParquet(gpuCB, structSchema, schema.toStructType,
-              bytesAllowedPerBatch, useCompression)
+              bytesAllowedPerBatch, useCompression, rowGroupSizeBytes)
           }
         }
       })
@@ -325,7 +322,8 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
       schema: StructType,
       origSchema: StructType,
       bytesAllowedPerBatch: Long,
-      useCompression: Boolean): Iterator[ParquetCachedBatch] = {
+      useCompression: Boolean,
+      rowGroupSizeBytes: Long): Iterator[ParquetCachedBatch] = {
     if (oldGpuCB.numRows() == 0) {
       // There is no encoded data to retain for an empty input.
       return Iterator.empty
@@ -382,7 +380,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
 
             for (i <- splitVectors.head.indices) {
               withResource(makeTableForIndex(i)) { table =>
-                val buffer = writeTableToCachedBatch(table, schema, useCompression)
+                val buffer = writeTableToCachedBatch(table, schema, useCompression, rowGroupSizeBytes)
                 buffers += buffer
               }
             }
@@ -391,7 +389,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
           }
         } else {
           withResource(GpuColumnVector.from(gpuCB)) { table =>
-            val buffer = writeTableToCachedBatch(table, schema, useCompression)
+            val buffer = writeTableToCachedBatch(table, schema, useCompression, rowGroupSizeBytes)
             buffers += buffer
           }
         }
@@ -426,23 +424,25 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
 
   def getParquetWriterOptions(
       useCompression: Boolean,
-      schema: StructType): ParquetWriterOptions = {
+      schema: StructType,
+      rowGroupSizeBytes: Long): ParquetWriterOptions = {
     val compressionType = if (useCompression) CompressionType.SNAPPY else CompressionType.NONE
     SchemaUtils
         .writerOptionsFromSchema(ParquetWriterOptions.builder(), schema, nullable = false,
           writeInt96 = false)
         .withCompressionType(compressionType)
         // Keep cache records small while encoding the large GPU input only once.
-        .withRowGroupSizeBytes(ParquetBufferConsumer.TargetRowGroupBytes)
+        .withRowGroupSizeBytes(rowGroupSizeBytes)
         .withStatisticsFrequency(StatisticsFrequency.ROWGROUP).build()
   }
 
   private def writeTableToCachedBatch(
       table: Table,
       schema: StructType,
-      useCompression: Boolean): ParquetBufferConsumer = {
+      useCompression: Boolean,
+      rowGroupSizeBytes: Long): ParquetBufferConsumer = {
     val buffer = new ParquetBufferConsumer(table.getRowCount.toInt)
-    val opts = getParquetWriterOptions(useCompression, schema)
+    val opts = getParquetWriterOptions(useCompression, schema, rowGroupSizeBytes)
     closeOnExcept(buffer) { _ =>
       withResource(Table.writeParquetChunked(opts, buffer)) { writer =>
         writer.write(table)
@@ -1446,6 +1446,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
         input.mapPartitions(zeroColumnBatches)
       } else {
         val bytesAllowedPerBatch = getGpuBytesAllowedPerBatch(conf)
+        val rowGroupSizeBytes = rapidsConf.parquetCacheRowGroupSizeBytes
         val converters = new GpuRowToColumnConverter(structSchema)
         // This only sizes each batch's builders. The goal sets no size target: a partition stays
         // one batch unless the iterator has to split it, as at a column's size limit.
@@ -1458,7 +1459,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
         })
         columnarBatchRdd.flatMap(cb => {
           withResource(cb)(cb => compressColumnarBatchWithParquet(cb, structSchema,
-            schema.toStructType, bytesAllowedPerBatch, useCompression))
+            schema.toStructType, bytesAllowedPerBatch, useCompression, rowGroupSizeBytes))
         })
       }
     } else {

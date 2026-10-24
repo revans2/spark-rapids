@@ -19,7 +19,8 @@ import scala.collection.mutable.ArrayBuffer
 
 import ai.rapids.cudf.{ColumnVector, CompressionType, HostBufferConsumer, HostMemoryBuffer,
   ParquetChunkedReader => CudfParquetChunkedReader, ParquetOptions, ParquetWriterOptions, Table}
-import com.nvidia.spark.rapids.{SparkQueryCompareTestSuite, SpillableHostBuffer, SpillPriorities}
+import com.nvidia.spark.rapids.{RapidsConf, SparkQueryCompareTestSuite, SpillableHostBuffer,
+  SpillPriorities}
 import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
 import com.nvidia.spark.rapids.RapidsPluginImplicits._
 import com.nvidia.spark.rapids.jni.{CpuRetryOOM, RmmSpark}
@@ -134,7 +135,8 @@ class ParquetCachedBatchFilesGpuSuite extends SparkQueryCompareTestSuite {
       val count = 200000
       val narrowSchema = new StructType().add("id", IntegerType, nullable = false)
       val options = new ParquetCachedBatchSerializer()
-        .getParquetWriterOptions(useCompression = false, schema = narrowSchema)
+        .getParquetWriterOptions(useCompression = false, schema = narrowSchema,
+          rowGroupSizeBytes = new RapidsConf(Map.empty[String, String]).parquetCacheRowGroupSizeBytes)
       assert(options.getRowGroupSizeRows == ParquetWriterOptions.builder().build()
         .getRowGroupSizeRows)
       withResource(ColumnVector.fromInts((0 until count).toArray: _*)) { ids =>
