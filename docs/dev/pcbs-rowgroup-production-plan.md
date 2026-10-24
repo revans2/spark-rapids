@@ -57,12 +57,17 @@ REVIEW: nine distinct cases passed with no failures, errors or skips at actual
 origins and heap checks, and checked all frozen and raw evidence initially and
 finally: 1,749,926,385 content bytes each, 3,174 frozen entries, no remaining JVMs
 or GPU processes. Proof: ../crossversion/selected-sql330-java001-accepted.json.
-Spark330 Kryo is now RUNNING alone under supervisor 651054 at
-../crossversion/selected-sql330-kryo001, using the same accepted fa29 artifacts and
-unchanged nine cases. These four SQL lanes run before the remaining longer
-compile gates; acceptance criteria and dependencies are unchanged. The narrow
-selected-SQL acceptance helper reuses existing checks; root and independent
-review passed its three synthetic tests. Remaining three SQL lanes are open.
+Spark330 Kryo is also READY FOR REVIEW: the same nine cases passed at actual
+4 GiB, with root's independent JUnit/runtime/registrator/origin/heap replay and
+initial/final frozen/raw content checks of 1,750,002,735 bytes each and 3,174 frozen
+entries. No case JVM or GPU processes remained; proof:
+../crossversion/selected-sql330-kryo001-accepted.json. Spark401 Java is now RUNNING
+alone under supervisor 652677 at ../crossversion/selected-sql401-java001, using its
+accepted fa29 artifacts and unchanged nine cases. The four SQL lanes run before
+the remaining longer compile gates; acceptance criteria and dependencies are
+unchanged. The narrow selected-SQL acceptance helper reuses existing checks;
+root and independent review passed its three synthetic tests. The two Spark401
+SQL lanes remain open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
