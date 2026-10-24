@@ -62,7 +62,40 @@ release targets.
 
 **Classfile API/ABI evidence is not compilation, behavior or runtime validation.**
 
-## Observed gates and remaining work
+## Selected byte-target source gates
+
+The selected runtime policy is `fa29f4d90c`, using an 8 MiB uncompressed target
+and cuDF's default row cap. Root verified that all tracked paths outside docs
+match the measured `d9ba8787f6` tree, including production, tests and build files;
+artifacts retain their original source identities. The optional adjacent-view
+prototype is excluded. Evidence is under the production evidence root
+`/data/pcbs-oom/pcbs-rowgroup-production/`.
+
+| Target | Selected-source evidence | Status |
+|---|---|---|
+| 330 / Scala 2.12 | Fresh normal verify: 53 Scala and nine Java tests; root replayed reports and checked all 36 implementation classes and 237 actual target-private classes against fresh packaged bytes | READY FOR REVIEW |
+| 355 / Scala 2.12 | Independently accepted d9ba full 53-plus-nine build and Java/Kryo SQL lanes, nine cases each at 4 GiB; explicit non-doc source equivalence to fa29 | READY FOR REVIEW for these gates |
+| 340 / Scala 2.12 | Fresh fa29 normal verify at `crossversion/selected-verify340-001` | RUNNING |
+| 350 / Scala 2.13; 401 / Scala 2.13; 413 / Scala 2.13; 420 / Scala 2.13 | Prepared exact 53-plus-nine focused boundary owners | Pending actual execution |
+| 39 OSS compile/package pairs | Prepared serial grouped owners; compile/package only, no runtime credit | Pending actual execution |
+| Three DBR pairs | Real vendor dependency-resolution/compile attempts and matching runtime coverage required; no OSS substitution | Not yet attempted |
+| 330 / 401 Java and Kryo SQL | Four prepared selected-source nine-case lanes | Pending actual execution |
+
+The selected330 proof is `crossversion/selected-verify330-001-accepted.json`:
+3,094 tracked regular files plus the explicit Gitlink, exact retained test-report
+equality, actual Spark330/Parquet classpaths, fresh implementation classes and
+all classes from its actual target-specific private dependency. The shared JNI
+matches the frozen common runtime. Private dependencies are Scala/Spark-specific;
+this does not assert their bytes equal the Spark355 dependency. The source
+identity receipt is `support-audit/final-byte8-source-equivalence001.json` and
+accepted d9 build evidence is `support-audit/root-byte-builds004.json`.
+
+Remaining gates are explicit; this table does not establish all-target readiness.
+Missing locally cached vendor artifacts are not a recorded resolver failure.
+The older observations below remain historical and cannot be relabeled as
+selected-source validation.
+
+## Historical c385 gates and original follow-up scope
 
 | Target | Observed gate |
 |---|---|

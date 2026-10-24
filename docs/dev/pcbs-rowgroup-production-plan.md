@@ -20,11 +20,17 @@ ratios remain specific to the captured cache representation. Evidence:
 ../compression-queue/report001/summary.json and
 ../compression-queue/reverified001/result.json. Runtime policy remains fa29;
 the optional adjacent-view prototype is not promoted.
-The first actual final-source Spark 3.3.0 verify is now RUNNING under supervisor
-615314 at ../crossversion/selected-verify330-001, using the clean dedicated
-worktree at explicit fa29 source, normal full verify, exact 53 Scala plus nine
-Java test acceptance and an owned 1800-second deadline. It is the sole heavy
-workload; no final-source 330 success is claimed yet.
+The final-source Spark 3.3.0 focused verify is READY FOR REVIEW: all 53 Scala
+and nine Java tests passed in the normal full reactor, with no failures, skips,
+timeout, source changes or surviving owned processes. Root independently
+replayed the reports, checked 3,094 tracked regular files plus the explicit
+Gitlink, all 36 implementation-family classes and all 237 classes from the actual
+Spark330 private dependency against fresh module/distribution bytes. Evidence:
+../crossversion/selected-verify330-001-accepted.json. Its target-private hash is
+not the Spark355 private hash; the common JNI retains the pinned shared hash.
+The next boundary, Spark 3.4.0, is RUNNING alone under supervisor 623875 at
+../crossversion/selected-verify340-001 on clean explicit fa29 source, using the
+same exact 53-plus-nine normal verify and owned 1800-second deadline.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
