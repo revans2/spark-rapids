@@ -35,6 +35,18 @@ caught and corrected a filename-only origin check before execution. No candidate
 build or SQL runtime result is claimed yet. Next runtime work remains the reviewed
 three-build owner after the layout pair completes and root confirms quiescence.
 
+The fixed 20-cell outer-compression queue is prepared in ../compression-queue,
+independently reviewed, and root read the owner and passed all five small tests.
+It compares baseline and an explicitly selected byte-target candidate on both
+public datasets, at 48 GiB heap and DISK_ONLY, with compression OFF/LZ4/ZSTD/
+SNAPPY/LZF. Parquet SNAPPY and the workload controls remain fixed. This is a
+single-JVM screening matrix; actual candidate selection, artifact admission,
+codec availability and runtime remain unverified. No compression result is
+claimed. The selected-artifact Nsight preflight also records that the existing
+frozen profiler owner cannot select new artifacts; any later adaptation must
+preserve its controls, ownership and strict verifier. CUDA activity time and host
+GPU-semaphore holding time must be reported separately.
+
 ## Historical implementation checkpoints
 
 The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,
