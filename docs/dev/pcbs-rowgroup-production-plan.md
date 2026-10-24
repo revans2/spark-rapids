@@ -187,8 +187,11 @@ source SHA is 96abe68e6b4878366c2b9d7968d5782c9698ea993e7169881731ec15da6cd56c.
 It reads aggregate /proc/cgroup counters at a nominal two-second interval, writes
 ../byte-target-screen/matrix001/os-memory001.jsonl, stops on parent identity loss
 or its 7,200-second bound, and launches no Java/GPU workload. Sampling starts at
-1792817211941178921 epoch ns, partway through the first control fill; earlier
-history is unavailable. Sampling overhead is unmeasured and not assumed zero.
+1792817211941178921 epoch ns. The completed phase markers show that this is
+about 17.6 seconds into the first warmup, after the 151.324-second fill finished;
+the first fill has no OS-sampling coverage and that warmup is partial. This
+corrects the initial interpretation of the live phase state; earlier history is
+unavailable. Sampling overhead is unmeasured and not assumed zero.
 It changes no data, storage or JVM/GPU control; resulting system observations
 remain aggregate evidence, not causal attribution.
 
