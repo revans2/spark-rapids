@@ -217,8 +217,15 @@ reads physically fetched about 99 GB each, while baseline's last two fetched
 speed claim. Do not assume excluded warmup means a fully warm filesystem cache.
 A read-only code/native trace is checking logical-file range segmentation; no
 production change or artifact replacement is authorized by that investigation.
-Fresh four-lane cross-version SQL queue sql-queue540-002 is now running serially;
-repeats, public data and decoded-layout diagnostics remain pending. Evidence is
+Fresh four-lane cross-version SQL queue sql-queue540-002 completed successfully:
+330 Java/Kryo and 401 Java/Kryo each passed all nine cases, no failures/errors/skips,
+actual 4 GiB application heap and correct serializer/registrator/runtime verified.
+Root independently reparsed raw JUnit, observed JVM main/heap and event environments:
+../support-audit/root-cross-sql-recheck001.json. These 36 tests are READY FOR REVIEW.
+The initial audit-negative Java001 remains unchanged. All owned JVM/GPU processes
+exited before root scheduled ../world-queue/matrix001 (16 fresh production public-data
+cases, unchanged frozen controls/runtime; currently running). Repeats and decoded
+layout remain pending. Evidence is
 under ../production-runs and ../support-audit/first-pair-*-audit.json. All workers
 remain MCP docker_exec only; benchmark jobs own the sole JVM/GPU/build slot.
 

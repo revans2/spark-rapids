@@ -66,9 +66,9 @@ release targets.
 
 | Target | Observed gate |
 |---|---|
-| 330 / Scala 2.12 | Maven verify: six focused Scala suites, 52 tests; 9 Java tests passed |
+| 330 / Scala 2.12 | Maven verify: 52 Scala and 9 Java tests passed; fresh Java/Kryo SQL lanes each passed 9 tests at 4 GiB |
 | 355 / Scala 2.12 | Same focused verify passed; local Java and Kryo SQL lanes each passed 9 tests |
-| 401 / Scala 2.13 | Same focused verify passed; captured test JVM classpath has main Parquet 1.15.2 |
+| 401 / Scala 2.13 | Same focused verify passed; Java/Kryo SQL lanes each passed 9 tests at 4 GiB; test classpath main Parquet 1.15.2 |
 
 The 330 test JVM classpath has main Parquet 1.12.2. On 401, column-test/Avro
 artifacts at 1.13.1 are separate from the main 1.15.2 libraries.
@@ -93,4 +93,9 @@ Raw audit evidence is under
 Verify evidence is in `build010/` and
 `crossversion/crossverify{330,401}-001/`; the latter retain
 `resolved-test-classpath.json`. Local SQL evidence is in
-`integration-java003/` and `integration-kryo002/`.
+`integration-java003/` and `integration-kryo002/`. Cross-version SQL evidence is
+`crossversion/sql{330,401}-{java,kryo}002/` and `sql-queue540-002/`.
+Root independently reparsed all four raw JUnit reports, actual JVM heap/main-class
+evidence and completed Spark event environments: `support-audit/root-cross-sql-recheck001.json`.
+All 36 tests passed with zero failures/errors/skips. The original 330 Java001
+launcher-bootstrap audit false negative is retained, not overwritten.

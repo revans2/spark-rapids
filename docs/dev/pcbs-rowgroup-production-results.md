@@ -36,6 +36,9 @@ Patched measured reads each performed about 99 GB of physical reads, versus
 Patched per-read global GC time was 0.37–0.51 seconds versus 5.76–8.55 seconds
 for baseline. These counters do not identify which files caused the physical
 reads, and do not separate format overhead from page-cache or spill behavior.
+Patched read RSS peaks were also lower (22.4–23.1 GiB versus 50.1–51.7 GiB),
+so the samples do not support increased process RSS as the explanation. System
+page-cache/pressure history was not recorded in these first four cases.
 
 Observed heap includes sampled occupancy and logged pre-GC occupancy across fill,
 warmup and reads. It includes garbage; it is not a live-set or minimum-heap measure.
