@@ -141,6 +141,33 @@ bytes; no worker completion summary substituted for those checks. This is build
 and focused correctness evidence, not all-version or performance acceptance.
 Next gates are byte8 Java/Kryo SQL and the fixed full-size 12-cell screen.
 
+Byte8 SQL correctness gates are READY FOR REVIEW on Java and Kryo. Java001
+ran all nine expected tests successfully (127.365 seconds, actual 4 GiB), but its
+v1 owner misparsed the actual jar:file shim origin and the Scala Files$ object
+name. Root and independent review confirmed the fixture bugs and unchanged
+frozen evidence. A narrow versioned parser retains exact outer-jar and approved
+shim-root checks. Root ran the strict supplementary postcheck (2.4 seconds),
+independently checked raw JUnit groups (2 shape, 6 storage, 1 partial/removal),
+actual serializer/version/heap and all three exact class origins; the original
+failed owner result remains intact. Evidence: ../byte-target-sql/java001-postcheck-v2.json
+and ../support-audit/root-byte8-java001-acceptance.json. No Java workload rerun
+or silent result rewrite occurred. Kryo001 passed v2 directly (125.663 seconds),
+all nine tests and required Kryo registrator. Root independently replayed JUnit,
+all 31 frozen entries, runtime/heap/origins and final quiescence:
+../support-audit/root-byte8-kryo001-acceptance.json. These include the normal
+injected-OOM correctness cases and are excluded from performance comparisons.
+
+The fixed 12-cell byte-target screen is now running alone at
+../byte-target-screen/matrix001 (supervisor 558869). Its four arms are the frozen
+c385 8 MiB/65,536-row control and the new 8/16/32 MiB/default-row candidates.
+Each runs the full canonical 96 GiB workload at DISK_ONLY and MEMORY_AND_DISK,
+and full TLC at DISK_ONLY, all at 48 GiB heap with unchanged workload/default
+retention/GPU controls. Worker monitoring remains MCP docker_exec only; root
+owns acceptance and subsequent scheduling. The reviewed reporter has six small
+passing tests and preserves incomplete OOM evidence with unknown whole-cache
+sizes. Actual screen outcomes, report and independent hybrid raw replay remain
+pending; one JVM per cell provides screening evidence, not confidence bounds.
+
 ## Historical implementation checkpoints
 
 The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,
