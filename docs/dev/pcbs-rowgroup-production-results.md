@@ -388,8 +388,14 @@ seconds into fill; missing fill history remains unknown. The patched diagnostic
 also completed with original verifier PASS and JVM exit zero, with no remaining
 owned processes. Its recording starts before fill. Both recordings have zero
 DataLoss events and successful selected-event exports, but precise phase coverage
-and CPU/allocation interpretation remain pending. CPU stacks/context switches were
-disabled in the Nsight captures.
+and CPU/allocation interpretation remain pending. Root separately replayed both
+complete original benchmark results, including sixteen real inputs and
+9,590,376,664 content bytes checked initially and finally:
+../jfr-host-profile/reverified001/result.json. The first interpreter missed
+static Spark worker names in the patched capture; its output is retained but
+cannot support cross-arm worker comparisons. The reviewed version2 repair and
+seven pure tests pass; actual interpretation remains pending. CPU stacks/context
+switches were disabled in the Nsight captures.
 The prototype remains isolated/unpromoted. Main fa29 and the reported original
 runtime remain unchanged; outer compression and final main-policy53-plus-nine
 compatibility remain pending.

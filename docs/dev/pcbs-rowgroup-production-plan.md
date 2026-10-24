@@ -25,6 +25,16 @@ The first actual final-source Spark 3.3.0 verify is now RUNNING under supervisor
 worktree at explicit fa29 source, normal full verify, exact 53 Scala plus nine
 Java test acceptance and an owned 1800-second deadline. It is the sole heavy
 workload; no final-source 330 success is claimed yet.
+Root also completed the two original JFR benchmark replays: exact retained
+results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
+checked initially and finally at ../jfr-host-profile/reverified001. The first
+interpreter completed, but root found its thread grouping missed the patched
+capture's static worker names. Interpretation001 is retained and must not be
+used for cross-arm worker comparisons. A narrow version2 repair recognizes both
+observed Spark worker-name forms; root and independent review passed seven pure
+tests. Actual version2 interpretation awaits the next idle slot. No CPU or
+allocation conclusion follows yet. A four-case existing-event-log spill/CPU
+reporter is also source-reviewed with three passing pure tests, but unrun.
 MCP docker_exec remains mandatory for root and workers. JFR interpretation and
 final supported-version gates remain open; the optional adjacent-view prototype
 stays isolated because its bracket did not establish a wall-time improvement.
