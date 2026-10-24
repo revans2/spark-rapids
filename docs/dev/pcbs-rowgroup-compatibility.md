@@ -78,13 +78,14 @@ prototype is excluded. Evidence is under the production evidence root
 | 340 / Scala 2.12 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 237 actual target-private classes | READY FOR REVIEW |
 | 350 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 237 actual target-private classes | READY FOR REVIEW |
 | 401 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 243 actual target-private classes | READY FOR REVIEW |
-| 413 / Scala 2.13; 420 / Scala 2.13 | Prepared clean fa29 worktrees and exact 53-plus-nine focused boundary owners | Pending actual execution |
+| 413 / Scala 2.13 | Fresh fa29 normal verify at `crossversion/selected-verify413-001` | RUNNING |
+| 420 / Scala 2.13 | Prepared clean fa29 worktree and exact 53-plus-nine focused boundary owner | Pending actual execution |
 | 39 OSS compile/package pairs | Prepared serial grouped owners; compile/package only, no runtime credit | Pending actual execution |
 | Three DBR pairs | Real vendor dependency-resolution/compile attempts and matching runtime coverage required; no OSS substitution | Not yet attempted |
 | 330 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |
 | 330 Kryo SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/registrator/origins and initial/final frozen/raw content | READY FOR REVIEW |
 | 401 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |
-| 401 Kryo SQL | Running at `crossversion/selected-sql401-kryo001`, same accepted fa29 artifacts | RUNNING |
+| 401 Kryo SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/registrator/origins and initial/final frozen/raw content | READY FOR REVIEW |
 
 The selected330 proof is `crossversion/selected-verify330-001-accepted.json`:
 3,094 tracked regular files plus the explicit Gitlink, exact retained test-report

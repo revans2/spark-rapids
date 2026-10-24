@@ -66,12 +66,18 @@ FOR REVIEW: nine distinct cases passed at actual 4 GiB with root's independent
 JUnit/runtime/origin/heap replay and initial/final frozen/raw content checks of
 1,785,434,866 bytes each and 3,174 frozen entries. No case JVM or GPU processes
 remained; proof: ../crossversion/selected-sql401-java001-accepted.json. Spark401
-Kryo is now RUNNING alone under supervisor 654625 at
-../crossversion/selected-sql401-kryo001 using the same accepted artifacts and nine
-cases. The four SQL lanes run before the remaining longer compile gates;
-acceptance criteria and dependencies are unchanged. The narrow selected-SQL
-acceptance helper reuses existing checks; root and independent review passed its
-three synthetic tests. Only the Spark401 Kryo SQL lane remains open.
+Kryo is also READY FOR REVIEW: nine exact cases passed at actual 4 GiB, with root's
+independent JUnit/runtime/registrator/origin/heap replay and initial/final content
+checks of 1,785,490,238 bytes each and 3,174 frozen entries. Proof:
+../crossversion/selected-sql401-kryo001-accepted.json. All four selected-source SQL
+lanes passed their 36 case executions; no failures, errors, skips or remaining
+case JVM/GPU processes. They do not grant other-version or full-suite credit.
+The narrow selected-SQL acceptance helper reuses existing checks; root and
+independent review passed its three synthetic tests. Spark 4.1.3 / Scala 2.13 is
+now RUNNING alone under supervisor 656516 at ../crossversion/selected-verify413-001,
+using clean fa29 source and the normal exact 53-plus-nine focused verify with
+an owned 1800-second deadline. Spark420, both compile/package groups and the
+actual vendor attempts remain open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
