@@ -162,8 +162,16 @@ The release matrix contains 42 Scala/build pairs across 32 targets. All supporte
 versions remain in scope. A focused audit is checking the actual Spark-supplied
 Parquet dependencies and both existing newBlockMeta/cache-scan shim boundaries;
 the Maven test-artifact Parquet property is not production dependency evidence.
-Vendor-runtime availability and additional boundary builds must be recorded
-explicitly. Four fresh Java/Kryo SQL lanes on 3.3.0 and 4.0.1 are now scheduled
+The [compatibility audit](pcbs-rowgroup-compatibility.md) records all groups,
+exact shim selection and 34 required Parquet API descriptors. No OSS signature
+or shim-selection defect was found. Actual dependencies range from Parquet
+1.12.2 through 1.17.0; 401 uses 1.15.2, independently captured from its test JVM
+classpath. Classfile equivalence is not runtime proof. Additional boundary gates
+are 340/Scala 2.12, 350/Scala 2.13, 413 and 420; all three DBR vendor validation
+lanes remain required. Their vendor artifacts/runtimes are absent locally; no
+OSS substitute or all-target success is claimed. The audit is READY FOR REVIEW,
+while all-target validation remains IN PROGRESS.
+Four fresh Java/Kryo SQL lanes on 3.3.0 and 4.0.1 are now scheduled
 serially; matched production performance remains pending. All operations and
 worker handoffs remain MCP docker_exec only.
 
