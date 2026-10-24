@@ -1,13 +1,30 @@
 # PCBS row-group production implementation plan
 
-Status: IN PROGRESS. The fixed 20-case outer-compression comparison is now
-RUNNING at ../compression-queue/matrix001 under supervisor 598683, using the
-accepted builds004 byte8/default-row manifest. Both public datasets retain all
-rows, 48 GiB heap and DISK_ONLY; only outer Spark compression changes. No completed
-matrix result is claimed. The global codec also applies to task broadcasts,
-SQL result collection and applicable shuffle/spill; OFF disables RDD-cache
-compression only. Timings compare whole-query settings, not isolated cache-codec
-cost. Cache-file ratios remain specific to the captured cache representation. No benchmark, build or heavy profile analysis overlaps.
+Status: IN PROGRESS. The fixed 20-case outer-compression comparison is complete
+and READY FOR REVIEW: 20/20 PASS using the accepted builds004 byte8/default-row
+manifest. Root executed report001 and reverified001: exact original-result and
+CPU-oracle replays, 32 immutable input files, 240 raw evidence files, and
+20,533,013,314 content bytes checked initially and rehashed at the end. Both full
+public datasets retain 48 GiB heap and DISK_ONLY. The full twenty-row table and
+precision/IO/GC links are in
+[production results](pcbs-rowgroup-production-results.md#completed-outer-spark-compression-comparison).
+SNAPPY reduced observed fill/read times versus OFF despite little cache-file
+reduction, but the same-codec TLC patched read regression remains. ZSTD reduced
+file size further with higher elapsed times; LZF fill was substantially slower.
+One JVM per cell does not establish independent-run variability or a causal
+bottleneck, and no compression default or winner is selected. The global codec
+also applies to task broadcasts, SQL result collection and applicable
+shuffle/spill; OFF disables RDD-cache compression only and retains global LZ4.
+Timings compare whole-query settings, not isolated cache-codec cost. Cache-file
+ratios remain specific to the captured cache representation. Evidence:
+../compression-queue/report001/summary.json and
+../compression-queue/reverified001/result.json. Runtime policy remains fa29;
+the optional adjacent-view prototype is not promoted.
+The first actual final-source Spark 3.3.0 verify is now RUNNING under supervisor
+615314 at ../crossversion/selected-verify330-001, using the clean dedicated
+worktree at explicit fa29 source, normal full verify, exact 53 Scala plus nine
+Java test acceptance and an owned 1800-second deadline. It is the sole heavy
+workload; no final-source 330 success is claimed yet.
 MCP docker_exec remains mandatory for root and workers. JFR interpretation and
 final supported-version gates remain open; the optional adjacent-view prototype
 stays isolated because its bracket did not establish a wall-time improvement.

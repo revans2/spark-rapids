@@ -8,7 +8,8 @@ batch-layout diagnostic pair are also independently verified. Root selected the
 final-source correctness and compatibility remain open. The separate TLC diagnostic
 pair is closed and its analysis is READY FOR REVIEW, not causal performance proof.
 These measurements use the production logical-buffer reader, separately from the
-older research multi-file prototype.
+older research multi-file prototype. The separate 20-case outer-compression
+comparison is also complete, independently replayed and READY FOR REVIEW.
 
 ## Why stored record size matters
 
@@ -39,6 +40,92 @@ materialized Parquet arrays. This source explanation is not a fitted memory mode
 or a measured bottleneck claim. Decisive source and full qualifications:
 ../support-audit/record-budget-explanation001.md. Root independently read the
 MemoryStore, JavaSerializer, SerializerManager and NextIterator paths.
+
+## Completed outer Spark compression comparison
+
+All 20 cases PASS and are READY FOR REVIEW. Root replayed every original verifier
+with exact retained-result equality and all four CPU-oracle read checks. The
+closed replay covers 32 immutable input files and 240 raw evidence files, with
+20,533,013,314 content bytes checked initially and rehashed at the end.
+Evidence: [accepted replay](/data/pcbs-oom/pcbs-rowgroup-production/compression-queue/reverified001/result.json).
+
+Each case is a fresh JVM over the full GHArchive dataset (32,078,549 rows) or TLC
+dataset (239,470,448 rows), using sixteen fixed partitions, a 48 GiB heap and
+DISK_ONLY. Baseline is original PCBS `60c28e44f0`; patched is selected byte8/default
+rows `d9ba8787f6`, whose unchanged final-source behavior is recorded separately
+in the source-equivalence receipt. Runtime policy remains `fa29f4d90c`; the
+adjacent-view prototype is excluded. All arms retain local eight slots, a 1 GiB
+GPU batch target, 15 GiB GPU pool, concurrent GPU tasks two, host limit 40 GiB,
+pinned pool 2 GiB, reset100/unroll16 and memory fraction 0.6. Inner PCBS Parquet
+compression remains SNAPPY.
+
+OFF disables RDD-cache compression only and explicitly retains the global LZ4
+codec. The other profiles enable RDD compression and select the named global
+codec. That codec also applies to task broadcasts, SQL result collection and
+applicable shuffle/spill. Timings therefore compare full-query settings rather
+than isolated cache-codec costs; the file ratios describe captured cache files
+specifically. No executable control or default changes follow from this screen.
+
+Times below are seconds. Median read excludes the separate warmup and uses three
+within-JVM reads. Heap is maximum observed phase occupancy, including garbage,
+not a live set or minimum heap. GiB uses 2^30 bytes. Payload sums complete encoded
+Parquet arrays; file size sums the complete Java-serialized cache files for all
+sixteen partitions. File/payload includes Java framing and outer compression.
+
+| Dataset | Arm | Outer profile | Fill s | Warmup s | Median read s | Heap GiB | Payload GiB | Full file GiB | File/payload |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| GHArchive | baseline | OFF | 48.721 | 16.694 | 15.645 | 19.984 | 23.512 | 23.512 | 1.0000002 |
+| GHArchive | patched | OFF | 46.500 | 16.064 | 15.407 | 16.311 | 23.336 | 23.336 | 1.0000099 |
+| GHArchive | patched | LZ4 | 52.193 | 14.781 | 13.808 | 16.157 | 23.336 | 23.015 | 0.9862549 |
+| GHArchive | baseline | LZ4 | 54.949 | 14.567 | 14.131 | 38.505 | 23.512 | 23.177 | 0.9857279 |
+| GHArchive | baseline | ZSTD | 70.013 | 20.885 | 19.373 | 43.734 | 23.512 | 20.085 | 0.8542123 |
+| GHArchive | patched | ZSTD | 67.309 | 20.021 | 19.337 | 16.651 | 23.336 | 20.039 | 0.8587306 |
+| GHArchive | patched | SNAPPY | 43.066 | 12.693 | 11.390 | 15.841 | 23.336 | 23.301 | 0.9984988 |
+| GHArchive | baseline | SNAPPY | 44.904 | 12.610 | 12.305 | 32.658 | 23.512 | 23.475 | 0.9983974 |
+| GHArchive | baseline | LZF | 149.014 | 18.053 | 17.386 | 21.741 | 23.512 | 23.095 | 0.9822343 |
+| GHArchive | patched | LZF | 128.443 | 18.966 | 18.253 | 16.167 | 23.336 | 22.921 | 0.9822236 |
+| TLC | baseline | OFF | 18.625 | 5.908 | 4.905 | 15.685 | 5.755 | 5.755 | 1.0000004 |
+| TLC | patched | OFF | 18.137 | 7.771 | 6.468 | 15.950 | 6.265 | 6.265 | 1.0000168 |
+| TLC | patched | LZ4 | 19.218 | 7.165 | 6.085 | 15.943 | 6.265 | 6.221 | 0.9930387 |
+| TLC | baseline | LZ4 | 18.907 | 5.316 | 4.759 | 15.957 | 5.755 | 5.736 | 0.9965493 |
+| TLC | baseline | ZSTD | 20.868 | 5.913 | 5.036 | 15.547 | 5.755 | 5.413 | 0.9406200 |
+| TLC | patched | ZSTD | 21.089 | 7.751 | 7.188 | 15.947 | 6.265 | 6.034 | 0.9631437 |
+| TLC | patched | SNAPPY | 16.864 | 6.492 | 5.631 | 15.960 | 6.265 | 6.261 | 0.9994265 |
+| TLC | baseline | SNAPPY | 17.389 | 5.361 | 4.383 | 15.914 | 5.755 | 5.754 | 0.9997811 |
+| TLC | baseline | LZF | 40.378 | 5.133 | 4.442 | 15.363 | 5.755 | 5.723 | 0.9943702 |
+| TLC | patched | LZF | 42.479 | 6.925 | 5.687 | 15.998 | 6.265 | 6.240 | 0.9959904 |
+
+Full precision and all three individual reads are retained in
+[CSV](/data/pcbs-oom/pcbs-rowgroup-production/compression-queue/report001/summary.csv)
+and [JSON](/data/pcbs-oom/pcbs-rowgroup-production/compression-queue/report001/summary.json).
+The JSON also retains per-phase IO windows, GC observations, storage checkpoints,
+record counts and exact source/artifact identities.
+
+SNAPPY versus OFF reduced the observed read median by 21.35% for GH baseline,
+26.07% for GH patched, 10.64% for TLC baseline and 12.94% for TLC patched. Fill was
+6.64–7.84% lower across those four comparisons. Yet SNAPPY cache files were only
+0.022–0.160% smaller than their own Parquet payloads. These measurements do not
+establish that cache-file reduction caused the timing change. All measured
+OFF/SNAPPY read sample windows report zero physical `read_bytes`; those windows
+cover only part of each phase and are distinct from logical `rchar`.
+
+The same-codec comparison still retains the TLC regression: under SNAPPY,
+patched reads took 5.631 s versus baseline 4.383 s (28.48% longer), while patched
+GH reads took 11.390 s versus baseline 12.305 s (7.43% lower). TLC patched payload
+was 8.85% larger than baseline under that profile.
+
+ZSTD produced the smallest cache files, about 14.1–14.6% below the Parquet payload
+on GH and 3.7–5.9% below it on TLC, but its fill and read medians were higher than
+OFF in every arm. LZF fill took 128.443–149.014 s on GH and 40.378–42.479 s on TLC,
+versus OFF 46.500–48.721 s and 18.137–18.625 s respectively. Smaller files alone
+did not predict lower elapsed time in this screen.
+
+There is one JVM per cell, not independent repeated runs; the three reads within
+a JVM do not estimate between-run variability. Run order, page-cache/system
+history, physical IO coverage and global codec consumers remain confounds.
+Existing task spill/retry counters and operator metrics can help separate
+follow-up hypotheses, but were not used here to assign a bottleneck. No causal
+claim, universal winner, new default or compression recommendation is established.
 
 ## Verified byte-only target screen
 
