@@ -8,7 +8,14 @@ REVIEW. The research real-data sweep is complete. The production implementation 
 committed; its separate measurements and supported-version checks remain gates
 for final review.
 
-## Implementation checkpoint
+Current checkpoint: the c385 production comparison is independently verified
+(15 synthetic JVMs and 16 public-data cases). The byte-only 8 MiB candidate at
+d9ba8787f6 is committed separately but unbuilt; decoded-layout diagnostics,
+8/16/32 MiB screening and final selected-source compatibility remain gates.
+Earlier checkpoint paragraphs below retain historical failures and pending states;
+the completed repeat checkpoint and current byte-target section supersede them.
+
+## Historical implementation checkpoints
 
 The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,
 branch pcbs-rowgroup-production, based on 60c28e44f0. The original repository and
@@ -449,25 +456,46 @@ All supported-version acceptance must be rerun against the eventual selected
 source, not just the earlier c385 implementation. Existing boundary/grouped/vendor
 worktrees and fixed-commit plans remain preparations; update them explicitly to
 the final source and new test count before execution. The eleven-run c385 series
-remains the sole active JVM/GPU job and its files/controls stay frozen. Root
-continues sole scheduling; workers continue MCP docker_exec only.
+is complete; its files/controls stay frozen. Root continues sole JVM/GPU/build
+scheduling; workers continue MCP docker_exec only.
 
 ## Repeat verification and next-build preparation checkpoint
 
-Six of the eleven repeat JVMs have completed: five PASS and one genuine heap OOM.
-Both completed baseline 1/1 runs pass; the additional default baseline memory/disk
-run OOMs, while the additional patched default memory/disk run passes. The second
-DISK_ONLY pair reverses the initial timing ordering, so no fixed disk speedup or
-regression is established. Remaining cases, final original-verifier replay and
-independent content checks must finish before the aggregate is accepted.
+The eleven-repeat queue completed with nine PASS and two genuine heap OOMs.
+Together with the first four runs, all fifteen JVMs are independently verified:
+12 PASS and three HEAP_OOM, all default baseline MEMORY_AND_DISK. All six patched-
+default JVMs (three per storage level) and all three baseline 1/1 JVMs pass. Root replayed all original
+verifiers and the approved correction with exact result/metric equality, checked
+16 actual inputs and 180 raw evidence files, and verified 106,043,786,691 bytes
+both initially and at final rehash (140.391 seconds). Queue, sampler, Java and GPU
+processes are quiescent. This comparison is READY FOR REVIEW.
+
+The generated table includes all fifteen JVMs, three-per-arm medians/ranges,
+fill/warmup/read times, observed heap/RSS, actual stored layout and negative
+outcomes. MEMORY_AND_DISK patch/default fill/read medians are 157.327/41.013s;
+baseline 1/1 is 147.397/38.943s. Patched heap peaks are 38.106–38.696 GiB versus
+about 45.2 GiB for 1/1, with slightly higher patched RSS. Disk ordering varies
+with physical IO; the initial slowdown is not a universal result. Full results:
+../canonical-repeat-queue/report001/summary.{csv,json,md}, copied into the
+production results document. Replay: ../canonical-repeat-queue/reverified001;
+root final checks: ../support-audit/root-repeat-final-checks001.json.
+
+Root also reran the completed-case GPU metric extraction and the OS analysis
+after sampler closure; all eight metric cases and fifteen OS phase observations
+exactly match the worker outputs. The closed sampler hash is
+5b7a90126e6998d311c4ff1c9538ca1aa7f280cfbd75e4c857a9c62fac01b18c.
+Source confirms gpuTime measures semaphore-held host elapsed time; staging/IO
+can be inside it. Missing retry/spill updates remain unknown. OS measurements
+show file refaults/cache turnover but do not identify per-file residency or
+reconstruct the first pair's missing OS history. No causal GPU profile is claimed.
 
 The idle-only canonical15 replay helper at
 ../canonical-repeat-queue/reverify_repeats_v1.py is prepared and source-reviewed.
 Root and an independent worker each reran six tiny tests successfully. It retains
 raw prefix ERROR/OOM evidence, requires exact original and approved normalized
 results, checks every declared input/artifact content and rehashes unique files
-at completion. It has NOT run against the real fifteen cases; the live queue
-retains exclusive admission. The repeat report's eight tiny tests also pass.
+at completion. Root has now run it against all fifteen real cases successfully; the queue
+has ended and exclusive admission is available for the next diagnostic. The repeat report's eight tiny tests also pass.
 
 The next three-artifact build owner at ../crossversion/build_byte_targets_v1.py
 and its starter/freezer are prepared and source-reviewed by root and an

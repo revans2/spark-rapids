@@ -1,11 +1,87 @@
 # PCBS row-group production measurements
 
-Status: IN PROGRESS. The first four synthetic cases and all sixteen production
-public-data cases are independently verified and READY FOR REVIEW. Fresh-JVM
-synthetic repeats and decoded batch-layout diagnostics are pending. These measurements use the production
-logical-buffer reader, separately from the older research multi-file prototype.
+Status: IN PROGRESS. All fifteen synthetic JVM runs and all sixteen production
+public-data cases are independently verified and READY FOR REVIEW. Decoded batch-
+layout diagnostics and the new byte-only target sweep remain pending. These
+measurements use the production logical-buffer reader, separately from the older
+research multi-file prototype.
 
-## First matched cases
+## Repeated synthetic comparison
+
+15 fresh JVMs: default100/16 and baseline known1/1 remain separate. Each JVM read median uses three reads after one warmup; aggregate ranges span fresh JVMs. OOMs have no successful-read median. Heap/RSS are observed maxima, not live-set requirements. No profiler or data/control change;96GiB values,16 partitions,8 task slots,48GiB heap.
+
+| Profile | Storage | Arm | PASS/OOM | Fill median [range] s | Read median [range] s | Read JVMs |
+|---|---|---|---|---:|---:|---:|
+| default | DISK_ONLY | baseline | 3/0 | 171.507 [167.364, 186.661] | 49.030 [48.677, 53.764] | 3 |
+| default | DISK_ONLY | patched | 3/0 | 164.026 [149.797, 186.312] | 46.849 [44.860, 70.240] | 3 |
+| default | MEMORY_AND_DISK | baseline | 0/3 | 156.450 [150.251, 164.011] |  | 0 |
+| default | MEMORY_AND_DISK | patched | 3/0 | 157.327 [143.255, 181.988] | 41.013 [37.065, 45.764] | 3 |
+| known-1-1-workaround | MEMORY_AND_DISK | baseline | 3/0 | 147.397 [135.590, 161.678] | 38.943 [38.414, 39.926] | 3 |
+
+Per-JVM measurements (full IO, GC, residency/layout and strict provenance in JSON/CSV):
+
+| Profile | Storage | Arm | Repeat | Outcome | Fill s | Warmup s | Read s | Heap GiB | RSS GiB | Records | Max record MiB |
+|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| default | DISK_ONLY | baseline | 1 | PASS | 186.661 | 53.323 | 53.764 | 44.286 | 51.663 | 112 | 895.936 |
+| default | DISK_ONLY | baseline | 2 | PASS | 171.507 | 58.918 | 49.030 | 43.753 | 50.180 | 112 | 895.936 |
+| default | DISK_ONLY | baseline | 3 | PASS | 167.364 | 67.633 | 48.677 | 44.515 | 51.840 | 112 | 895.936 |
+| default | DISK_ONLY | patched | 1 | PASS | 164.026 | 79.399 | 70.240 | 18.054 | 23.109 | 12400 | 7.938 |
+| default | DISK_ONLY | patched | 2 | PASS | 186.312 | 47.659 | 46.849 | 15.655 | 21.659 | 12400 | 7.938 |
+| default | DISK_ONLY | patched | 3 | PASS | 149.797 | 47.204 | 44.860 | 18.470 | 24.033 | 12400 | 7.938 |
+| default | MEMORY_AND_DISK | baseline | 1 | HEAP_OOM | 164.011 |  |  | 45.248 | 51.390 | 112 | 895.936 |
+| default | MEMORY_AND_DISK | baseline | 2 | HEAP_OOM | 150.251 |  |  | 45.235 | 51.407 | 112 | 895.936 |
+| default | MEMORY_AND_DISK | baseline | 3 | HEAP_OOM | 156.450 |  |  | 45.241 | 51.416 | 112 | 895.936 |
+| default | MEMORY_AND_DISK | patched | 1 | PASS | 181.988 | 60.319 | 45.764 | 38.696 | 53.007 | 12400 | 7.938 |
+| default | MEMORY_AND_DISK | patched | 2 | PASS | 157.327 | 42.927 | 41.013 | 38.106 | 52.682 | 12400 | 7.938 |
+| default | MEMORY_AND_DISK | patched | 3 | PASS | 143.255 | 52.757 | 37.065 | 38.172 | 52.957 | 12400 | 7.938 |
+| known-1-1-workaround | MEMORY_AND_DISK | baseline | 1 | PASS | 161.678 | 42.058 | 39.926 | 45.241 | 51.432 | 112 | 895.936 |
+| known-1-1-workaround | MEMORY_AND_DISK | baseline | 2 | PASS | 147.397 | 39.372 | 38.943 | 45.220 | 51.424 | 112 | 895.936 |
+| known-1-1-workaround | MEMORY_AND_DISK | baseline | 3 | PASS | 135.590 | 51.802 | 38.414 | 45.239 | 51.437 | 112 | 895.936 |
+
+Statistics report n explicitly; fill may exist in a subsequently failed JVM. No partial-OOM read time is imputed. Missing metrics remain unknown, never zero. Observed heap includes warmup. GC totals cover only reported phases. Per-phase sampled IO deltas have boundary gaps and differ from exact file sizes. Canonical storage figures are asynchronous RDDStorageInfo estimates, not physical block files. Counterbalanced order does not control page-cache state; no causal conclusion follows. The retained originals are unchanged; only strict audited outcome/issues normalization is used.
+
+
+
+All arms above use stock Java serialization. The patched artifact is c385525a51,
+with 8 MiB uncompressed row groups and the earlier 65,536-row limit. These are
+not measurements of the new default-row-limit candidate or the 16/32 MiB targets.
+
+At MEMORY_AND_DISK the patch passes at defaults in all three JVMs. Relative to
+the baseline 1/1 workaround, its median fill is about 7% slower and read median
+about 5% slower. Its observed heap peaks are lower, but RSS is slightly higher:
+52.68–53.01 GiB versus 51.42–51.44 GiB. These are whole-run observed peaks, not
+live-set requirements. The default baseline completes fill but fails readback in
+all three JVMs; its fill timings remain valid completed-phase measurements.
+
+The initial disk read slowdown does not hold across repeats. Patched read medians
+range from 44.86 to 70.24 seconds. The initial patched reads sampled about 99 GB
+of physical IO each; the second pair sampled zero during the measured intervals
+in both arms. Host memory is 188.52 GiB, actual input files total 96.052 GiB and
+encoded cache payload is about 96.04 GiB. Their sum exceeds host capacity before
+JVM/native/other memory, but does not establish simultaneous residency. Later
+samples show file refaults and cache turnover despite nearly unchanged aggregate
+Cached bytes. Page-cache state remains a material confound; these medians do not
+establish a universal disk speedup or regression.
+
+The task metric gpuTime is host elapsed time while holding the GPU semaphore,
+not CUDA kernel time. Root checked GpuTaskMetrics and GpuSemaphore definitions:
+PCBS acquires before reader.next(), which can stage/copy/read host data under the
+lease. GPU wait/holding totals overlap across tasks and cannot alone establish
+GPU compute saturation. Retry/spill updates are absent in the eight inspected
+completed cases; missing updates remain unknown, not proven zero.
+
+Root independently replayed all original verifiers and the exact approved
+Java-options correction: 12 PASS / three genuine HEAP_OOM, identical metrics,
+16 actual input files and 180 raw evidence files. Initial and final content
+checks each verified 106,043,786,691 bytes; replay took 140.391 seconds. CSV/JSON/
+Markdown exports: ../canonical-repeat-queue/report001/summary.{csv,json,md}.
+Full replay: ../canonical-repeat-queue/reverified001/result.json; independent
+closure/metric checks: ../support-audit/root-repeat-final-checks001.json.
+OS analysis was rerun after sampler closure with an unchanged source hash;
+its original helper retains its provisional label. These checks do not supply
+missing OS history for the first pair or a causal GPU profile.
+
+## First matched cases (historical single-JVM comparison)
 
 | Implementation | Storage | Fill (s) | Warmup (s) | Measured-read median (s) | Observed heap peak (GiB) | Result |
 |---|---|---:|---:|---:|---:|---|
@@ -14,10 +90,10 @@ logical-buffer reader, separately from the older research multi-file prototype.
 | Existing PCBS | DISK_ONLY | 186.66 | 53.32 | 53.76 | 44.29 | PASS |
 | Row-group PCBS patch | DISK_ONLY | 164.03 | 79.40 | 70.24 | 18.05 | PASS |
 
-One fresh JVM per row so far. The patched measured reads were 45.764, 47.327 and
+One fresh JVM per row in this initial comparison. The patched measured reads were 45.764, 47.327 and
 40.242 seconds; these are three reads in one JVM, not three independent repeats.
 All four patched read row counts and sixteen column sums match the frozen oracle
-within the existing 1e-10 relative tolerance. No patched task failed or retried.
+within the existing 1e-10 relative tolerance. No patched Spark task failed or required another task attempt.
 The baseline failed its first read after 16.218 seconds in
 ObjectInputStream.readArray → JavaDeserializationStream → MemoryStore.putIterator
 → BlockManager.maybeCacheDiskValuesInMemory. That failure duration is not a
