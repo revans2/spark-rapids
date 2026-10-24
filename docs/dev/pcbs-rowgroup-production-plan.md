@@ -168,6 +168,30 @@ passing tests and preserves incomplete OOM evidence with unknown whole-cache
 sizes. Actual screen outcomes, report and independent hybrid raw replay remain
 pending; one JVM per cell provides screening evidence, not confidence bounds.
 
+The fixed12 report and hybrid raw replay adapters are source-reviewed and READY
+FOR REVIEW as preparation only: ../byte-target-screen/report_byte_screen_v1.py
+and reverify_byte_screen_v1.py, six small tests each passed independently by root
+and review. Actual report/replay are pending closure of the running screen. The
+replay retains original full canonical/world verifiers, exact approved canonical
+sidecars, all metric equality and initial/final actual content checks through the
+previously verified StableDigests implementation; it requires both locks and idle
+admission before reading payload/artifact content. Root also retained the final
+selected-source compatibility preflight: ../support-audit/final-selected-compatibility-preflight001.md.
+It identifies old source pins/counts and the writable Zinc cache requirement in
+future grouped/vendor owners; no final-source version coverage is claimed yet.
+
+Root reused the existing read-only OS sampler during matrix001, after reading
+its launcher and lifecycle. Sampler 560099 monitors exact parent 558869/start
+425892959, checked independently against /proc and initial sample metadata. Its
+source SHA is 96abe68e6b4878366c2b9d7968d5782c9698ea993e7169881731ec15da6cd56c.
+It reads aggregate /proc/cgroup counters at a nominal two-second interval, writes
+../byte-target-screen/matrix001/os-memory001.jsonl, stops on parent identity loss
+or its 7,200-second bound, and launches no Java/GPU workload. Sampling starts at
+1792817211941178921 epoch ns, partway through the first control fill; earlier
+history is unavailable. Sampling overhead is unmeasured and not assumed zero.
+It changes no data, storage or JVM/GPU control; resulting system observations
+remain aggregate evidence, not causal attribution.
+
 ## Historical implementation checkpoints
 
 The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,
