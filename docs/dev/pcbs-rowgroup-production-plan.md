@@ -206,7 +206,18 @@ four sixteen-column sum/row oracles. Root also generated the explicit audited
 comparison canonical-first-pair001.json. This is one fresh JVM per arm, not a
 statistical speed estimate or minimum-heap result. Baseline has no successful
 read median; patched fill was about 11% slower in this pair. Remaining default
-DISK_ONLY baseline/patched cases are running serially in remaining-default002;
+DISK_ONLY baseline/patched cases completed serially in remaining-default002,
+both strict-sidecar PASS and all four row/sum oracles exact. Baseline fill/read
+median/observed heap: 186.661 s / 53.764 s / 44.286 GiB. Patched: 164.026 s /
+70.240 s / 18.054 GiB. Root generated canonical-first-four001.json from the four
+explicit sidecars; an independent agent reparsed raw scalars, GC peaks and all
+read oracles. The observed 30.65% disk-read slowdown remains unresolved: patched
+reads physically fetched about 99 GB each, while baseline's last two fetched
+164 KB and zero. Global patched GC was lower; no causal attribution or universal
+speed claim. Do not assume excluded warmup means a fully warm filesystem cache.
+A read-only code/native trace is checking logical-file range segmentation; no
+production change or artifact replacement is authorized by that investigation.
+Fresh four-lane cross-version SQL queue sql-queue540-002 is now running serially;
 repeats, public data and decoded-layout diagnostics remain pending. Evidence is
 under ../production-runs and ../support-audit/first-pair-*-audit.json. All workers
 remain MCP docker_exec only; benchmark jobs own the sole JVM/GPU/build slot.

@@ -59,9 +59,13 @@ Scala tests plus nine Java tests, with RAT/style and artifact packaging. Root
 independently inspected the raw logs. No Spark source is changed. All supported
 release targets remain required; these three runtime checks are representative,
 not complete matrix coverage. Additional API/dependency boundary validation and
-fresh cross-version Java/Kryo SQL lanes are in progress. Matched production
-performance numbers are still pending; historical prototype timings above are
-not measurements of the new production logical reader.
+fresh cross-version Java/Kryo SQL lanes are in progress. The first four matched
+production cases are recorded in [production results](pcbs-rowgroup-production-results.md):
+the memory-and-disk baseline OOMs while the patch passes; both disk-only arms
+pass, with lower patched heap but slower reads. Physical I/O differs substantially
+and the read cost remains under investigation. These are one JVM per arm, not
+repeatability evidence. Historical prototype timings above are separate from
+the new production logical reader.
 
 Initial patch scope: GPU-written small records, combined GPU reads, CPU-reader
 and existing CPU-written-record compatibility. CPU parquet-mr producer streaming
