@@ -19,8 +19,17 @@ through the first warmup; missing history will remain unknown.
 Root read the new final-only OS phase adapter and its original metric decoder,
 independently passed its four pure tests, and obtained independent source review.
 Actual analysis waits for 12 READY receipts, a closed sampler and idle locks.
-Workers are preparing only narrow, versioned final-source compatibility launchers
-while the benchmark runs. No compilation or other workload runs concurrently.
+The versioned final-source boundary/grouped and vendor/SQL launchers are now
+source-reviewed by root and independent agents; root independently passed all
+18 new pure tests. Preparation is READY FOR REVIEW in ../crossversion/
+SELECTED-SOURCE-VERIFY-PREP-V1.md and SELECTED-VENDOR-SQL-PREP-V1.md.
+They require an explicit final source commit, fresh isolated worktrees, writable
+compiler caches and current 53-Scala/9-Java evidence. Grouped OSS builds remain
+compile/package-only; vendor attempts do not become runtime acceptance.
+No selected-source build, dependency-resolution attempt or SQL run has occurred.
+The 16/32 MiB choice may require a larger generated correctness fixture to
+preserve its multiple-record assertion; that assertion will not be weakened.
+No compilation or other workload runs concurrently with the benchmark.
 All root and worker project operations remain MCP docker_exec only.
 
 Current implementation checkpoint: the c385 production comparison is independently verified
