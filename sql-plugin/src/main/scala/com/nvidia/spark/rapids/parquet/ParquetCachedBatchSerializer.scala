@@ -1090,7 +1090,8 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
       sharedConf: Broadcast[Map[String, String]]) {
 
     val conf: SQLConf = getConfFromMap(sharedConf)
-    val bytesAllowedPerBatch = getBytesAllowedPerBatch(conf)
+    val bytesAllowedPerBatch = math.min(getBytesAllowedPerBatch(conf),
+      new RapidsConf(conf).parquetCacheRowGroupSizeBytes)
     val hadoopConf: Configuration = getHadoopConf(cachedAttributes.toStructType, conf)
 
     def getInternalRowToCachedBatchIterator: Iterator[CachedBatch] = {
@@ -1102,9 +1103,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
     }
 
     /**
-     * This class produces an Iterator[CachedBatch] from Iterator[InternalRow]. This is a n-1
-     * relationship. Each partition represents a single parquet file, so we encode it
-     * and return the CachedBatch when next is called.
+     * This class produces small Parquet CachedBatches from an Iterator[InternalRow].
      */
     class InternalRowToCachedBatchIterator extends Iterator[CachedBatch]() with AutoCloseable {
 
@@ -1222,8 +1221,8 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
       private val queue = new mutable.Queue[CachedBatch]()
 
       //estimate the size of a row
-      val estimatedSize: Int = cachedAttributes.map { attr =>
-        attr.dataType.defaultSize
+      val estimatedSize: Long = cachedAttributes.map { attr =>
+        attr.dataType.defaultSize.toLong
       }.sum
 
       override def next(): CachedBatch = {
@@ -1248,10 +1247,9 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
         // we will put it in the next CachedBatch
         var leftOverRow: Option[InternalRow] = None
         while (rowIterator.hasNext || leftOverRow.nonEmpty) {
-          // Each partition will be a single parquet file
           var rows = 0
-          // at least a single block
-          val stream = new ByteArrayOutputStream(ByteArrayOutputFile.BLOCK_SIZE)
+          val stream = new ByteArrayOutputStream(
+            math.min(ByteArrayOutputFile.BLOCK_SIZE.toLong, bytesAllowedPerBatch).toInt)
           val outputFile: OutputFile = new ByteArrayOutputFile(stream)
           conf.setConfString(SparkShimImpl.parquetRebaseWriteKey,
             LegacyBehaviorPolicyShim.CORRECTED_STR)
@@ -1265,7 +1263,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
           val recordWriter = SQLConf.withExistingConf(conf) {
             parquetOutputFileFormat.getRecordWriter(outputFile, hadoopConf)
           }
-          var totalSize = 0
+          var totalSize = 0L
           while ((rowIterator.hasNext || leftOverRow.nonEmpty)
             && totalSize < bytesAllowedPerBatch) {
 
@@ -1284,7 +1282,8 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
                   estimatedSize
               }
             }
-            if (totalSize <= bytesAllowedPerBatch) {
+            // A row larger than the budget must still make progress in its own record.
+            if (rows == 0 || totalSize <= bytesAllowedPerBatch) {
               rows += 1
               if (rows < 0) {
                 throw new IllegalStateException("CachedBatch doesn't support rows larger " +

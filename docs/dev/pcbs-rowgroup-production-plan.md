@@ -24,10 +24,12 @@ OFF_HEAP storage. Escalate unavoidable released-contract changes.
    large GPU input budgets and cuDF's default row limit are preserved. Existing
    internal helper callers were updated together; no compatibility overloads.
    Independent diff/caller review and git diff --check pass.
-2. CPU cap: PENDING. Use min(existing budget, target), retain the splitting loop,
-   and admit an oversized first row. The current loop instead postpones it forever.
-   UnsafeRows use actual row bytes; generic rows use schema estimates, so neither
-   this budget nor the GPU target is a universal encoded-size bound.
+2. CPU cap: IMPLEMENTED; runtime verification pending. The existing loop now uses
+   min(existing budget, target), Long accounting and first-row admission, avoiding
+   the former oversized-row stall. Initial output allocation is capped too, rather
+   than allocating 32 MiB for every small record. Independent source review and
+   git diff --check pass. UnsafeRows use actual row bytes; generic rows use schema
+   estimates, so neither CPU nor GPU targets guarantee a hard encoded-size bound.
 3. Focused tests: PENDING. Real GPU and CPU writes must produce multiple records
    with explicit size bounds and exact data. One ~20k-row GPU Python case retains
    nested/binary/decimal/timestamp/null/projection/reordering and CPU/GPU reads.
