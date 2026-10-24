@@ -4,7 +4,9 @@ Status: IN PROGRESS. The user authorized finishing the real-data sweep, then a
 reviewable production patch with tests, performance checks and independent agent
 reviews. The 48-case sweep is complete and READY FOR REVIEW: 46 PASS, two genuine
 heap OOMs; root independently reverified every result and frozen hash. Only the architect marks completed work DONE; verified work is READY FOR
-REVIEW. The real-data sweep remains the prerequisite for implementation.
+REVIEW. The research real-data sweep is complete. The production implementation is
+committed; its separate measurements and supported-version checks remain gates
+for final review.
 
 ## Implementation checkpoint
 
@@ -294,6 +296,43 @@ jar bundles through the existing install_deps.py workflow; no such bundles or DB
 runtime are available here. No vendor-resolution failure or universal readiness
 is inferred from cache absence. All operations and worker handoffs remain MCP
 docker_exec only.
+
+## Completed production public-data checkpoint
+
+All sixteen production public-data cases are READY FOR REVIEW: fifteen PASS and
+one genuine heap OOM in existing PCBS at GHArchive / 8 GiB / MEMORY_AND_DISK.
+The patched case passed. Every successful case has four exact read oracles and
+zero failed tasks. Root independently checked the final table against raw phase,
+GC, partition and oracle markers, then reran every unchanged original verifier
+with exact saved-result equality. All frozen artifacts, 32 input files and 192
+raw-evidence files passed content hashes and an independent final rehash.
+Evidence: ../world-queue/{complete001.*,reverified001/result.json} and
+../support-audit/world-complete-raw001.json. No production source changed.
+
+The measurements expose real tradeoffs: TLC reads are 20–42% slower and payloads
+about 8.9% larger; GHArchive 48 GiB mixed storage has 18% slower reads and 9%
+higher observed heap. Small-heap disk cases reduce heap substantially, and the
+patch avoids the observed mixed-storage OOM. These are one-JVM pairs, not
+universal performance or minimum-heap claims. The complete results and units are
+in pcbs-rowgroup-production-results.md. Independent interpretation review agrees.
+
+Both the fixed world queue and its read-only OS sampler ended; root verified no
+remaining JVM or GPU process before the next admission. The reviewed eleven-run
+canonical repeat queue is now active at ../canonical-repeat-queue/repeats001:
+eight additional default-control JVMs and three explicitly separate current
+baseline reset1/unroll1 JVMs. Parent PID509641/startticks425053211 and bounded
+sampler PID509661 were recorded. No repeat outcome is claimed at this checkpoint.
+All other controls remain fixed, including memory fraction0.6. No cache flushing,
+forced GC, automatic scratch deletion or overlapping builds/profiles.
+
+Decoded-layout diagnostics, four boundary full verifications, grouped OSS
+compilation and real Databricks coverage remain pending. Root created detached
+boundary/grouped worktrees at 1966a46404b49cbd6d122b807bdf9a7e92c411b6; production
+main code there equals c385525a51. Preparation is not a successful build.
+Logical-input segment coalescing is a performance hypothesis only; no optimization
+or artifact change has been made during the matched series. CPU-producer work
+and heavy downstream GPU workloads remain deferred. All project and worker
+operations continue through MCP docker_exec only.
 
 ## Scope and compatibility
 

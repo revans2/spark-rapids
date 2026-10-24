@@ -1,8 +1,8 @@
 # PCBS row-group production measurements
 
-Status: IN PROGRESS. The first four matched cases are verified and READY FOR REVIEW.
-Fresh-JVM repeats, public-data measurements and decoded batch-layout diagnostics
-are pending. These measurements use the production
+Status: IN PROGRESS. The first four synthetic cases and all sixteen production
+public-data cases are independently verified and READY FOR REVIEW. Fresh-JVM
+synthetic repeats and decoded batch-layout diagnostics are pending. These measurements use the production
 logical-buffer reader, separately from the older research multi-file prototype.
 
 ## First matched cases
@@ -75,6 +75,75 @@ lengths, including their file framing; they exclude Java serialization framing.
 They are not physical cache-file sizes or GPU residency. The 8 MiB writer target
 is soft, and this workload does not establish a bound for large rows or strings.
 Actual decoded GPU batch sizes still need the separate layout diagnostic.
+
+## Production public-data measurements
+
+All sixteen cases completed: fifteen PASS, and existing PCBS filled its GHArchive
+cache at 8 GiB before a genuine Java heap OOM during its first read. The patch
+passed that case. Both implementations retain ordinary Spark Java serialization;
+this is the production row-group patch, not the research codec.
+
+Controls match the synthetic cases except for the listed heap and dataset:
+eight local slots, sixteen immutable input partitions, the same 1 GiB GPU target,
+15 GiB managed GPU pool, two concurrent GPU tasks, 40 GiB managed host limit,
+2 GiB pinned pool, default reset100/unroll16, memory fraction0.6 and SNAPPY.
+Timestamp inference uses inferTimestampNTZ=false and UTC in both arms and their
+CPU-derived oracles. GHArchive contains 32,078,549 rows / 91.095 GiB semantic
+values; TLC contains 239,470,448 rows / 31.108 GiB. Semantic sizes exclude offsets,
+null masks and padding and do not measure GPU allocations.
+
+Each cell below is existing PCBS → patched PCBS. Read is the median of three
+within-JVM reads after a separate warmup; each arm has one fresh JVM.
+
+| Dataset | Heap GiB | Storage | Fill (s) | Read (s) | Observed heap GiB |
+|---|---:|---|---:|---:|---:|
+| GHArchive | 48 | DISK_ONLY | 48.72 → 46.77 | 15.33 → 15.05 | 20.98 → 16.00 |
+| GHArchive | 48 | MEMORY_AND_DISK | 32.93 → 32.62 | 6.07 → 7.16 | 25.33 → 27.66 |
+| GHArchive | 8 | DISK_ONLY | 51.76 → 44.10 | 18.07 → 15.76 | 7.44 → 2.98 |
+| GHArchive | 8 | MEMORY_AND_DISK | 50.30 → 47.47 | OOM → 16.41 | 7.44 → 6.42 |
+| TLC | 48 | DISK_ONLY | 18.23 → 18.54 | 4.96 → 6.20 | 16.00 → 15.99 |
+| TLC | 48 | MEMORY_AND_DISK | 12.71 → 13.89 | 3.55 → 4.64 | 12.06 → 12.70 |
+| TLC | 8 | DISK_ONLY | 17.25 → 16.50 | 5.20 → 6.26 | 7.04 → 2.79 |
+| TLC | 8 | MEMORY_AND_DISK | 14.37 → 14.66 | 3.89 → 5.52 | 7.31 → 5.74 |
+
+The patch avoids the observed OOM and reduces heap pressure in the small-heap
+disk cases. The benefit is conditional: TLC reads are 20–42% slower; GHArchive
+at 48 GiB with MEMORY_AND_DISK reads 18% slower with 9% higher observed heap.
+TLC's corresponding heap peak is 5% higher. Fill differences range from 15%
+faster to 9% slower. Observed occupancy includes garbage and does not establish
+the minimum heap or a live-set requirement.
+
+| Dataset | Parquet payload GiB, existing → patch | Payload / semantic bytes | Records | Maximum record MiB |
+|---|---:|---:|---:|---:|
+| GHArchive | 23.512 → 23.336 | 25.81% → 25.62% | 128 → 11,722 | 258.1 → 3.90 |
+| TLC | 5.755 → 6.265 | 18.50% → 20.14% | 52 → 5,346 | about 153.2 → 1.49 |
+
+TLC's payload is about 8.9% larger. These are complete Parquet array lengths,
+including framing. Captured Java-serialized block-file lengths are reported
+separately in the full table, only when all sixteen partition files exist at one
+checkpoint. Partial mixed residency cannot provide a whole-cache file ratio.
+Spark MemoryStore estimates are also distinct: GHArchive's patched 48 GiB
+mixed case reports about 22.032 GiB while arrays total 23.336 GiB. Changed Parquet
+layout, encoding and framing affect size; this is not a comparison of generic
+Java compression algorithms.
+
+The runs do not isolate the cause of read regressions. More records introduce
+metadata and input-segment work, while compression, residency and filesystem
+cache also differ. Warmup does not equalize the page cache. No forced GC, cache
+flush or memory-fraction tuning was added. Earlier CPU-default and custom-codec
+measurements remain separate historical fixture/runtime cohorts. CPU oracles
+here are correctness controls, not CPU cache-performance measurements.
+
+The full table, including warmup, RSS, record ranges, payload ratios and actual
+storage estimates, is retained at world-queue/complete001.{md,csv,json} under the
+evidence root. Root independently checked every scalar against raw phase,
+record, GC and CPU-oracle markers in support-audit/world-complete-raw001.json.
+Root then reran all sixteen unchanged original verifiers, obtaining exact
+retained-result equality, and hashed all frozen artifacts, 32 actual input
+files and 192 raw-evidence files. An independent final content rehash also
+passed: world-queue/reverified001/result.json. No OOM timing was converted to
+a successful read median. These are single-JVM measurements, not independent
+run-to-run confidence intervals.
 
 ## Evidence and verification
 

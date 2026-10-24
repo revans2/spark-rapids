@@ -2,8 +2,22 @@
 
 Status: READY FOR REVIEW — bounded BlockManager codec/native lifetime/recovery
 research, scheduler-token research, newer-version audit and upstream proposal verified. Prior reproduction/prototype
-results remain READY FOR REVIEW. Production implementation and architect
-acceptance are pending.
+results remain READY FOR REVIEW. The production row-group patch is committed;
+its remaining validation and architect acceptance are pending.
+
+## Production public-data validation
+
+The plugin-only row-group patch has a separate completed sixteen-case production
+matrix, independently reverified with exact original-verifier results and content
+hashes: fifteen PASS, one existing-PCBS heap OOM at GHArchive / 8 GiB /
+MEMORY_AND_DISK. The patch passes that case. TLC reads are 20–42% slower and
+payloads about 8.9% larger; GHArchive 48 GiB mixed storage also has slower reads
+and higher observed heap. Benefits depend on data and residency. See
+[production measurements](pcbs-rowgroup-production-results.md) and the
+[committed production tracker](pcbs-rowgroup-production-plan.md). Fresh canonical
+default versus reset1/unroll1 repeats are running; no repeat outcomes are claimed
+here. Existing research-codec/CPU timings remain separate cohorts. No Spark-core,
+Spark OFF_HEAP, public config or production codec changes were introduced.
 
 ## Public-data compression, heap and storage experiments (2026-10-23)
 
