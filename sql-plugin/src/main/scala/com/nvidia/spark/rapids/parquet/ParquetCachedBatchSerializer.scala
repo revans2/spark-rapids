@@ -380,7 +380,8 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
 
             for (i <- splitVectors.head.indices) {
               withResource(makeTableForIndex(i)) { table =>
-                val buffer = writeTableToCachedBatch(table, schema, useCompression, rowGroupSizeBytes)
+                val buffer = writeTableToCachedBatch(table, schema, useCompression,
+                  rowGroupSizeBytes)
                 buffers += buffer
               }
             }
@@ -1303,9 +1304,8 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
     }
 
     /**
-     * This class produces an Iterator[CachedBatch] from Iterator[ColumnarBatch]. This is a 1-1
-     * relationship. Each ColumnarBatch is converted to a single ParquetCachedBatch when next()
-     * is called on this iterator
+     * This class produces cached records from host columnar batches using the CPU row writer.
+     * A columnar batch may produce multiple records under the cache byte budget.
      */
     class ColumnarBatchToCachedBatchIterator extends InternalRowToCachedBatchIterator
         with AutoCloseable {

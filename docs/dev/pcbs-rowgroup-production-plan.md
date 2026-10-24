@@ -1,15 +1,14 @@
 # Parquet cache production tracker
 
-Status: IN PROGRESS. Only the architect marks work DONE.
-All project operations, worker handoffs and checkpoints use MCP docker_exec.
+Status: READY FOR REVIEW. Only the architect marks work DONE.
+Use MCP docker_exec for every project operation, worker handoff and checkpoint.
 Work in the main checkout on pcbs-rowgroup-production; no new worktrees.
 
-Human decisions (2026-10-24): both CPU and GPU writers are in scope, since CPU
-records can still approach the large GPU input budget. Add an internal,
-undocumented cache-record byte target (default 8 MiB) so tests can use small data.
-Remove the specified storage/compression matrix, partial-unpersist and filter
-checks; retain focused size, type and CPU/GPU read coverage.
-These decisions supersede the former CPU-writer/config exclusions.
+Human decisions (2026-10-24): both CPU and GPU writers are in scope because CPU
+records could still approach the large input budget. Add an internal, undocumented
+cache-record byte target (default 8 MiB) so tests can use small data. Remove the
+specified storage/compression matrix, partial-unpersist and filter tests; retain
+focused size, type and CPU/GPU read coverage. These supersede the former exclusions.
 
 RELEASED: PCBS CPU/GPU read/write behavior, supported types, projection/reordering,
 row counts, compression, storage levels, ParquetCachedBatch(numRows, Array[Byte])
@@ -18,33 +17,83 @@ UNRELEASED: row-group splitting, read bundling, the internal conf and branch-add
 tests; change directly without compatibility shims. No Spark changes or Spark
 OFF_HEAP storage. Escalate unavoidable released-contract changes.
 
-1. Shared internal target: IMPLEMENTED; runtime verification pending. Internal
+1. Shared internal target: READY FOR REVIEW. Internal
    spark.rapids.sql.cache.serializer.rowGroupSizeBytes defaults to 8 MiB (min 1 KiB).
-   Both GPU entry paths capture the query conf and pass the target explicitly;
-   large GPU input budgets and cuDF's default row limit are preserved. Existing
-   internal helper callers were updated together; no compatibility overloads.
-   Independent diff/caller review and git diff --check pass.
-2. CPU cap: IMPLEMENTED; runtime verification pending. The existing loop now uses
-   min(existing budget, target), Long accounting and first-row admission, avoiding
-   the former oversized-row stall. Initial output allocation is capped too, rather
-   than allocating 32 MiB for every small record. Independent source review and
-   git diff --check pass. UnsafeRows use actual row bytes; generic rows use schema
-   estimates, so neither CPU nor GPU targets guarantee a hard encoded-size bound.
-3. Focused tests: PENDING. Real GPU and CPU writes must produce multiple records
-   with explicit size bounds and exact data. One ~20k-row GPU Python case retains
-   nested/binary/decimal/timestamp/null/projection/reordering and CPU/GPU reads.
-   Reuse the existing converted-row CPU test if it exercises the cap. Remove the
-   storage matrix, partial-unpersist, filter checks/allowances and unused narrow shape.
+   Both GPU entry paths capture query conf and pass the target explicitly; large
+   GPU input budgets and cuDF's default row limit are preserved. Helper callers
+   were updated together, without compatibility overloads or public documentation.
+2. CPU cap: READY FOR REVIEW. The existing loop uses min(existing budget, target),
+   Long accounting and first-row admission, avoiding the oversized-row stall.
+   Initial output allocation is capped too. UnsafeRows use actual row bytes;
+   generic rows retain schema estimates. The CPU loop still queues a partition's
+   records eagerly. Neither CPU nor GPU targets guarantee a hard encoded bound.
+3. Focused tests: READY FOR REVIEW. Four Scala cases check real writes and exact
+   data: GPU 20k Longs at 16 KiB, records <= 2 * target; CPU target/global budgets
+   16 KiB/1 MiB and 32 KiB/16 KiB, records <= budget + 4096; three oversized 2 KiB
+   strings at a 1 KiB target each make a one-row record. Comments explain the
+   data-specific fragment/footer allowances; assertions were not loosened.
+   Python uses 20,001 rows, a 1 MiB internal target and a 1 GiB GPU target; checks
+   nested/binary/decimal/timestamp/null values, projection/reordering, CPU/GPU reads,
+   actual record count, row totals and sizes <= 2 * target + 64 KiB. The existing
+   converted-row CPU case verifies multiple records at a 1 KiB internal target.
+   Removed the authorized storage/compression matrix, partial-unpersist, filter
+   checks and EqualTo/Remainder/LessThan allowances, and unused 131k-row narrow shape.
 
-Acceptance: builds for the Maven default (330), another 3.3.x and a 4.x target;
-ParquetCachedBatch*Suite, ParquetBufferConsumerSuite, CachedGpuBatchIteratorSuite,
-CachedBatchWriterSuite; full cache_test.py with PCBS and default parallel settings,
-recording the new test duration. No weakened assertions. Record each rule's case,
-commands, results and independent review; mark completed tasks READY FOR REVIEW.
-Park for non-fixture CPU regressions, unaffordable GPU fragments, unavoidable
-released behavior changes or an unresolved contradiction.
+Verification (2026-10-24), evidence E=/data/pcbs-oom/pcbs-rowgroup-followup:
+
+| Check | Result | Evidence under E |
+| --- | --- | --- |
+| Default Spark 3.3.0 verify | 59 Scala + 9 Java passed; 5m09s reactor, 46s Scala | default330-tests.log |
+| Spark 3.3.4 package | PASS, 1m44s; compilation/package only | package334.log |
+| Spark 4.0.1 / Scala 2.13 package | PASS, 1m06s; compilation/package only | package401.log |
+| Spark 3.5.5 runtime artifacts | PASS, 4m02s | package355.log |
+| Full cache_test.py, PCBS, default parallel | 620 passed, 4 default large-data skips; 84.154s, 8 workers | cache-default-parallel.xml, .stdout.log, .stderr.log |
+| New GPU Python test | PASS, 4.009s; 19 records, max 73,647 encoded bytes | XML properties cached_record_count / max_cached_record_bytes |
+
+Commands below show the acceptance selections; logs retain output. Maven calls
+also used -nsu -ntp, -l for the listed log, and separate -DsecondaryCacheDir paths.
+The default verify uses the temporary mvn-with-code-cache.sh under E, which only
+appends -XX:ReservedCodeCacheSize=512m to MAVEN_OPTS, preserving existing options.
+
+```bash
+# Build cwd: /data/pcbs-oom/production-cleanup-verify/source
+E=/data/pcbs-oom/pcbs-rowgroup-followup
+S=com.nvidia.spark.rapids.parquet.ParquetCachedBatch,com.nvidia.spark.rapids.parquet.ParquetBufferConsumerSuite,com.nvidia.spark.rapids.CachedGpuBatchIteratorSuite,com.nvidia.spark.rapids.CachedBatchWriterSuite
+$E/mvn-with-code-cache.sh -pl tests -am verify -DwildcardSuites="$S" -Drapids.parallelUnitTests=false
+rapids-plugin-mvn -Dbuildver=334 -pl sql-plugin -am package
+rapids-plugin-mvn -f scala2.13/pom.xml -Dbuildver=401 -pl sql-plugin -am package
+$E/mvn-with-code-cache.sh -Dbuildver=355 -pl dist,integration_tests -am package
+
+env -u TEST -u TEST_TAGS -u TEST_PARALLEL -u MAX_PARALLEL -u TEST_TYPE \
+  -u RANDOM_SELECT -u RANDOM_SELECT_SEED -u RUN_TEST_PARAMS -u PYTEST_ADDOPTS \
+  -u SKIP_TESTS -u LOCAL_JAR_PATH -u INTEGRATION_TEST_VERSION_OVERRIDE -u PLUGIN_JAR \
+  JAVA_HOME=/usr/lib/jvm/java-17-openjdk SPARK_HOME=/home/roberte/src/spark_3.5.5 \
+  TESTS=cache_test.py \
+  PYSP_TEST_spark_sql_cache_serializer=com.nvidia.spark.ParquetCachedBatchSerializer \
+  ./integration_tests/run_pyspark_from_build.sh --durations=20 -rs \
+  --junitxml="$E/cache-default-parallel.xml" --log-file="$E/cache-default-parallel.pytest.log"
+```
+
+All required ParquetCachedBatch*Suite, ParquetBufferConsumerSuite,
+CachedGpuBatchIteratorSuite and CachedBatchWriterSuite cases passed. Scalastyle,
+license and scheduled build checks remained enabled. Builds used the existing
+tracked-source export to exclude unrelated untracked files from license checks;
+all six changed implementation/test files were independently compared byte-for-byte
+with the main checkout. No worktree was created. Independent worker review and
+lead source/output inspection found no blockers; git diff --check passed.
+
+Corrections preserved inputs, budgets and assertions: the existing Mockito writer
+fixture retained every empty output buffer; stubOnly() removes that unused history.
+The new direct GPU fixture initially wrote original column names; it now uses the
+production cached-schema helper. Logs default330-verify.log and
+default330-verify-final.log retain those failures. default330-verify-retry.log
+records a compiler run stopped after its JIT code cache filled; the Maven-only
+cache increase leaves forked test settings unchanged. Python teardown emitted
+Py4J closed-log-stream warnings after successful tests. No production fix was
+needed for these verification issues.
 
 Prior cleanup removed 103 research tools/36 documents and shared reader lifecycle,
-footer/stream/task cleanup. Its verification predates this follow-up. Historical
-reports remain in Git; raw evidence is under /data/pcbs-oom. Databricks dependencies
-and runtimes remain unavailable; no vendor validation claim.
+footer/stream/task cleanup. Historical reports remain in Git; raw evidence is under
+/data/pcbs-oom. Databricks dependencies/runtimes remain unavailable; no vendor
+validation claim. Park any non-fixture CPU regression, unaffordable GPU fragment,
+unavoidable released-contract change or unresolved contradiction.

@@ -136,7 +136,8 @@ class ParquetCachedBatchFilesGpuSuite extends SparkQueryCompareTestSuite {
       val narrowSchema = new StructType().add("id", IntegerType, nullable = false)
       val options = new ParquetCachedBatchSerializer()
         .getParquetWriterOptions(useCompression = false, schema = narrowSchema,
-          rowGroupSizeBytes = new RapidsConf(Map.empty[String, String]).parquetCacheRowGroupSizeBytes)
+          rowGroupSizeBytes = new RapidsConf(Map.empty[String, String])
+            .parquetCacheRowGroupSizeBytes)
       assert(options.getRowGroupSizeRows == ParquetWriterOptions.builder().build()
         .getRowGroupSizeRows)
       withResource(ColumnVector.fromInts((0 until count).toArray: _*)) { ids =>
