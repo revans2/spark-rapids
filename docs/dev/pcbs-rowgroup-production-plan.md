@@ -144,9 +144,18 @@ ordered commands, every actual implementation-family raw/module/dist class,
 tracked-source coverage and initial/final content checks of 1,617,647,200 bytes.
 This is COMPILE_PACKAGE_ONLY with runtime_tests_passed=null; no extra unit,
 SQL, runtime or target-private provenance credit is inferred.
-The full nineteen-target Scala2.13 group is RUNNING under supervisor727454 at
-../crossversion/selected-grouped213-001, source8ab82c90a6, unchanged normal serial
-buildall and 10,800-second total deadline. Actual vendor attempts remain open.
+The full nineteen-target Scala2.13 group is also READY FOR REVIEW:
+../crossversion/selected-grouped213-001-accepted.json. All nineteen targets and
+the combined distribution succeeded in 2,544.689 seconds; both the generator and
+buildall exited0 with no changed sources, termination actions or remaining owned
+processes. Root independently replayed all target/source/class proofs and
+initial/final content checks of 1,674,671,814 bytes; the standard Scala2.13
+generator was byte-identical. All39 OSS release-pair compile/package gates are
+verified. This adds no unit, SQL, runtime or target-private provenance credit.
+The three real vendor compile attempts are RUNNING under supervisor777772 at
+../crossversion/selected-vendor-8ab001, source8ab82c90a6, with separate fresh
+writable Zinc, normal real vendor coordinates and 1,800-second per-case deadlines.
+No vendor compilation or runtime pass is claimed.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
