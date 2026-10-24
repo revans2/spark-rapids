@@ -222,6 +222,29 @@ repeats, public data and decoded-layout diagnostics remain pending. Evidence is
 under ../production-runs and ../support-audit/first-pair-*-audit.json. All workers
 remain MCP docker_exec only; benchmark jobs own the sole JVM/GPU/build slot.
 
+The next eleven canonical repeat/control JVMs are PREPARED, not run:
+../canonical-repeat-queue. Root read the full launcher and reran its eight tiny
+Python checks; an independent agent found no material issue. Default orders are
+counterbalanced across repeats 2/3; baseline reset1/unroll1 has three separately
+labelled cases. All use the identical 96 GiB data, runtime, query and other controls.
+Each case requires 208 GiB free disk; insufficient space parks rather than deletes
+owned scratch or raw evidence. No cache flush, forced GC or memory-fraction change.
+
+Read-only native tracing found one HMB view per column chunk in logicalFile; the
+matching cuDF source coalesces logical reads but submits a transfer per input HMB
+boundary. Adjacent views in one parent could merge without payload copies. This
+is an unmeasured optimization hypothesis, not the established cause of the disk
+read difference. Root read the decisive HMB transfer loop and production assembly.
+The optional profiling-plan contains separate Nsight command plans only: no profile
+or optimization has run, and any future artifact/profile is a distinct cohort.
+All workers remain MCP docker_exec only, including checkpoint confirmations.
+
+Root created six dedicated detached worktrees at full commit
+1966a46404b49cbd6d122b807bdf9a7e92c411b6 for the four additional boundary checks
+and two grouped OSS builds. This commit has the identical production main code.
+The build launchers are prepared and root's tiny boundary/grouped checks pass;
+no new Maven/dependency/runtime build is credited until actually scheduled.
+
 Existing build/buildall can compile/package the 39 OSS Scala/build pairs, grouped
 by Scala line, then assemble each multi-shim distribution. It hardcodes skipped
 tests and cannot replace runtime/boundary gates. It also permits packaging fallback
