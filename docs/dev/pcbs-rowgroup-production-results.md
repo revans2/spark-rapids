@@ -10,6 +10,36 @@ pair is closed and its analysis is READY FOR REVIEW, not causal performance proo
 These measurements use the production logical-buffer reader, separately from the
 older research multi-file prototype.
 
+## Why stored record size matters
+
+Spark's default safeguards count records rather than bytes. In the inspected
+3.5.5 MemoryStore loop, unroll period16 checks after records1,17,33 and so on,
+after the object has already been materialized. The check belongs to one
+putIterator operation; it is not a global allocation limit. Java reset100 counts
+top-level writes in one serialization stream. The reader consumes those reset
+markers later; neither setting bounds a nested array allocation in advance.
+The unrolled prefix and Java handles can reference the same arrays, so their
+sizes must not simply be added.
+
+For illustration, six distinct 1 GiB arrays per partition can reach 48 GiB of
+payload across eight tasks before considering other heap users. There is no
+periodic reset within those six records, and no second periodic unroll check
+before the final reservation. This is a possible-overlap example, not the
+measured canonical layout or a universal heap formula. If actual arrays are
+8 MiB instead, sixteen new arrays represent 128 MiB and a hundred-array interval
+800 MiB. Actual encoded array length is what matters here, not the uncompressed
+row-group target or decoded GPU batch size.
+
+Smaller records make those count-based delays less costly in bytes, while adding
+footer, object and transfer work. Reassembling them for GPU decoding separates
+stored record size from the GPU processing target. Outer Spark compression changes
+serialized storage bytes; decompression still restores the same array length
+before PCBS decoding. It can change IO and CPU cost without shrinking the
+materialized Parquet arrays. This source explanation is not a fitted memory model
+or a measured bottleneck claim. Decisive source and full qualifications:
+../support-audit/record-budget-explanation001.md. Root independently read the
+MemoryStore, JavaSerializer, SerializerManager and NextIterator paths.
+
 ## Verified byte-only target screen
 
 All twelve cases PASS with no failed Spark tasks. The eight canonical cases use

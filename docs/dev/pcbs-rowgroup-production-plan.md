@@ -22,6 +22,11 @@ The earlier broad nested-coverage concern was overstated. Very wide schemas and
 explicit logical-bundle counts remain coverage limits, not observed failures.
 Source-only receipt: ../support-audit/final-byte8-source-review001.md. This does
 not replace the remaining actual version gates or final human review.
+The results now explain the distinct record-count safeguards and compression byte
+domains from decisive source: root independently read MemoryStore's post-record
+1/17/33 checks, JavaSerializer's top-level reset counter, NextIterator prefetch and
+SerializerManager's compression wrapping. Illustrative byte arithmetic is not a
+hard heap budget; source draft ../support-audit/record-budget-explanation001.md.
 
 The user authorized finishing the real-data sweep, then a
 reviewable production patch with tests, performance checks and independent agent
