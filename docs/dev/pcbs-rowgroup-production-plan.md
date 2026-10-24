@@ -480,6 +480,14 @@ JNI/private artifacts and original baseline. No actual candidate Maven build,
 artifact freezing, runtime gate or new benchmark has run. See
 ../crossversion/BYTE-TARGET-BUILD-PREP.md for exact prerequisites and limitations.
 
+Root reread the decisive Spark Java stream-reset and MemoryStore admission loops
+and recorded a source-based memory model in
+../support-audit/byte-target-memory-model001.md. Independent review checked the
+arithmetic and required clarifying Parquet versus outer Spark stream compression;
+that clarification is applied. The record-retention and admission scales overlap
+and are not additive heap bounds. Actual encoded sizes and observed heap still
+need the new screen; these formulas predict neither universal success nor OOM.
+
 All operations and worker checkpoints continue via MCP docker_exec. Root owns
 scheduling and actual acceptance checks. Preparations are READY FOR REVIEW;
 production and measurement acceptance remain IN PROGRESS.
