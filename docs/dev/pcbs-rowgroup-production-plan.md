@@ -452,6 +452,15 @@ every dimension. No new screen has run. Scope/identities/reporting:
 ../support-audit/byte-target-sweep-plan001.md; source review and build approach:
 ../support-audit/byte-target-review-build-plan001.md.
 
+The 16 and 32 MiB experimental sources are now committed, clean and independently
+reviewed: cebb9206d5c3b0cbd13a6e6e6069cf611264d6b3 in
+../byte-target16-worktree and abec8b6da5578207e8118793f8f2eee5cc21c9ef in
+../byte-target32-worktree. Each complete tree differs from byte8 only in the
+private byte constant. No GPU target, input, test, POM or public config changes.
+They remain unbuilt and unmeasured; preparation is READY FOR REVIEW, candidate
+acceptance IN PROGRESS. Root created them during the diagnostic-only layout run;
+no primary performance timings are being collected concurrently.
+
 All supported-version acceptance must be rerun against the eventual selected
 source, not just the earlier c385 implementation. Existing boundary/grouped/vendor
 worktrees and fixed-commit plans remain preparations; update them explicitly to
@@ -523,8 +532,11 @@ preserves original runners/oracles and the strict option correction, and retains
 one-JVM screening and OOM limitations. Actual artifact admission and runtime have
 NOT RUN. The existing decoded-layout pair's earlier independent five-test review
 is reconciled in ../layout-queue/README.md; only stale pending wording changed.
-Root plans that diagnostic after the repeat replay; its times are excluded from
-performance comparisons and its runtime remains unverified.
+Root launched it after the successful repeat replay at ../layout-queue/pair001,
+supervisor PID525296. It is the sole active JVM/GPU/build-slot owner, beginning
+with baseline and then frozen c385. Its times are excluded from performance
+comparisons; actual layout verification is IN PROGRESS. Workers remain MCP-only
+and cannot launch follow-on jobs; root independently verifies its acceptance.
 
 A minimal future world-compression adapter at ../compression-profiles is also
 source-reviewed by root and an independent worker; both reran six tiny tests PASS.
