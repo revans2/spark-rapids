@@ -4,7 +4,10 @@ Status: IN PROGRESS. The fixed 20-case outer-compression comparison is now
 RUNNING at ../compression-queue/matrix001 under supervisor 598683, using the
 accepted builds004 byte8/default-row manifest. Both public datasets retain all
 rows, 48 GiB heap and DISK_ONLY; only outer Spark compression changes. No completed
-matrix result is claimed. No benchmark, build or heavy profile analysis overlaps.
+matrix result is claimed. The global codec also applies to task broadcasts,
+SQL result collection and applicable shuffle/spill; OFF disables RDD-cache
+compression only. Timings compare whole-query settings, not isolated cache-codec
+cost. Cache-file ratios remain specific to the captured cache representation. No benchmark, build or heavy profile analysis overlaps.
 MCP docker_exec remains mandatory for root and workers. JFR interpretation and
 final supported-version gates remain open; the optional adjacent-view prototype
 stays isolated because its bracket did not establish a wall-time improvement.
