@@ -147,8 +147,25 @@ sent with send_message to a completed worker did not restart it, causing idle ti
 Use followup_task for every new executable handoff, even when a worker may still
 be running; reserve send_message for information. Check worker state after a
 completion before assuming a queued action is active. This repeats an earlier
-coordination mistake; no code/results changed. Current next gate is isolated330
-full verify (crossverify330-001);401 runtime and matched performance remain pending.
+coordination mistake; no code/results changed.
+
+Cross-version full verify gates are READY FOR REVIEW: Spark 3.3.0 / Scala 2.12
+(crossverify330-001, 374.644 seconds) and Spark 4.0.1 / Scala 2.13
+(crossverify401-001, 382.310 seconds). Each passed 52 selected Scala tests and
+nine Java tests, zero failures/skips, RAT/style and the full selected reactor.
+Root inspected raw logs, exact commands and successful process reports; no source
+changes or live owned processes remained. This supplements the Spark 3.5.5 gate,
+not a claim that three runtimes cover every supported release. The production
+patch changes RAPIDS only; these version labels identify validation environments.
+
+The release matrix contains 42 Scala/build pairs across 32 targets. All supported
+versions remain in scope. A focused audit is checking the actual Spark-supplied
+Parquet dependencies and both existing newBlockMeta/cache-scan shim boundaries;
+the Maven test-artifact Parquet property is not production dependency evidence.
+Vendor-runtime availability and additional boundary builds must be recorded
+explicitly. Four fresh Java/Kryo SQL lanes on 3.3.0 and 4.0.1 are now scheduled
+serially; matched production performance remains pending. All operations and
+worker handoffs remain MCP docker_exec only.
 
 ## Scope and compatibility
 

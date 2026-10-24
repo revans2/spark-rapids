@@ -53,6 +53,16 @@ codec separate. Existing PCBS/Spark/StorageLevel contracts are RELEASED (main an
 deployed); prototype helpers/formats/overlays are UNRELEASED, with no compatibility
 adapters. No Spark core/OFF_HEAP/new public config or external posting.
 
+Cross-version production verification now passes Spark 3.3.0 / Scala 2.12 and
+Spark 4.0.1 / Scala 2.13 as well as 3.5.5: each full verify lane runs 52 selected
+Scala tests plus nine Java tests, with RAT/style and artifact packaging. Root
+independently inspected the raw logs. No Spark source is changed. All supported
+release targets remain required; these three runtime checks are representative,
+not complete matrix coverage. Additional API/dependency boundary validation and
+fresh cross-version Java/Kryo SQL lanes are in progress. Matched production
+performance numbers are still pending; historical prototype timings above are
+not measurements of the new production logical reader.
+
 Initial patch scope: GPU-written small records, combined GPU reads, CPU-reader
 and existing CPU-written-record compatibility. CPU parquet-mr producer streaming
 and profiling and heavy downstream GPU queries remain separate follow-ups.
