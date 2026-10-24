@@ -23,8 +23,14 @@ The baseline diagnostic passed strict version-2 validation: 112 returned GPU
 batches across 16 partitions, 805,306,368 rows and 16 columns; represented returned
 buffers range from 819,467,520 to 953,942,144 bytes. Its actual plan contains only
 the raw scan, with no full-row coalescer. These are represented buffer sizes,
-not allocation peaks or timing measurements. The patched diagnostic is pending.
-Evidence: ../layout-queue/pair001. Root independent replay remains pending.
+not allocation peaks or timing measurements. The patched diagnostic also passed: 112 batches and the same exact rows/columns,
+with median/max represented buffers of 1,072,241,792 bytes and a smaller final
+batch per partition. Its actual plan also has no separate full-row coalescer.
+Root independently replayed both complete strict verifiers and required exact
+retained-result equality, then confirmed no live JVM or GPU owner. Small stored
+records therefore still produce large GPU batches in this measured workload.
+Evidence: ../layout-queue/pair001 and ../support-audit/root-layout-pair001.json.
+Diagnostic timings are excluded from the primary performance comparison.
 
 The new byte8 Java/Kryo SQL owner is prepared in ../byte-target-sql, independently
 reviewed, and root independently passed its four small acceptance tests. It requires
@@ -32,8 +38,13 @@ actual three-candidate 53-Scala/9-Java build manifests, the clean committed byte
 source, exactly nine non-skipped cases per lane, observed 4 GiB SparkSubmit heap,
 actual serializer/registrator and exact full-path plugin class origins. Review
 caught and corrected a filename-only origin check before execution. No candidate
-build or SQL runtime result is claimed yet. Next runtime work remains the reviewed
-three-build owner after the layout pair completes and root confirms quiescence.
+build or SQL runtime result is claimed yet. After layout acceptance and verified
+quiescence, root launched the reviewed three-build owner at
+../crossversion/byte-target-builds001 (supervisor 528536). It builds committed
+byte8 d9ba8787f6, byte16 cebb9206d5 and byte32 abec8b6da5 sequentially; each must
+actually pass the fresh 53-Scala/9-Java verify and matched artifact checks before
+any benchmark admission. Worker monitoring remains MCP docker_exec only; root
+owns subsequent scheduling and independent acceptance.
 
 The fixed 20-cell outer-compression queue is prepared in ../compression-queue,
 independently reviewed, and root read the owner and passed all five small tests.
