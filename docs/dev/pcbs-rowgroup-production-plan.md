@@ -488,6 +488,16 @@ that clarification is applied. The record-retention and admission scales overlap
 and are not additive heap bounds. Actual encoded sizes and observed heap still
 need the new screen; these formulas predict neither universal success nor OOM.
 
+The twelve-case screen owner/starter at ../byte-target-screen is prepared and
+reviewed by root and an independent worker; each reran seven tiny tests PASS.
+It admits the frozen old control and three actual completed 53+9 candidate builds,
+preserves original runners/oracles and the strict option correction, and retains
+one-JVM screening and OOM limitations. Actual artifact admission and runtime have
+NOT RUN. The existing decoded-layout pair's earlier independent five-test review
+is reconciled in ../layout-queue/README.md; only stale pending wording changed.
+Root plans that diagnostic after the repeat replay; its times are excluded from
+performance comparisons and its runtime remains unverified.
+
 All operations and worker checkpoints continue via MCP docker_exec. Root owns
 scheduling and actual acceptance checks. Preparations are READY FOR REVIEW;
 production and measurement acceptance remain IN PROGRESS.
@@ -522,9 +532,11 @@ fixes that path. Evaluate a separate bounded follow-up after the GPU patch.
 
 ## Implementation choices to validate
 
-1. Retain large GPU input batches and existing column-limit slicing. Set private
-   Parquet row-group targets to the measured 65,536 rows / 8 MiB. These are soft
-   writer targets, not hard encoded-record or heap limits.
+1. Retain large GPU input batches and existing column-limit slicing. The next
+   candidate uses only an 8 MiB uncompressed row-group target, retaining cuDF's
+   default row limit; compare 16 and 32 MiB before selecting the final byte target.
+   Frozen c385 measurements retain their earlier 65,536-row override. These are
+   soft writer targets, not hard encoded-record or heap limits.
 2. Read footer/chunk metadata over writer callback buffers and lazily copy one
    complete row-group Parquet record at a time. Preserve distinct dictionary and
    first-data offsets, row counts, schema and compression; reuse the scan's
