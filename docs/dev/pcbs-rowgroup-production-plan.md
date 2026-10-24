@@ -80,9 +80,14 @@ remain at ../crossversion/selected-verify413-001 and selected-verify420-001.
 Root's ordinary exact-coordinate forced refresh succeeded through the unchanged
 wrapper/settings: ../crossversion/resolver-jackson001/result.json. No dependency
 version, source, settings or repository metadata was edited by hand. Spark4.1.3
-is RUNNING again under supervisor657449 at ../crossversion/selected-verify413-002,
-using the same clean fa29 worktree with no target directories and unchanged
-53-plus-nine normal verify/1800-second deadline. No new413/420 pass is claimed.
+is now READY FOR REVIEW at ../crossversion/selected-verify413-002-accepted.json:
+the normal verify passed all 53 Scala and nine Java tests with no failures,
+skips, timeout, changed sources or remaining owned processes. Root independently
+replayed exact reports and source coverage and checked all 36 implementation
+classes and all 243 actual target-private classes against fresh packaged bytes.
+Spark4.2.0 is RUNNING under supervisor665799 at
+../crossversion/selected-verify420-002, retaining the unchanged clean fa29
+worktree and normal 53-plus-nine verify/1800-second deadline. No420 pass is claimed.
 The grouped compile/package acceptance helper is prepared and independently
 reviewed. Before its first run, the unreleased selected-group owner was minimally
 adapted to retain actual child return codes; acceptance rejects missing/nonzero
