@@ -102,10 +102,25 @@ The selected-group command now includes `-nsu` alongside writable
 `secondaryCacheDir` in the same single `--option` value, matching the boundary
 owners without losing buildall's last-option semantics. Root independently read
 the exact delta and reran all twelve pure tests (0.022 s); independent review
-passed. The Scala2.12 group is now RUNNING under supervisor673257 at
-../crossversion/selected-grouped212-001, with the exact twenty release targets,
-normal serial buildall and a 10,800-second total deadline. No group pass is
-claimed. The Scala2.13 group and actual vendor attempts remain open.
+passed. The first Scala2.12 group stopped at the first target's tools-module
+license check: ten tracked research JSON reports lacked recognized notices.
+Evidence is retained at ../crossversion/selected-grouped212-001. The buildall
+child exited124 because xargs aborted after its child255; this was not the
+10,800-second deadline (154.343 seconds elapsed, no termination actions, source
+changes or remaining owned processes). No group pass is claimed.
+The ten historical research outputs are UNRELEASED. Their repair adds only one
+valid-JSON _license string array per file; every existing value and byte suffix
+is preserved. Original bytes, parsed objects and old/new hashes are retained at
+../support-audit/research-json-license001. Root independently checked the exact
+RAT-listed paths against Git fa29 and archived originals, valid JSON and all
+existing values: root-semantic-verification002.json. Root then ran the unchanged
+tools RAT check: exit0, 90 approved licenses, zero unknown/unapproved, 0.614 seconds;
+root-rat-tool-result.json retains the actual command and output. No exclusion,
+skipped check, POM, runtime, test or configuration change was introduced.
+Frozen fa29 worktrees, measured artifacts and original raw evidence are unchanged
+and retain their identities. Fresh grouped attempts require the new license-only
+source commit and separate output; both groups and actual vendor attempts remain
+open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first

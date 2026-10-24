@@ -80,7 +80,7 @@ prototype is excluded. Evidence is under the production evidence root
 | 401 / Scala 2.13 | Fresh normal fa29 verify: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation classes and all 243 actual target-private classes | READY FOR REVIEW |
 | 413 / Scala 2.13 | Fresh normal fa29 verify after ordinary dependency refresh: 53 Scala and nine Java tests; root replayed reports, tracked source, fresh implementation bytes and all 243 actual target-private classes | READY FOR REVIEW |
 | 420 / Scala 2.13 | Fresh normal fa29 verify after ordinary dependency refresh: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation bytes and all 243 actual target-private classes | READY FOR REVIEW |
-| 39 OSS compile/package pairs | Exact twenty-target Scala2.12 group running at `crossversion/selected-grouped212-001`; Scala2.13 nineteen-target group pending; compile/package only, no runtime credit | IN PROGRESS |
+| 39 OSS compile/package pairs | First Scala2.12 attempt stopped on ten research JSON license notices in tools; metadata-only repair passes unchanged RAT; fresh source/output retries required. Compile/package only, no runtime credit | Pending fresh attempts |
 | Three DBR pairs | Real vendor dependency-resolution/compile attempts and matching runtime coverage required; no OSS substitution | Not yet attempted |
 | 330 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |
 | 330 Kryo SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/registrator/origins and initial/final frozen/raw content | READY FOR REVIEW |
