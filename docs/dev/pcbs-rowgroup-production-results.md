@@ -4,8 +4,9 @@ Status: IN PROGRESS. All fifteen repeated synthetic JVM runs, sixteen production
 public-data cases and the separate twelve-case byte-target screen are independently
 verified and READY FOR REVIEW. All six GH8GiB byte-target cases and the decoded
 batch-layout diagnostic pair are also independently verified. Root selected the
-8 MiB/default-row policy as the production starting point and promoted that code
-policy pending commit; final-source correctness and compatibility remain open.
+8 MiB/default-row policy as the production starting point, committed in fa29f4d90c;
+final-source correctness and compatibility remain open. The separate TLC diagnostic
+pair is closed and its analysis is READY FOR REVIEW, not causal performance proof.
 These measurements use the production logical-buffer reader, separately from the
 older research multi-file prototype.
 
@@ -132,20 +133,73 @@ Neither a confidence interval nor a causal performance or heap-safety guarantee
 follows from one JVM per cell.
 
 The benchmark source identities remain d9ba8787f6, cebb9206d5 and abec8b6da5;
-the selected 8 MiB policy is promoted into production source in this change
-without relabeling any measured artifact as a new commit. Final-source
-correctness and all-supported-version validation remain unrun gates. Root started
-the separate TLC diagnostic in ../selected-world-profiling/supervisor001 (parent
-579123), with baseline COLLECTING and no accepted capture yet. Its profiled wall
-times are not primary performance evidence. Outer Spark-compression experiments
-remain pending; native off-heap storage is optional, with no Spark-core or
-Spark OFF_HEAP change.
+the selected 8 MiB policy is committed in fa29f4d90c without relabeling any
+measured artifact as that commit. Final-source correctness and all-supported-version
+validation remain unrun gates. The separate TLC diagnostic pair below is closed
+and analyzed; its profiled wall times are not primary performance evidence.
+Outer Spark-compression experiments remain pending; native off-heap storage is
+optional, with no Spark-core or Spark OFF_HEAP change.
 
 Evidence: ../gh8-byte-target-screen/reverified001/summary.{json,csv,md}. The JSON
 retains the exact six-case original results, CPU-oracle proof, source identities,
 per-phase memory/IO, per-block residency and before/final content-hash receipt.
 These measurements are READY FOR REVIEW, separately from the older48-case
 prototype and earlier CPU/custom-codec cohorts.
+
+## TLC diagnostic transfer profile
+
+Both separately profiled JVMs completed the full TLC query with exact original
+world-verifier PASS replay, and both Nsight collectors and SQLite exports
+completed successfully. This is the original unsplit PCBS baseline from
+60c28e44f0 versus the measured byte8/default-row artifact d9ba8787f6, not the
+c385 row-group control or the isolated coalescing prototype. They retain all
+239,470,448 TLC rows, sixteen input files and the original all-column checksum
+query at DISK_ONLY/48 GiB, local8, GPU target1 GiB/pool15 GiB/concurrency2,
+host40/pinned2 GiB, default reset100/unroll16/fraction0.6 and inner SNAPPY/outer OFF.
+
+The table shows exported pinned-source Host-to-Device transfer-event rows for
+read3. Direction/source/destination labels come from the actual export enum tables.
+
+| Actual artifact | Target JVM PID | Event rows | Bytes | Summed transfer duration (ns) |
+|---|---:|---:|---:|---:|
+| Original unsplit PCBS baseline | 579202 | 67,096 | 6,387,132,221 | 332,931,228 |
+| byte8/default-row patch d9ba | 580827 | 196,954 | 7,135,673,140 | 523,016,220 |
+
+Counts and bytes are identical across read0 warmup and reads1–3 within each arm;
+their durations vary, and the durations above belong only to read3. Fill has
+37,066 pinned Host-to-Device event rows in each arm. These are event rows, not
+counts of physical DMA operations, CUDA API calls or logical host-buffer views.
+The exported copyCount field is retained raw and unweighted; its batched-operation
+meaning remains unresolved. No byte or duration total is multiplied by it.
+
+Summed event durations can overlap; they are not read wall time, GPU utilization
+or on-core CPU time. The analysis also retains runtime-name totals with non-null
+callchain rows excluded, kernel-name totals, and explicit boundary-straddling and
+outside-phase-start counts. Attribution uses event start in millisecond-anchored
+phase windows, so boundary and overlapping-work limitations remain. CPU stack
+and context-switch sampling were disabled. Profiled wall times are excluded from
+the primary performance tables; one capture per arm, different encoded payloads,
+physical IO/page-cache state and profiling overhead prevent a causal slowdown
+claim. More transfer-event rows motivate investigation, not proof of the cause.
+
+Evidence: ../selected-world-profiling/supervisor001 and
+../selected-world-profiling/analysis001.json. The final analysis is
+READY FOR REVIEW. Root checked the actual schema, session normalization and
+sampled JVM identities, and independently matched the read3 pinned-transfer SQL
+totals above. Initial and final content checks each verified 542,273,856 bytes
+of analysis/trace/log/result/plan evidence. Both captures retain successful
+collector/audit/export process closure and exact original benchmark-result
+equality; no benchmark control or production runtime was changed by analysis.
+
+The resulting adjacent-view experiment is isolated at 8d14ea52cd in
+../contiguous-view-worktree. It preserves stored records and payload bytes while
+merging only ordered physically contiguous extents within the same materialized
+parent. Its 3.5.5 build is active (parent 582845); no prototype build result,
+runtime correctness or performance improvement is claimed. Its future gate is
+55 Scala plus nine Java tests; main fa29f4d90c remains the selected 8 MiB policy
+with the separate 53-plus-nine gate. The prototype is not promoted to main or
+substituted into any reported timing/profile. Outer compression and final
+selected-source compatibility remain pending.
 
 ## Returned GPU batch sizes
 

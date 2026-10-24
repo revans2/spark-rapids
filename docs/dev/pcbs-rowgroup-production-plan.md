@@ -18,7 +18,7 @@ replayed report: ../byte-target-screen/render-check001.json. The full table is i
 [production results](pcbs-rowgroup-production-results.md#verified-byte-only-target-screen).
 This supersedes the provisional case receipts below. Root has selected the
 8 MiB uncompressed-byte target with cuDF's default row cap as the conservative
-production starting point. The selected code policy is promoted in this change;
+production starting point. The selected code policy is committed in fa29f4d90c;
 final-source verification remains open.
 
 The eight canonical cases keep 96 GiB of semantic values and the four TLC cases
@@ -50,11 +50,11 @@ peaks are 3.002/3.978/6.745 GiB. Those single-JVM results support the conservati
 8 MiB starting point rather than a universal performance claim. Canonical byte32
 also observed 39.504 GiB versus byte8's 16.187 GiB in DISK storage; TLC's larger
 row groups compress better, but do not establish a workload-independent optimum.
-The measured byte8 source remains d9ba8787f6; the code policy is promoted
-in this change, not a relabeling of that benchmark artifact. Final-source gates
-remain unrun. No new launcher framework, Spark-core change or Spark OFF_HEAP
-setting is required; native off-heap storage remains optional. The TLC diagnostic
-profile is active with no accepted capture yet; outer compression is pending.
+The measured byte8 source remains d9ba8787f6; its policy is committed in
+fa29f4d90c without relabeling that benchmark artifact. Final-source gates remain
+unrun. No new launcher framework, Spark-core change or Spark OFF_HEAP setting is
+required; native off-heap storage remains optional. The TLC diagnostic pair is
+closed and analyzed READY FOR REVIEW; outer compression remains pending.
 The versioned final-source boundary/grouped and vendor/SQL launchers are now
 source-reviewed by root and independent agents; root independently passed all
 18 new pure tests. Preparation is READY FOR REVIEW in ../crossversion/
@@ -75,18 +75,33 @@ and require the closed 20-case queue before analysis.
 Source tracing identifies per-host-buffer-view CUDA copy calls as a hypothesis
 for small-record overhead. The standalone cuDF and JNI-vendored trees differ;
 the corrected trace names both absolute roots and does not attest either to the
-frozen binary. Actual capture is required before assigning counts or causality.
+frozen binary. The diagnostic capture shows more transfer-event rows in byte8,
+but does not equate those rows to source views/API calls or establish causality.
 The narrow full-TLC profiling pair is prepared in ../selected-world-profiling
 to examine the observed public-data regression, retaining its original
 data/query/resources/oracle. Root read the complete canonical-to-TLC difference,
 independently passed all six pure tests, and obtained independent source review.
-Root has started the separately scheduled diagnostic at
-../selected-world-profiling/supervisor001 (parent 579123); baseline is COLLECTING.
-Its immutable tlc-plan001 SHA is
+Both captures and exports in ../selected-world-profiling/supervisor001 completed
+successfully, with exact original world-verifier PASS replay. The immutable
+tlc-plan001 SHA remains
 6b4ffded791b6f17e57141341a66cbe65b6ecaad1c074a6166e3c6f702f732f6.
-This uses the explicit measured byte8 artifact; no capture is accepted yet and
-profiled wall times are excluded from primary comparisons. No transfer optimization
-has been introduced.
+The final read-only analysis is READY FOR REVIEW at
+../selected-world-profiling/analysis001.json; initial/final real content checks each
+verified 542,273,856 bytes. Root independently matched read3 pinned Host-to-Device
+SQL totals: original unsplit baseline 67,096 rows/6,387,132,221 bytes versus measured
+byte8 d9ba8787f6 196,954 rows/7,135,673,140 bytes. Transfer-event rows are not DMA
+or API counts, and cumulative durations are not wall time or CPU/kernel utilization.
+CPU stack/context-switch sampling was disabled; profiled wall times remain excluded
+from primary comparisons. These observations do not prove the cause of a slowdown.
+
+The separate contiguous-view prototype at 8d14ea52cd is committed only in
+../contiguous-view-worktree, not promoted to main fa29f4d90c or the measured runtime.
+It merges only physically adjacent ordered column extents within one parent,
+without payload copying or a stored-format change. Its bounded 3.5.5 build is
+active (parent 582845); no build/runtime acceptance or performance result is claimed.
+Future prototype gates require 55 Scala tests plus nine Java tests, separately
+from the main policy's 53 plus nine. Outer compression and final selected-source
+compatibility remain pending.
 The closed-screen rendering checker is independently reviewed; root read it,
 passed four pure tests and executed it successfully on report001. Exact JSON
 replay equality and every CSV field/Markdown cell/limit note passed.
@@ -106,9 +121,10 @@ artifact audits in builds004. Root independently replayed all reports, checked
 all 36 implementation-family classes against fresh module/distribution bytes,
 and confirmed final quiescence. These candidate artifacts are READY FOR REVIEW.
 Decoded-layout diagnostics, the closed 8/16/32 MiB screen and all six GH8 cases
-passed. Root selected byte8/default rows and promoted that code policy in this
-change. Profiling is active without an accepted capture; outer compression and
-final selected-source correctness/compatibility remain gates.
+passed. Root selected byte8/default rows and committed that code policy in
+fa29f4d90c. The TLC profiling pair is closed/analyzed READY FOR REVIEW; outer
+compression and final selected-source correctness/compatibility remain gates.
+The isolated coalescing prototype build is active, with no result or main promotion.
 Earlier checkpoint paragraphs below retain historical failures and pending states;
 the completed repeat checkpoint and current byte-target section supersede them.
 
