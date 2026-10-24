@@ -88,8 +88,13 @@ reviewed. Before its first run, the unreleased selected-group owner was minimall
 adapted to retain actual child return codes; acceptance rejects missing/nonzero
 or Boolean codes. Root read the decisive paths and passed all twelve pure tests
 across the selected owner, acceptance and historical grouped-check modules.
-Historical owners, production source, commands and controls are unchanged.
-Both compile/package groups and the actual vendor attempts remain open.
+Historical owners and production source are unchanged.
+The selected-group command now includes `-nsu` alongside writable
+`secondaryCacheDir` in the same single `--option` value, matching the boundary
+owners without losing buildall's last-option semantics. Root independently read
+the exact delta and reran all twelve pure tests (0.022 s); independent review
+passed. No grouped build has executed. Both compile/package groups and the actual
+vendor attempts remain open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
@@ -139,7 +144,22 @@ REVIEW. The research real-data sweep is complete. The production implementation 
 committed; its separate measurements and supported-version checks remain gates
 for final review.
 
-Current runtime checkpoint: the fixed 12-case byte-target screen is complete and
+A further independent source review found no high-confidence defect in the
+selected splitter, logical-file framing, reader retry/ownership, task cleanup or
+common-shim paths. Its remaining limits are very wide schemas, real indivisible
+near-limit records and incomplete version/vendor gates; it grants no extra
+runtime credit. Independent documentation review corrected stale status wording,
+linked the completed c385 layout diagnostic and clarified heap/RSS observation
+scope. Root inspected these changes; no runtime policy changed.
+
+## Historical status checkpoints
+
+The current status above is authoritative. The retained chronological checkpoints
+below preserve evidence and their original pending/running states; those states
+are historical and must not override the current status. Measured source and
+artifact identities remain unchanged.
+
+Retained runtime checkpoint: the fixed 12-case byte-target screen is complete and
 READY FOR REVIEW: all twelve PASS, with no failed Spark tasks. Root replayed all
 original verifiers and the exact approved canonical Java-options sidecars,
 requiring entire retained-result equality, CPU-oracle checks and initial/final
@@ -268,7 +288,7 @@ reference unchanged across Scala/Spark targets would be incorrect. The shared
 JNI still requires its frozen common hash. Actual acceptance remains unrun.
 All root and worker project operations remain MCP docker_exec only.
 
-Current implementation checkpoint: the c385 production comparison is independently verified
+Retained implementation checkpoint: the c385 production comparison is independently verified
 (15 synthetic JVMs and 16 public-data cases). The byte-only 8 MiB candidate at
 d9ba8787f6 is committed separately. All three byte-only candidates passed full 53-Scala/9-Java verify and matched
 artifact audits in builds004. Root independently replayed all reports, checked

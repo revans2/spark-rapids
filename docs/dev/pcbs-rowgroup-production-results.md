@@ -558,9 +558,11 @@ not measurements of the new default-row-limit candidate or the 16/32 MiB targets
 At MEMORY_AND_DISK the patch passes at defaults in all three JVMs. Relative to
 the baseline 1/1 workaround, its median fill is about 7% slower and read median
 about 5% slower. Its observed heap peaks are lower, but RSS is slightly higher:
-52.68–53.01 GiB versus 51.42–51.44 GiB. These are whole-run observed peaks, not
-live-set requirements. The default baseline completes fill but fails readback in
-all three JVMs; its fill timings remain valid completed-phase measurements.
+52.68–53.01 GiB versus 51.42–51.44 GiB. Heap is the maximum over retained timed-phase
+observations, including warmup; RSS is the maximum over retained process samples.
+Neither establishes a whole-JVM-lifetime maximum or live-set requirement. The
+default baseline completes fill but fails readback in all three JVMs; its fill
+timings remain valid completed-phase measurements.
 
 The initial disk read slowdown does not hold across repeats. Patched read medians
 range from 44.86 to 70.24 seconds. The initial patched reads sampled about 99 GB
@@ -685,7 +687,9 @@ without reducing that GPU target. These byte counts sum actual Parquet array
 lengths, including their file framing; they exclude Java serialization framing.
 They are not physical cache-file sizes or GPU residency. The 8 MiB writer target
 is soft, and this workload does not establish a bound for large rows or strings.
-Actual decoded GPU batch sizes still need the separate layout diagnostic.
+The completed [returned-batch diagnostic](#returned-gpu-batch-sizes) reports the
+actual decoded layout for this c385 cohort. It does not establish the final
+byte8/default-row artifact's decoded layout.
 
 ## Production public-data measurements
 
