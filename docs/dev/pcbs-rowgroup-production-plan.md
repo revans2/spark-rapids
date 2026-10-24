@@ -334,6 +334,123 @@ or artifact change has been made during the matched series. CPU-producer work
 and heavy downstream GPU workloads remain deferred. All project and worker
 operations continue through MCP docker_exec only.
 
+## Future-build preflight correction
+
+The future boundary, grouped OSS and vendor owners originally rejected every
+nonempty MAVEN_CONFIG. Root's value-free preflight showed that this image uses
+exactly '-s' plus an existing absolute settings-file path, with no MAVEN_ARGS.
+Rejecting that existing resolver selection would block builds before Maven ran.
+The shared ../crossversion/maven_environment.py now permits only empty config or
+that exact two-token settings selection, preserving the environment unchanged.
+All other arguments, extra flags, malformed values and nonfiles remain rejected.
+No settings contents were read or hashed, and no Maven/JVM/network operation ran.
+
+The three future owners freeze the validator and retain value-free classification.
+Root read the changed code and independently passed four environment tests,
+four grouped-build tests, six vendor-owner tests and the boundary exact52+9
+acceptance checks. Independent review passed. This changes unreleased orchestration
+only; selected tests, source identity, fresh-class and ownership gates are intact.
+Completed/frozen build and benchmark helpers were not modified.
+
+Exact three-vendor normal-resolver compile attempts are prepared at
+../crossversion/run_vendor_compile_v1.py; actual attempts and runtime coverage
+remain NOT RUN. Missing cached artifacts are not evidence of failed resolution.
+Exit zero alone will be REVIEW_PENDING until root checks freshly compiled helpers
+and real vendor dependency origins. No OSS substitution is allowed. Actual DBR
+SQL validation still requires its matching runtime or authorized CI lane.
+The local PR-description draft is ../support-audit/pr-description-draft001.md;
+nothing was posted. The eleven-run benchmark queue remains the sole active
+JVM/GPU workload, with no change to its controls or implementation.
+
+## Weekend profiling and compression extension
+
+The user authorized continuing to completion, profiling why cases get faster or
+slower, and comparing Spark's general-purpose cache compression off/on and
+different codecs. The active eleven-run series remains unchanged. No new matrix,
+profile or writer-control artifact has run at this checkpoint.
+
+The encoder difference is now explicit in the results report: existing PCBS
+uses the cuDF Java defaults of 128 MiB uncompressed row-group data / 1,000,000
+rows; the patch passes 8 MiB uncompressed / 65,536 rows. Native C++ defaults are
+unlimited row-group bytes / 1,000,000 rows, overridden by JNI's Java arguments.
+Root independently inspected the exact frozen Builder constructor without
+starting a JVM, and read the native defaults/JNI call sites. Evidence:
+../support-audit/java-writer-defaults-root001.json. The fixed row cap is independent
+of column count; cuDF separately checks uncompressed bytes across columns when
+choosing group boundaries. Neither value is a compressed cache-file-size target.
+
+Planned experiments, with every outcome retained:
+- Complete the current repeat queue and actual decoded-layout diagnostics first.
+- After the new byte-target screen below selects a candidate, prepare an isolated
+  baseline-plus-writer-settings-only artifact: only the byte setter changes, with
+  the default row cap retained. The original large-array consumer and reader stay.
+  Compare original baseline, this control and selected patch on canonical and
+  TLC DISK_ONLY / 48 GiB (six fresh JVMs). This separates encoder-layout effects
+  from the combined splitting/staging/reader changes, not each latter cost alone.
+- Defer Spark stream compression until selecting the byte target, then screen
+  fresh explicit OFF, LZ4, ZSTD, SNAPPY and LZF profiles on the original baseline,
+  the explicitly selected patch artifact and both public datasets:
+  twenty DISK_ONLY / 48 GiB JVMs. Parquet SNAPPY, data, sixteen partitions,
+  eight slots, GPU/host/heap/GC/retention settings and query stay fixed.
+- Choose a bounded canonical or mixed-storage confirmation from those results;
+  do not multiply every dimension. Keep profiler runs outside primary timings.
+- Profile actual transfers, kernels, CPU/metadata/allocation costs and physical IO
+  before attributing speedups or regressions. A later diagnostic may snapshot
+  cache-file residency with installed fincore, without reading payload, flushing
+  or changing permissions; availability/accuracy still needs validation.
+
+Detailed NOT RUN scope, source evidence, codec/global-shuffle caveat and reporting
+fields: ../support-audit/compression-matrix-plan001.md. Preserve all fill/warmup/read
+values, observed heap/RSS, per-phase IO, exact Parquet payload and captured complete
+Java block-file sizes in CSV/JSON/Markdown. CPU historical results remain separate.
+The agreed production architecture stays fixed. Spark-core changes, Spark
+OFF_HEAP, new public config, synthetic data reduction and heavy downstream GPU
+expansion remain excluded. Existing released behavior stays protected; research wrappers
+and the writer-only control are unreleased and need no compatibility adapter.
+All future operations, handoffs and checkpoints continue via MCP docker_exec.
+
+## Byte-only targets: new candidate IN PROGRESS
+
+The user explicitly requested dropping the added 65,536-row override, retaining
+cuDF's default 1,000,000-row cap and comparing 8 / 16 / 32 MiB uncompressed targets.
+The old cap reaches 8 MiB at 128 value-bytes per row and underfills narrow groups;
+our sixteen-double canonical schema largely hides that constraint. No byte-size
+choice is final before the measurements and architect review.
+
+A separate ../byte-target-worktree at 572fe681f3423465e6366ae1e19fe68400168ef4
+contains the prepared next 8 MiB candidate. Production changes are exactly two
+deletions: TargetRowGroupRows and its writer-builder call. A new GPU test encodes
+200,000 int rows through the production factory, requires one group over 65,536
+rows, checks every decoded value and host-handle cleanup. Fixed deterministic
+128-byte binary values keep the existing integration fixture genuinely above
+the byte target; its exact-data and multi-record assertions remain intact.
+Performance inputs and current benchmark artifacts were not changed.
+
+Root read the diff and cuDF factory signature; independent source review passed.
+Python syntax and diff checks pass. Scala compilation, GPU execution and SQL
+validation are NOT RUN for this candidate. Its new selected suite count is
+53 Scala (9/4/10/5/8/17) plus nine Java tests. Previous 52-test evidence describes
+the frozen c385 artifact only and must not be relabelled. Tests for a finally
+selected larger target also need actual validation; the fixed 128-byte fixture
+does not automatically prove multiple groups at 32 MiB.
+
+Bounded first screen: four explicitly distinct compiled artifacts (frozen
+8 MiB/65,536 control and new 8/16/32 MiB/default-row-cap variants), full canonical
+96 GiB DISK_ONLY and MEMORY_AND_DISK at 48 GiB heap, plus TLC DISK_ONLY at 48 GiB:
+twelve fresh JVMs. Keep data/partitions/query/GPU/heap/GC/retention controls fixed.
+A 32 MiB heap OOM is a valid negative, not a reason to reduce data. Then select
+a small-heap GHArchive confirmation from the evidence rather than multiplying
+every dimension. No new screen has run. Scope/identities/reporting:
+../support-audit/byte-target-sweep-plan001.md; source review and build approach:
+../support-audit/byte-target-review-build-plan001.md.
+
+All supported-version acceptance must be rerun against the eventual selected
+source, not just the earlier c385 implementation. Existing boundary/grouped/vendor
+worktrees and fixed-commit plans remain preparations; update them explicitly to
+the final source and new test count before execution. The eleven-run c385 series
+remains the sole active JVM/GPU job and its files/controls stay frozen. Root
+continues sole scheduling; workers continue MCP docker_exec only.
+
 ## Scope and compatibility
 
 Use MCP docker_exec for every operation, including workers. Confirm at handoffs

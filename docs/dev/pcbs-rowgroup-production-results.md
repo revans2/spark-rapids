@@ -63,6 +63,32 @@ before timed phases. Fill traverses cached
 records and can include disk readback or cache repopulation; that definition is
 identical in both arms.
 
+The encoder layout also changes between implementations:
+
+| Writer setting | Existing PCBS | Row-group patch |
+|---|---:|---:|
+| Row-group uncompressed-byte target | 128 MiB | 8 MiB |
+| Row-group row limit | 1,000,000 | 65,536 |
+
+Existing PCBS leaves these options unset in the cuDF Java builder. The exact
+frozen Java Builder class initializes 128 MiB / 1,000,000 rows, and JNI explicitly
+passes those values to native cuDF. Native C++ defaults differ: unlimited
+row-group bytes and 1,000,000 rows. The byte target is based on uncompressed
+row-group data, not the compressed Parquet file length or GPU batch allocation.
+The byte target does not impose a hard compressed-file-size limit. A whole
+existing cache record can contain several row groups and is much larger than one row group.
+
+Thus the patch does not merely split the original baseline file after writing.
+It changes row-group layout before encoding, then copies encoded column chunks
+into independent files without decoding/reencoding them. Current comparisons
+combine encoder-layout changes, splitting, staging and combined/chunked reading;
+they do not isolate post-processing overhead. Dictionary/page encoding and
+compression can change even though the input values and Parquet codec match.
+Exact default evidence, independently inspected by root without loading a JVM:
+support-audit/java-writer-defaults-root001.json. Matching native defaults and
+JNI setters are in the retained cuDF source under the evidence root's sibling
+pcbs-rowgroup-stitch-spike/native-prerequisites/cudf-source.
+
 | Implementation | Encoded Parquet bytes | Stored records | Smallest record (bytes) | Largest record (bytes) |
 |---|---:|---:|---:|---:|
 | Existing PCBS | 103,100,327,376 | 112 | 807,025,755 | 939,457,451 |
