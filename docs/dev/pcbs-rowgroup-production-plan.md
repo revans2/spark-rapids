@@ -98,6 +98,18 @@ are being prepared; byte16/32 builds have not started and no byte8 artifact or
 benchmark is accepted yet. The checker must still reject wrong versions,
 classifiers, duplicate main/test jars and incomplete/skipped test execution.
 
+The v3 classifier-aware inspector and recovery owner passed independent review
+and root's four small tests. They require exactly one expected main SQL jar and
+an optional exact matching tests jar, retaining both hashes; other versions,
+classifiers, duplicates and missing jars still fail. Root read the decisive
+inspector/recovery/freeze path and launched ../crossversion/byte-target-builds003
+(supervisor 538677). It replays the completed byte8 reactor against the original
+command timestamp and unchanged source freeze, preserves its raw records with
+explicit recovered-build receipts, and still requires all 53+9 tests, JNI/private
+class and fresh module/distribution audits before accepting the artifact. Only
+byte16/32 subsequently compile. Original attempts remain unchanged. Recovery and
+remaining build acceptance are pending; no new benchmark result is claimed.
+
 ## Historical implementation checkpoints
 
 The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,
