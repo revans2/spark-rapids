@@ -93,7 +93,7 @@ prototype is excluded. Evidence is under the production evidence root
 | 420 / Scala 2.13 | Fresh normal fa29 verify after ordinary dependency refresh: 53 Scala and nine Java tests; root independently replayed reports, tracked source, fresh implementation bytes and all 243 actual target-private classes | READY FOR REVIEW |
 | 20 Scala2.12 OSS compile/package pairs | All twenty targets and combined distribution pass at license-only8ab82c90a6; root independently replayed target/source/class evidence and 1,617,647,200 content bytes initially/finally: `crossversion/selected-grouped212-002-accepted.json`. Compile/package only, no runtime credit | READY FOR REVIEW |
 | 19 Scala2.13 OSS compile/package pairs | All nineteen targets and combined distribution pass at8ab82c90a6; root independently replayed target/source/class evidence and 1,674,671,814 content bytes initially/finally; generator byte-identical: `crossversion/selected-grouped213-001-accepted.json`. Compile/package only, no runtime credit | READY FOR REVIEW |
-| Three DBR pairs | Real vendor compile attempts running at `crossversion/selected-vendor-8ab001`, source8ab82c90a6; matching runtime coverage still required; no OSS substitution | IN PROGRESS |
+| Three DBR pairs | Actual normal compile attempts at 8ab82c90a6 stopped in vendor BOM dependency resolution before plugin/shim compilation; fresh forced exact-artifact lookups also failed. Genuine SDKs and matching runtimes required; no OSS substitution or compile/runtime credit | VALIDATION BLOCKED |
 | 330 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |
 | 330 Kryo SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/registrator/origins and initial/final frozen/raw content | READY FOR REVIEW |
 | 401 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |
@@ -108,8 +108,20 @@ this does not assert their bytes equal the Spark355 dependency. The source
 identity receipt is `support-audit/final-byte8-source-equivalence001.json` and
 accepted d9 build evidence is `support-audit/root-byte-builds004.json`.
 
-Remaining gates are explicit; this table does not establish all-target readiness.
-Missing locally cached vendor artifacts are not a recorded resolver failure.
+All 39 OSS compile/package pairs and the seven focused OSS correctness gates are
+verified. This does not establish runtime coverage for every pair. The three
+vendor attempts each exited 1 in the Databricks BOM, with plugin/shim modules
+SKIPPED, no timeout/cancellation or remaining owned processes. Normal attempts:
+`crossversion/selected-vendor-8ab001/`. Forced fresh nontransitive Spark SQL lookups
+also reported exact artifacts missing from the configured Central mirror:
+`support-audit/vendor-force-resolution001/`. Versions are
+`3.5.0-databricks-143`, `4.0.0-databricks-173`, and `4.1.0-databricks-183`.
+This is a resolver/SDK gap, not a demonstrated source/API failure or proof that
+those artifacts are unavailable everywhere. Genuine vendor SDKs, successful fresh
+compilation and applicable correctness/matching-runtime checks remain required.
+All-target readiness is not established.
+Earlier observations of absent local vendor caches alone did not establish a
+resolver failure; the actual attempts above now provide resolver evidence.
 The older observations below remain historical and cannot be relabeled as
 selected-source validation.
 

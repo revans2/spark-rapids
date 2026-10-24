@@ -1,6 +1,21 @@
 # PCBS row-group production implementation plan
 
-Status: IN PROGRESS. The fixed 20-case outer-compression comparison is complete
+Status: READY FOR REVIEW for implementation, completed measurements, seven focused
+OSS correctness gates and all 39 OSS compile/package pairs. Databricks acceptance
+remains unverified because all three real vendor attempts stopped on dependency
+resolution; genuine vendor SDKs and matching runtimes are still required. Only
+the architect marks work DONE.
+
+Review the [measurements](pcbs-rowgroup-production-results.md) for fill/read times,
+heap observations, storage modes, compression and profiling limits, and the
+[compatibility matrix](pcbs-rowgroup-compatibility.md) for exact coverage and gaps.
+The production patch uses stock Spark caching and serialization with smaller
+complete Parquet records, combined for larger GPU decoding. It requires no
+Spark-core change, Spark OFF_HEAP storage or new public configuration.
+The selected policy remains a soft 8 MiB uncompressed row-group target and cuDF's
+default 1,000,000-row cap. No universal speedup or hard memory bound is claimed.
+
+The fixed 20-case outer-compression comparison is complete
 and READY FOR REVIEW: 20/20 PASS using the accepted builds004 byte8/default-row
 manifest. Root executed report001 and reverified001: exact original-result and
 CPU-oracle replays, 32 immutable input files, 240 raw evidence files, and
@@ -152,10 +167,26 @@ processes. Root independently replayed all target/source/class proofs and
 initial/final content checks of 1,674,671,814 bytes; the standard Scala2.13
 generator was byte-identical. All39 OSS release-pair compile/package gates are
 verified. This adds no unit, SQL, runtime or target-private provenance credit.
-The three real vendor compile attempts are RUNNING under supervisor777772 at
-../crossversion/selected-vendor-8ab001, source8ab82c90a6, with separate fresh
-writable Zinc, normal real vendor coordinates and 1,800-second per-case deadlines.
-No vendor compilation or runtime pass is claimed.
+All three real vendor compile attempts completed with dependency failures at
+../crossversion/selected-vendor-8ab001, source 8ab82c90a6. Exact Spark SQL versions
+3.5.0-databricks-143/4.0.0-databricks-173/4.1.0-databricks-183 could not resolve
+through the configured Central mirror. Each failed in the Databricks BOM before
+the plugin/shim modules compiled; elapsed times were 3.510/18.038/18.792 seconds,
+exit 1 with no timeout, cancellation, termination action or remaining owned
+processes. Root read the actual commands, logs and process receipts; independent
+review confirmed the cause and clean 8ab worktrees. This is not a source/API or
+runtime failure, and no vendor compilation or runtime pass is claimed.
+Root also forced a fresh, nontransitive exact Spark SQL lookup for each version
+using the unchanged Maven wrapper/settings. All three failed with explicit
+artifact-not-found diagnostics from https://repo1.maven.org/maven2, not merely
+cached-negative messages. Exact commands/tool outputs are retained in
+../support-audit/vendor-force-resolution001/{350db143,400db173,410db183}.json.
+This establishes unavailability through this configured resolver, not everywhere.
+Remaining external gates are genuine vendor dependencies, fresh target compilation
+with artifact/source proof, and applicable correctness/vendor-runtime checks.
+All owned workloads are closed; no SDK substitution, check bypass or Spark change
+was made. The implementation and completed OSS work are READY FOR REVIEW, while
+all-target acceptance remains open.
 Root also completed the two original JFR benchmark replays: exact retained
 results and CPU-oracle checks, sixteen real inputs, and 9,590,376,664 content bytes
 checked initially and finally at ../jfr-host-profile/reverified001. The first
@@ -174,9 +205,9 @@ all saved read3 full-kernel and all-direction memcpy interval counts/sums, with
 zero boundary straddlers. The results retain these separately profiled observations;
 they are not utilization, total actual GPU activity or CPU-causality measurements.
 ../support-audit/tlc-traced-device-intervals001.md records the exact scope.
-MCP docker_exec remains mandatory for root and workers. Final supported-version
-gates remain open; the optional adjacent-view prototype stays isolated because
-its bracket did not establish a wall-time improvement.
+MCP docker_exec remains mandatory for root and workers. OSS focused and
+compile/package gates are verified; vendor acceptance remains open. The optional
+adjacent-view prototype stays isolated because its bracket did not establish a wall-time improvement.
 Root rechecked the full committed d9ba-to-fa29 diff outside docs: it is empty,
 including source, tests, integration fixtures and build contracts. Receipt:
 ../support-audit/final-byte8-source-equivalence001.json. The accepted d9ba
@@ -212,6 +243,14 @@ near-limit records and incomplete version/vendor gates; it grants no extra
 runtime credit. Independent documentation review corrected stale status wording,
 linked the completed c385 layout diagnostic and clarified heap/RSS observation
 scope. Root inspected these changes; no runtime policy changed.
+
+Final independent documentation review found no excess runtime/readiness claims.
+It confirmed the separate focused, SQL and compile/package evidence and the
+vendor resolver gap; root corrected the remaining historical local-cache wording
+and inspected the final diff. Root's final non-doc diff against8ab is empty,
+no project processes were found and the GPU compute-process query was empty.
+The remaining external vendor gate is explicit; completed work is READY FOR
+REVIEW and no external PR or message was posted.
 
 ## Historical status checkpoints
 

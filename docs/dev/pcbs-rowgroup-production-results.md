@@ -1,12 +1,14 @@
 # PCBS row-group production measurements
 
-Status: IN PROGRESS. All fifteen repeated synthetic JVM runs, sixteen production
-public-data cases and the separate twelve-case byte-target screen are independently
+Status: READY FOR REVIEW for the completed measurements below. All fifteen
+repeated synthetic JVM runs, sixteen production public-data cases and the separate twelve-case byte-target screen are independently
 verified and READY FOR REVIEW. All six GH8GiB byte-target cases and the decoded
 batch-layout diagnostic pair are also independently verified. Root selected the
 8 MiB/default-row policy as the production starting point, committed in fa29f4d90c;
-final-source correctness and compatibility remain open. The separate TLC diagnostic
-pair is closed and its analysis is READY FOR REVIEW, not causal performance proof.
+seven focused OSS correctness gates and all 39 OSS compile/package pairs are now
+verified separately in the [compatibility matrix](pcbs-rowgroup-compatibility.md).
+Vendor validation remains unverified after real dependency-resolution failures.
+The separate TLC diagnostic pair is closed and its analysis is READY FOR REVIEW, not causal performance proof.
 These measurements use the production logical-buffer reader, separately from the
 older research multi-file prototype. The separate 20-case outer-compression
 comparison is also complete, independently replayed and READY FOR REVIEW.
