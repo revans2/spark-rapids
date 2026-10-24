@@ -14,8 +14,16 @@ old c385 settings filled in 151.324 s with median read 72.578 s; byte8 with the
 normal cuDF row cap filled in 149.122 s with median read 72.074 s. Both produced
 12,400 records. These are provisional single-JVM receipts, pending root replay of
 the closed matrix; they establish no clear timing difference. No selection has
-been made. The passive OS sampler missed the first fill and started partway
-through the first warmup; missing history will remain unknown.
+been made. The 16 MiB DISK case also passed: fill 156.266 s, median read
+71.460 s, observed phase heap peak about 20.1 GiB and 6,256 records. The 32 MiB
+DISK case passed: fill 154.756 s, median read 50.624 s, observed peak about
+39.5 GiB and 3,184 records. Its later two reads recorded zero physical read
+bytes, versus approximately 100 GB per read in earlier cases. That timing drop
+is confounded by changed physical I/O/page-cache conditions; it is not evidence
+of a clean target-size speedup. These remain worker receipts awaiting root's
+closed-matrix replay. The queue is starting the memory-and-disk cases.
+The passive OS sampler missed the first fill and started partway through the
+first warmup; missing history will remain unknown.
 Root read the new final-only OS phase adapter and its original metric decoder,
 independently passed its four pure tests, and obtained independent source review.
 Actual analysis waits for 12 READY receipts, a closed sampler and idle locks.
@@ -40,8 +48,12 @@ Source tracing identifies per-host-buffer-view CUDA copy calls as a hypothesis
 for small-record overhead. The standalone cuDF and JNI-vendored trees differ;
 the corrected trace names both absolute roots and does not attest either to the
 frozen binary. Actual capture is required before assigning counts or causality.
-A narrow full-TLC profiling pair is being prepared to examine the observed
-public-data regression, retaining its original data/query/resources/oracle.
+The narrow full-TLC profiling pair is prepared in ../selected-world-profiling
+to examine the observed public-data regression, retaining its original
+data/query/resources/oracle. Root read the complete canonical-to-TLC difference,
+independently passed all six pure tests, and obtained independent source review.
+Preparation is READY FOR REVIEW; actual plan creation/admission/capture waits
+for the closed verified screen and explicit root target selection.
 No optimized source or profiler run has been introduced.
 All root and worker project operations remain MCP docker_exec only.
 
