@@ -30,6 +30,19 @@ No selected-source build, dependency-resolution attempt or SQL run has occurred.
 The 16/32 MiB choice may require a larger generated correctness fixture to
 preserve its multiple-record assertion; that assertion will not be weakened.
 No compilation or other workload runs concurrently with the benchmark.
+The final-only outer-compression report/replay tools are prepared in
+../compression-queue. Root read both complete adapters and independently passed
+four pure tests; independent review also passed. Actual compression runs, reports
+and raw-verifier replays remain unrun. They distinguish outer Spark compression
+from inner Parquet SNAPPY, retain physical-file versus payload size separately,
+and require the closed 20-case queue before analysis.
+Source tracing identifies per-host-buffer-view CUDA copy calls as a hypothesis
+for small-record overhead. The standalone cuDF and JNI-vendored trees differ;
+the corrected trace names both absolute roots and does not attest either to the
+frozen binary. Actual capture is required before assigning counts or causality.
+A narrow full-TLC profiling pair is being prepared to examine the observed
+public-data regression, retaining its original data/query/resources/oracle.
+No optimized source or profiler run has been introduced.
 All root and worker project operations remain MCP docker_exec only.
 
 Current implementation checkpoint: the c385 production comparison is independently verified
