@@ -71,6 +71,17 @@ compiler bridge installed successfully in the writable cache and passed the prio
 failure boundary. Actual candidate verification remains pending. No source,
 benchmark control or acceptance threshold changed.
 
+Selected-artifact profiler preparation is source-reviewed in
+../selected-profiling: a versioned immutable plan changes only the selected
+matched descriptor, labels and fresh trace paths; both baseline and patch use
+the same descriptor. It reuses the existing owned process and strict audit
+helpers and requires actual target runtime/memcpy/kernel/NVTX data before marking
+READY_FOR_CAPTURE_REVIEW. Root read the owner and independently passed seven
+small tests; independent review passed. Actual permissions, capture completeness,
+export schema, timestamps and phase attribution remain unverified. No profiler
+run or new Spark setting is claimed. Native GPU activity must not be inferred
+from semaphore-held task time.
+
 ## Historical implementation checkpoints
 
 The isolated production worktree is /data/pcbs-oom/pcbs-rowgroup-production/worktree,
