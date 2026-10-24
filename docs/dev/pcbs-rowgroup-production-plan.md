@@ -65,8 +65,11 @@ The failed queue/log/source hashes remain intact; its three generated target
 folders were moved into its preserved-generated-targets directory after checking
 clean committed sources and quiescence. A versioned v2 owner adds only the writable
 -DsecondaryCacheDir setting already used by earlier supported-version builds;
-root passed its seven small tests. Fresh retry scheduling and independent review
-remain pending. No source, benchmark control or acceptance threshold changed.
+root passed its seven small tests. Independent review and all seven tiny tests passed; root scheduled fresh
+byte-target-builds002 with supervisor 529893. Its raw build log confirms the
+compiler bridge installed successfully in the writable cache and passed the prior
+failure boundary. Actual candidate verification remains pending. No source,
+benchmark control or acceptance threshold changed.
 
 ## Historical implementation checkpoints
 
