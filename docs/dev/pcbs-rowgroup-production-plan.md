@@ -14,6 +14,14 @@ including source, tests, integration fixtures and build contracts. Receipt:
 3.5.5 build53-plus-nine and Java/Kryo SQL evidence can therefore cover unchanged
 final-source behavior; artifact identities remain d9ba. Other version gates
 still require their own actual execution.
+Independent final-policy source review found no concrete defect in the reviewed
+footer/projection/ownership/retry paths. Root read the review and decisive nested
+integration fixture: the nine new cases require multiple stored records in one
+partition and compare reordered nested/binary values and projection on GPU and CPU.
+The earlier broad nested-coverage concern was overstated. Very wide schemas and
+explicit logical-bundle counts remain coverage limits, not observed failures.
+Source-only receipt: ../support-audit/final-byte8-source-review001.md. This does
+not replace the remaining actual version gates or final human review.
 
 The user authorized finishing the real-data sweep, then a
 reviewable production patch with tests, performance checks and independent agent
