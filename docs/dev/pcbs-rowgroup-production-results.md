@@ -2,8 +2,10 @@
 
 Status: IN PROGRESS. All fifteen repeated synthetic JVM runs, sixteen production
 public-data cases and the separate twelve-case byte-target screen are independently
-verified and READY FOR REVIEW. The decoded batch-layout diagnostic pair is also
-verified. Target selection and final selected-source compatibility remain open.
+verified and READY FOR REVIEW. All six GH8GiB byte-target cases and the decoded
+batch-layout diagnostic pair are also independently verified. Root selected the
+8 MiB/default-row policy as the production starting point and promoted that code
+policy pending commit; final-source correctness and compatibility remain open.
 These measurements use the production logical-buffer reader, separately from the
 older research multi-file prototype.
 
@@ -65,15 +67,12 @@ all sixteen positive block files were captured, are separate from these payload
 ratios. Canonical RDDStorageInfo memory/disk values remain estimates, not physical
 file lengths or a known RAM-resident payload subset.
 
-No winner is selected. A single JVM per cell does not provide independent-run
-confidence, and physical IO/order/system history remain confounds. The first
-GH8GiB follow-up case, byte8 DISK, passed its original verifier with empty issues,
-JVM exit0, complete reads and no failed tasks: fill 43.331 s, measured-read median
-15.296 s and observed heap peak 3,223,322,624 bytes. Root checked the raw result;
-final-six independent replay and the remaining five cases are pending. This
-initial receipt is separate from the verified twelve-case table. Heavy downstream
-GPU work and native off-heap storage
-are not requirements of this screen. No Spark-core change, Spark OFF_HEAP setting,
+The six GH8GiB follow-up cases below are now independently verified. Root has
+selected 8 MiB/default rows as the conservative production starting point, not a
+universal performance winner. A single JVM per cell does not provide
+independent-run confidence; physical IO/order/system history remain confounds.
+Heavy downstream GPU work and native off-heap storage are not requirements of
+this screen. No Spark-core change, Spark OFF_HEAP setting,
 memory-fraction tuning or public configuration was added.
 
 Evidence: ../byte-target-screen/report001/summary.{json,csv,md} retains full
@@ -88,7 +87,65 @@ classification comes from the strict separate correction, not a rerun or changed
 metrics. ../byte-target-screen/render-check001.json confirms all twelve rows,
 all 28 CSV fields and all 15 Markdown columns against that replay.
 Final OS analysis: ../support-audit/root-byte-screen-os001.json.
-These verified measurements are READY FOR REVIEW, not final target acceptance.
+These verified measurements are READY FOR REVIEW; selecting the initial policy
+does not complete final-source correctness or supported-version acceptance.
+
+## Verified full GHArchive at 8 GiB heap
+
+All six cases PASS. Root independently replayed every unchanged original world
+verifier, required exact retained-result equality and CPU-oracle checks, and
+verified inputs/artifacts/raw evidence with initial and final real content hashes.
+This follow-up keeps all 32,078,549 GHArchive rows, 97,812,713,394 semantic value
+bytes and sixteen immutable input partitions. The full-row query, local eight
+slots, 1 GiB GPU target, 15 GiB pool, concurrency two, host40/pinned2 GiB,
+default reset100/unroll16, memory fraction0.6, inner SNAPPY and outer compression
+OFF remain unchanged. The heap is 8 GiB; this is a separate cohort from the
+48 GiB table above.
+
+| Storage | Arm | Fill s | Warmup s | Read1 s | Read2 s | Read3 s | Median s | Heap GiB | Records | Payload/value |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| DISK_ONLY | byte8/default rows | 43.331 | 15.660 | 15.229 | 15.341 | 15.296 | 15.296 | 3.002 | 11,722 | 0.256166 |
+| MEMORY_AND_DISK | byte8/default rows | 46.242 | 16.031 | 15.296 | 15.099 | 14.936 | 15.099 | 6.584 | 11,722 | 0.256166 |
+| DISK_ONLY | byte16/default rows | 43.570 | 15.990 | 14.890 | 15.175 | 14.389 | 14.890 | 3.978 | 6,602 | 0.254405 |
+| MEMORY_AND_DISK | byte16/default rows | 46.122 | 16.773 | 16.239 | 15.570 | 16.012 | 16.012 | 6.271 | 6,602 | 0.254404 |
+| DISK_ONLY | byte32/default rows | 45.270 | 16.251 | 15.055 | 15.686 | 15.092 | 15.092 | 6.745 | 4,160 | 0.253064 |
+| MEMORY_AND_DISK | byte32/default rows | 43.976 | 16.306 | 15.356 | 14.356 | 15.382 | 15.356 | 7.418 | 4,160 | 0.253065 |
+
+Warmup is excluded from each three-read median. Heap is observed phase occupancy,
+not live heap or a minimum requirement; RSS remains sampled in the full exports.
+Encoded payloads vary slightly between storage cases even with identical values.
+Payload/value describes complete encoded Parquet arrays, not physical IO or
+whole Java-cache files. For all three mixed-storage cases the whole-cache
+serialized-file total and its ratio are NULL because all sixteen positive disk
+block files were not captured together. This is unknown full-cache file size,
+not zero bytes or missing payload. Retained per-block residency, Spark memory/
+disk estimates and actual file bytes remain separate evidence.
+
+Root selects 8 MiB uncompressed row-group bytes with the default cuDF
+1,000,000-row cap as the conservative production starting point. In these
+single-JVM DISK cases, read medians remain near 15 seconds while byte32's observed
+heap peak is 6.745 GiB versus byte8's 3.002 GiB. The canonical DISK screen also
+observed 39.504 GiB for byte32 versus 16.187 GiB for byte8, although its read
+comparison is physically IO-confounded. TLC's improved payload ratios at16/32
+are real measured layout differences; they do not establish a universal optimum.
+Neither a confidence interval nor a causal performance or heap-safety guarantee
+follows from one JVM per cell.
+
+The benchmark source identities remain d9ba8787f6, cebb9206d5 and abec8b6da5;
+the selected 8 MiB policy is promoted into production source in this change
+without relabeling any measured artifact as a new commit. Final-source
+correctness and all-supported-version validation remain unrun gates. Root started
+the separate TLC diagnostic in ../selected-world-profiling/supervisor001 (parent
+579123), with baseline COLLECTING and no accepted capture yet. Its profiled wall
+times are not primary performance evidence. Outer Spark-compression experiments
+remain pending; native off-heap storage is optional, with no Spark-core or
+Spark OFF_HEAP change.
+
+Evidence: ../gh8-byte-target-screen/reverified001/summary.{json,csv,md}. The JSON
+retains the exact six-case original results, CPU-oracle proof, source identities,
+per-phase memory/IO, per-block residency and before/final content-hash receipt.
+These measurements are READY FOR REVIEW, separately from the older48-case
+prototype and earlier CPU/custom-codec cohorts.
 
 ## Returned GPU batch sizes
 

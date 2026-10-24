@@ -744,7 +744,7 @@ def test_cache_partition_with_column_over_2gib(data_type, route):
                                   'spark.sql.shuffle.partitions': '1'})
 
 
-# Keep the producer target large: these inputs cross the writer's row or byte row-group
+# Keep the producer target large: these inputs cross the writer's byte row-group
 # target within one input partition, rather than creating small GPU input batches.
 _pcbs_row_group_conf = copy_and_update(_pcbs_gpu_scan_conf,
     {'spark.rapids.sql.batchSizeBytes': '1g'})
@@ -754,7 +754,8 @@ def _row_group_cache_input(spark, shape):
     rows = 131073 if shape == 'rows' else 32769
     source = spark.range(0, rows, 1, 1)
     text = f.concat(f.lit('key-'), (f.col('id') % 7).cast('string'))
-    payload = f.concat(f.lit('binary-'), f.col('id').cast('string'))
+    # Unique binary values alone exceed the byte target without a small row-count cap.
+    payload = f.rpad(f.concat(f.lit('binary-'), f.col('id').cast('string')), 128, 'x')
     if shape == 'bytes':
         payload = f.rpad(payload, 512, 'x')
         text = f.rpad(f.col('id').cast('string'), 512, 'y')

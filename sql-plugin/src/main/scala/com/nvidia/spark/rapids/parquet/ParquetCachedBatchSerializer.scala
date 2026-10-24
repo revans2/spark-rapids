@@ -118,7 +118,6 @@ private class ByteArrayOutputFile(stream: ByteArrayOutputStream) extends OutputF
 }
 
 private object ParquetBufferConsumer {
-  val TargetRowGroupRows: Int = 64 * 1024
   val TargetRowGroupBytes: Long = 8L * 1024 * 1024
 }
 
@@ -434,7 +433,6 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
           writeInt96 = false)
         .withCompressionType(compressionType)
         // Keep cache records small while encoding the large GPU input only once.
-        .withRowGroupSizeRows(ParquetBufferConsumer.TargetRowGroupRows)
         .withRowGroupSizeBytes(ParquetBufferConsumer.TargetRowGroupBytes)
         .withStatisticsFrequency(StatisticsFrequency.ROWGROUP).build()
   }

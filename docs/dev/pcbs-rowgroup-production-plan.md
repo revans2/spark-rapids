@@ -16,7 +16,10 @@ content verification. Evidence: ../byte-target-screen/reverified001/result.json.
 Root also checked all 28 CSV fields and 15 Markdown columns against the complete
 replayed report: ../byte-target-screen/render-check001.json. The full table is in
 [production results](pcbs-rowgroup-production-results.md#verified-byte-only-target-screen).
-This supersedes the provisional case receipts below; no target is selected.
+This supersedes the provisional case receipts below. Root has selected the
+8 MiB uncompressed-byte target with cuDF's default row cap as the conservative
+production starting point. The selected code policy is promoted in this change;
+final-source verification remains open.
 
 The eight canonical cases keep 96 GiB of semantic values and the four TLC cases
 keep all 239,470,448 rows. All use 48 GiB heap, ordinary Java serialization and
@@ -35,16 +38,23 @@ counters and per-phase JVM physical IO remain observations, not file-residency o
 causal proof. It missed the first fill and started partway through the first
 warmup, so that history remains unknown.
 
-Root has started the bounded six-case full-GH pressure follow-up: byte8/16/32 at
-8 GiB heap, each DISK_ONLY and MEMORY_AND_DISK. The first byte8 DISK case passed
-its original verifier (issues empty, JVM exit0, complete, no failed tasks): fill
-43.331 s, measured-read median 15.296 s and observed heap peak 3,223,322,624 bytes.
-Root read the raw result; final-six independent replay remains pending, as do
-the remaining five cases. Data, sixteen input partitions, threads, GPU/host
-controls and defaults remain fixed. Root uses the
-unchanged world runner one case at a time and will preserve genuine OOMs. No new
-launcher framework, Spark-core change, Spark OFF_HEAP setting or production change
-is required; native off-heap storage remains optional.
+The six-case full-GH pressure follow-up is complete and READY FOR REVIEW:
+all six PASS, independently replayed through the unchanged original world verifier
+with complete retained-result equality, CPU-oracle checks and initial/final input,
+artifact and raw-evidence content verification. Full table and proof:
+../gh8-byte-target-screen/reverified001/summary.{json,csv,md}. It retains all
+32,078,549 GHArchive rows, sixteen input partitions and the unchanged query;
+byte8/16/32 each use DISK_ONLY and MEMORY_AND_DISK at an 8 GiB heap with all other
+controls fixed. DISK read medians are 15.296/14.890/15.092 s, while observed heap
+peaks are 3.002/3.978/6.745 GiB. Those single-JVM results support the conservative
+8 MiB starting point rather than a universal performance claim. Canonical byte32
+also observed 39.504 GiB versus byte8's 16.187 GiB in DISK storage; TLC's larger
+row groups compress better, but do not establish a workload-independent optimum.
+The measured byte8 source remains d9ba8787f6; the code policy is promoted
+in this change, not a relabeling of that benchmark artifact. Final-source gates
+remain unrun. No new launcher framework, Spark-core change or Spark OFF_HEAP
+setting is required; native off-heap storage remains optional. The TLC diagnostic
+profile is active with no accepted capture yet; outer compression is pending.
 The versioned final-source boundary/grouped and vendor/SQL launchers are now
 source-reviewed by root and independent agents; root independently passed all
 18 new pure tests. Preparation is READY FOR REVIEW in ../crossversion/
@@ -70,9 +80,13 @@ The narrow full-TLC profiling pair is prepared in ../selected-world-profiling
 to examine the observed public-data regression, retaining its original
 data/query/resources/oracle. Root read the complete canonical-to-TLC difference,
 independently passed all six pure tests, and obtained independent source review.
-Preparation is READY FOR REVIEW; actual plan creation/admission/capture waits
-for the closed verified screen and explicit root target selection.
-No optimized source or profiler run has been introduced.
+Root has started the separately scheduled diagnostic at
+../selected-world-profiling/supervisor001 (parent 579123); baseline is COLLECTING.
+Its immutable tlc-plan001 SHA is
+6b4ffded791b6f17e57141341a66cbe65b6ecaad1c074a6166e3c6f702f732f6.
+This uses the explicit measured byte8 artifact; no capture is accepted yet and
+profiled wall times are excluded from primary comparisons. No transfer optimization
+has been introduced.
 The closed-screen rendering checker is independently reviewed; root read it,
 passed four pure tests and executed it successfully on report001. Exact JSON
 replay equality and every CSV field/Markdown cell/limit note passed.
@@ -91,8 +105,10 @@ artifact audits in builds004. Root independently replayed all reports, checked
 9,304 frozen source entries, actual JNI dependencies, all 237 private classes and
 all 36 implementation-family classes against fresh module/distribution bytes,
 and confirmed final quiescence. These candidate artifacts are READY FOR REVIEW.
-Decoded-layout diagnostics and the closed 8/16/32 MiB screen passed. Target
-selection, the GH8 follow-up and final selected-source compatibility remain gates.
+Decoded-layout diagnostics, the closed 8/16/32 MiB screen and all six GH8 cases
+passed. Root selected byte8/default rows and promoted that code policy in this
+change. Profiling is active without an accepted capture; outer compression and
+final selected-source correctness/compatibility remain gates.
 Earlier checkpoint paragraphs below retain historical failures and pending states;
 the completed repeat checkpoint and current byte-target section supersede them.
 

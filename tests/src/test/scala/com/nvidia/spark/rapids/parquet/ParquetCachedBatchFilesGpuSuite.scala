@@ -25,7 +25,7 @@ import com.nvidia.spark.rapids.RapidsPluginImplicits._
 import com.nvidia.spark.rapids.jni.{CpuRetryOOM, RmmSpark}
 import com.nvidia.spark.rapids.spill.SpillFramework
 
-import org.apache.spark.sql.types.{LongType, StringType, StructType}
+import org.apache.spark.sql.types.{IntegerType, LongType, StringType, StructType}
 
 class ParquetCachedBatchFilesGpuSuite extends SparkQueryCompareTestSuite {
   private val rows = 32768
@@ -125,6 +125,44 @@ class ParquetCachedBatchFilesGpuSuite extends SparkQueryCompareTestSuite {
         }
         assert(SpillFramework.stores.hostStore.numHandles == handles)
       }
+    }
+  }
+
+  test("cache writer byte target does not impose a small row limit on narrow data") {
+    withGpuSparkSession { _ =>
+      val handles = SpillFramework.stores.hostStore.numHandles
+      val count = 200000
+      val narrowSchema = new StructType().add("id", IntegerType, nullable = false)
+      val options = new ParquetCachedBatchSerializer()
+        .getParquetWriterOptions(useCompression = false, schema = narrowSchema)
+      assert(options.getRowGroupSizeRows == ParquetWriterOptions.builder().build()
+        .getRowGroupSizeRows)
+      withResource(ColumnVector.fromInts((0 until count).toArray: _*)) { ids =>
+        withResource(new Table(ids)) { table =>
+          withResource(new EncodedOutput) { encoded =>
+            withResource(Table.writeParquetChunked(options, encoded))(_.write(table))
+            val source = ParquetCachedBatchFiles.fromSpillableRegions(encoded.regions.toVector)
+            val records = ParquetCachedBatchFiles.split(source).toVector
+            assert(records.size == 1)
+            assert(records.head.numRows == count)
+            assert(records.head.numRows > 65536)
+            withResource(records.safeMap(ParquetCachedBatchFiles.stage(_, narrowSchema))) {
+              staged =>
+                withResource(ParquetCachedBatchFiles.logicalFile(staged)) { logical =>
+                  withResource(Table.readParquet(ParquetOptions.DEFAULT, logical.buffers: _*)) {
+                    decoded =>
+                      assert(decoded.getRowCount == count)
+                      assert(decoded.getNumberOfColumns == 1)
+                      withResource(decoded.getColumn(0).copyToHost()) { host =>
+                        (0 until count).foreach(row => assert(host.getInt(row) == row))
+                      }
+                  }
+                }
+            }
+          }
+        }
+      }
+      assert(SpillFramework.stores.hostStore.numHandles == handles)
     }
   }
 
