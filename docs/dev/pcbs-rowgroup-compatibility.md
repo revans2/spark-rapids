@@ -83,8 +83,8 @@ prototype is excluded. Evidence is under the production evidence root
 | Three DBR pairs | Real vendor dependency-resolution/compile attempts and matching runtime coverage required; no OSS substitution | Not yet attempted |
 | 330 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |
 | 330 Kryo SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/registrator/origins and initial/final frozen/raw content | READY FOR REVIEW |
-| 401 Java SQL | Running at `crossversion/selected-sql401-java001`, same accepted fa29 artifacts | RUNNING |
-| 401 Kryo SQL | Prepared selected-source nine-case lane | Pending actual execution |
+| 401 Java SQL | Nine exact cases at actual 4 GiB application heap; root replayed JUnit, runtime/origins and initial/final frozen/raw content | READY FOR REVIEW |
+| 401 Kryo SQL | Running at `crossversion/selected-sql401-kryo001`, same accepted fa29 artifacts | RUNNING |
 
 The selected330 proof is `crossversion/selected-verify330-001-accepted.json`:
 3,094 tracked regular files plus the explicit Gitlink, exact retained test-report
