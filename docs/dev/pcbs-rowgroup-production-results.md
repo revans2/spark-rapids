@@ -403,6 +403,27 @@ Receipt: ../selected-world-profiling/contiguous-analysis001.json, retaining
 exact units, raw copyCount fields, boundary/outside rows and proof hashes.
 Profiled wall times remain diagnostic-only and are not pooled into the bracket.
 
+The complete saved read3 kernel and memcpy groups also give these interval sums.
+Memcpy here includes every captured direction and memory kind, unlike the pinned
+H2D-only table above; kernel totals include every group before top20 truncation.
+
+| Actual artifact | Kernel event rows | Sum kernel s | All memcpy event rows | Sum memcpy s | Profiled read3 s |
+|---|---:|---:|---:|---:|---:|
+| Original60c28, PID579202 | 28,025 | 2.744420196 | 116,620 | 0.455610893 | 5.813682962 |
+| Byte8 d9ba, PID580827 | 35,802 | 2.404687167 | 248,205 | 0.664926275 | 6.615042969 |
+| Adjacent-view8d14, PID593922 | 35,802 | 2.451718079 | 125,247 | 0.530856177 | 6.781734840 |
+
+The sums upper-bound the union of just these retained intervals because events
+can overlap; all three read3 kernel/memcpy boundary-straddler counts are zero.
+They do not bound all actual device work: other activity kinds, contexts or
+processes, and missing capture remain possible. These are neither GPU utilization
+nor time attributable to CPU outside the recorded intervals. `gpuTime` remains
+host semaphore holding time, which can include staging. Exact units, epoch-window
+versus monotonic-time differences and coverage limits are in the
+[device-interval note](/data/pcbs-oom/pcbs-rowgroup-production/support-audit/tlc-traced-device-intervals001.md).
+Root independently matched all saved read3 counts and sums and read the decisive
+queries; independent review passed. No new benchmark or runtime change follows.
+
 ## Host-side read work observed by JFR
 
 Two separately labelled full-TLC diagnostics compare original PCBS with the

@@ -81,7 +81,11 @@ worker comparisons. The four-case GH task report also completed at
 Java/metadata paths and task-thread CPU differences, not exact CPU percentages,
 live heap, proven spill absence or a causal bottleneck. The results section
 [Host-side read work observed by JFR](pcbs-rowgroup-production-results.md#host-side-read-work-observed-by-jfr)
-retains the measurements and limits.
+retains the measurements and limits. Root and independent review also matched
+all saved read3 full-kernel and all-direction memcpy interval counts/sums, with
+zero boundary straddlers. The results retain these separately profiled observations;
+they are not utilization, total actual GPU activity or CPU-causality measurements.
+../support-audit/tlc-traced-device-intervals001.md records the exact scope.
 MCP docker_exec remains mandatory for root and workers. Final supported-version
 gates remain open; the optional adjacent-view prototype stays isolated because
 its bracket did not establish a wall-time improvement.
