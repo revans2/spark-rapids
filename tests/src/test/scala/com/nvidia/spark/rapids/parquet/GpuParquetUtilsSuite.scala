@@ -64,13 +64,6 @@ class GpuParquetUtilsSuite extends AnyFunSuite {
     val plain = column("plain", 500L, 0L, 40L)
     val other = column("other", 950L, 900L, 100L)
     val originals = Seq(block(dictionary, plain), block(other))
-    // Row-index metadata exists in newer Parquet versions; exercise it where available.
-    val rowIndexSetter = classOf[BlockMetaData].getMethods.find(_.getName == "setRowIndexOffset")
-    rowIndexSetter.foreach { setter =>
-      originals.zipWithIndex.foreach { case (metadata, index) =>
-        setter.invoke(metadata, Long.box(index * 7L))
-      }
-    }
     val relocated = ScanMetadata.relocate(originals, 64L)
     val first = relocated.head.getColumns.asScala
     assert(first(0).getDictionaryPageOffset == 64L)
@@ -81,33 +74,11 @@ class GpuParquetUtilsSuite extends AnyFunSuite {
     val second = relocated(1).getColumns.get(0)
     assert(second.getDictionaryPageOffset == 184L)
     assert(second.getFirstDataPageOffset == 234L)
-    relocated.zip(originals).foreach { case (output, original) =>
-      assert(output.getRowCount == original.getRowCount)
-      assert(output.getTotalByteSize == original.getTotalByteSize)
-      classOf[BlockMetaData].getMethods.find(_.getName == "getRowIndexOffset").foreach { getter =>
-        assert(getter.invoke(output) == getter.invoke(original))
-      }
-      output.getColumns.asScala.zip(original.getColumns.asScala).foreach { case (out, in) =>
-        assert(out.getPrimitiveType == in.getPrimitiveType)
-        assert(out.getCodec == in.getCodec)
-        assert(out.getEncodings == in.getEncodings)
-        assert(out.getStatistics == in.getStatistics)
-        assert(out.getValueCount == in.getValueCount)
-        assert(out.getTotalSize == in.getTotalSize)
-        assert(out.getTotalUncompressedSize == in.getTotalUncompressedSize)
-      }
-    }
+    assert(relocated.map(_.getRowCount) == originals.map(_.getRowCount))
     assert(dictionary.getFirstDataPageOffset == 120L)
     assert(dictionary.getDictionaryPageOffset == 100L)
     assert(plain.getFirstDataPageOffset == 500L)
     assert(other.getDictionaryPageOffset == 900L)
   }
 
-  test("relocation rejects offset overflow rather than wrapping") {
-    val original = block(column("plain", 10L, 0L, 32L))
-    intercept[ArithmeticException] {
-      GpuParquetUtils.relocateBlock(original, Long.MaxValue - 8L)
-    }
-    assert(original.getColumns.get(0).getFirstDataPageOffset == 10L)
-  }
 }

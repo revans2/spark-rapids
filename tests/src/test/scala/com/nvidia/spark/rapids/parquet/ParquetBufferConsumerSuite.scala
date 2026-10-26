@@ -18,8 +18,6 @@ package com.nvidia.spark.rapids.parquet
 
 import java.nio.file.Files
 
-import scala.collection.JavaConverters._
-
 import ai.rapids.cudf.HostMemoryBuffer
 import com.nvidia.spark.rapids.{ScalableTaskCompletion, SparkQueryCompareTestSuite}
 import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
@@ -66,59 +64,14 @@ class ParquetBufferConsumerSuite extends SparkQueryCompareTestSuite {
     }.toVector
   }
 
-  Seq(false, true).foreach { useNext =>
-    val operation = if (useNext) "next" else "hasNext"
-    test(s"malformed footer releases every callback region on $operation") {
-      withGpuSparkSession { _ =>
-        val handles = SpillFramework.stores.hostStore.numHandles
-        withResource(new ParquetBufferConsumer(numRows = 1)) { consumer =>
-          val buffers = addRegions(consumer, new Array[Byte](24))
-          val error = intercept[RuntimeException] {
-            if (useNext) consumer.records.next() else consumer.records.hasNext
-          }
-          assert(error.getMessage.contains("Expected magic number at tail"))
-          assert(buffers.forall(_.getRefCount == 0))
-          assert(SpillFramework.stores.hostStore.numHandles == handles)
-        }
-      }
-    }
-  }
-
-  test("exhaustion releases callback regions and close is idempotent") {
-    withGpuSparkSession { _ =>
-      val bytes = parquetBytes()
-      val handles = SpillFramework.stores.hostStore.numHandles
-      withResource(new ParquetBufferConsumer(numRows = rows)) { consumer =>
-        val buffers = addRegions(consumer, bytes)
-        val records = consumer.records
-        var count = 0
-        var totalRows = 0
-        while (records.hasNext) {
-          val record = records.next()
-          val footer = ParquetCachedBatchFiles.readFooter(
-            ParquetCachedBatchFiles.fromBytes(record.buffer))
-          assert(footer.getBlocks.asScala.map(_.getRowCount).sum == record.numRows)
-          assert(footer.getBlocks.size == 1)
-          count += 1
-          totalRows += record.numRows
-        }
-        assert(count > 1)
-        assert(totalRows == rows)
-        assert(buffers.forall(_.getRefCount == 0))
-        assert(SpillFramework.stores.hostStore.numHandles == handles)
-        consumer.close()
-        consumer.close()
-      }
-    }
-  }
-
-  test("explicit close releases regions without parsing their contents") {
+  test("malformed footer releases every callback region") {
     withGpuSparkSession { _ =>
       val handles = SpillFramework.stores.hostStore.numHandles
       withResource(new ParquetBufferConsumer(numRows = 1)) { consumer =>
         val buffers = addRegions(consumer, new Array[Byte](24))
-        consumer.close()
-        consumer.close()
+        intercept[RuntimeException] {
+          consumer.records.next()
+        }
         assert(buffers.forall(_.getRefCount == 0))
         assert(SpillFramework.stores.hostStore.numHandles == handles)
       }

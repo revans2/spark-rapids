@@ -25,43 +25,34 @@ import org.apache.spark.sql.types.{DataType, LongType}
 class CachedGpuBatchIteratorSuite extends SparkQueryCompareTestSuite {
   private val dataTypes = Array[DataType](LongType)
 
-  Seq("hasNext", "next").foreach { failureSite =>
-    test(s"later producer $failureSite failure closes cached output and preserves the error") {
-      withGpuSparkSession { _ =>
-        withResource(ColumnVector.fromLongs(1L, 2L)) { heldColumn =>
-          val references = heldColumn.getRefCount
-          val handles = SpillFramework.stores.deviceStore.numHandles
-          val failure = new IllegalStateException(s"injected producer $failureSite failure")
-          var hasNextCalls = 0
-          var nextCalls = 0
-          var closeCalls = 0
-          val producer = new GpuDataProducer[Table] {
-            override def hasNext: Boolean = {
-              hasNextCalls += 1
-              // The first two checks select the multi-chunk path. Fail only after
-              // the first table has been converted into a pending spillable batch.
-              if (hasNextCalls > 2 && failureSite == "hasNext") throw failure
-              true
-            }
+  test("later producer next failure closes cached output and preserves the error") {
+    withGpuSparkSession { _ =>
+      withResource(ColumnVector.fromLongs(1L, 2L)) { heldColumn =>
+        val references = heldColumn.getRefCount
+        val handles = SpillFramework.stores.deviceStore.numHandles
+        val failure = new IllegalStateException("injected producer next failure")
+        var nextCalls = 0
+        var closeCalls = 0
+        val producer = new GpuDataProducer[Table] {
+          override def hasNext: Boolean = true
 
-            override def next: Table = {
-              nextCalls += 1
-              if (nextCalls > 1) throw failure
-              new Table(heldColumn)
-            }
+          override def next: Table = {
+            nextCalls += 1
+            if (nextCalls > 1) throw failure
+            new Table(heldColumn)
+          }
 
-            override def close(): Unit = closeCalls += 1
-          }
-          val thrown = intercept[IllegalStateException] {
-            CachedGpuBatchIterator(producer, dataTypes)
-          }
-          assert(thrown eq failure)
-          assert(thrown.getSuppressed.isEmpty)
-          assert(nextCalls == (if (failureSite == "hasNext") 1 else 2))
-          assert(closeCalls == 1)
-          assert(heldColumn.getRefCount == references)
-          assert(SpillFramework.stores.deviceStore.numHandles == handles)
+          override def close(): Unit = closeCalls += 1
         }
+        val thrown = intercept[IllegalStateException] {
+          CachedGpuBatchIterator(producer, dataTypes)
+        }
+        assert(thrown eq failure)
+        assert(thrown.getSuppressed.isEmpty)
+        assert(nextCalls == 2)
+        assert(closeCalls == 1)
+        assert(heldColumn.getRefCount == references)
+        assert(SpillFramework.stores.deviceStore.numHandles == handles)
       }
     }
   }
@@ -106,52 +97,6 @@ class CachedGpuBatchIteratorSuite extends SparkQueryCompareTestSuite {
           if (chunks > 1) assert(handlesBeforeClose > handles)
           assert(heldColumn.getRefCount == references)
           assert(SpillFramework.stores.deviceStore.numHandles == handles)
-        }
-      }
-    }
-
-    Seq(false, true).foreach { consume =>
-      test(s"$chunks producer chunks release all references, consume=$consume") {
-        withGpuSparkSession { _ =>
-          withResource(ColumnVector.fromLongs(1L, 2L)) { heldColumn =>
-            val references = heldColumn.getRefCount
-            val handles = SpillFramework.stores.deviceStore.numHandles
-            var produced = 0
-            var closeCalls = 0
-            val producer = new GpuDataProducer[Table] {
-              override def hasNext: Boolean = produced < chunks
-
-              override def next: Table = {
-                if (!hasNext) throw new NoSuchElementException()
-                produced += 1
-                new Table(heldColumn)
-              }
-
-              override def close(): Unit = closeCalls += 1
-            }
-            withResource(CachedGpuBatchIterator(producer, dataTypes)) { batches =>
-              assert(closeCalls == 1)
-              assert(produced == chunks)
-              if (consume) {
-                var consumed = 0
-                while (batches.hasNext) {
-                  withResource(batches.next()) { batch =>
-                    assert(batch.numRows() == 2)
-                    withResource(batch.column(0).asInstanceOf[GpuColumnVector]
-                        .getBase.copyToHost()) { column =>
-                      assert(column.getLong(0) == 1L)
-                      assert(column.getLong(1) == 2L)
-                    }
-                  }
-                  consumed += 1
-                }
-                assert(consumed == chunks)
-              }
-            }
-            assert(closeCalls == 1)
-            assert(heldColumn.getRefCount == references)
-            assert(SpillFramework.stores.deviceStore.numHandles == handles)
-          }
         }
       }
     }

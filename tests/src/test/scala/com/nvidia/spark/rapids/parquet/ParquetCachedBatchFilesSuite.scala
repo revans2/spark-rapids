@@ -15,7 +15,7 @@
  */
 package com.nvidia.spark.rapids.parquet
 
-import java.io.{ByteArrayOutputStream, EOFException}
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -64,119 +64,78 @@ class ParquetCachedBatchFilesSuite extends AnyFunSuite {
     Files.readAllBytes(original)
   }
 
-  Seq(CompressionCodecName.UNCOMPRESSED, CompressionCodecName.SNAPPY).foreach { codec =>
-    Seq(false, true).foreach { dictionary =>
-      test(s"row-group records decode independently: $codec dictionary=$dictionary") {
-        withResource(new TemporaryDirectory) { directory =>
-          val bytes = writeFile(directory.path, codec, dictionary)
-          val source = ParquetCachedBatchFiles.fromBytes(bytes)
-          val original = ParquetCachedBatchFiles.readFooter(source)
-          assert(original.getBlocks.size > 1)
-          val columns = original.getBlocks.asScala.flatMap(_.getColumns.asScala)
-          if (dictionary) {
-            assert(columns.exists(c =>
-              c.hasDictionaryPage && c.getFirstDataPageOffset > c.getDictionaryPageOffset))
-          } else {
-            assert(columns.forall(!_.hasDictionaryPage))
-          }
-          var rowIndex = 0
-          var recordIndex = 0
-          ParquetCachedBatchFiles.split(source).foreach { record =>
-            val footer = ParquetCachedBatchFiles.readFooter(
-              ParquetCachedBatchFiles.fromBytes(record.buffer))
-            assert(footer.getBlocks.size == 1)
-            assert(footer.getBlocks.get(0).getRowCount == record.numRows)
-            assert(footer.getFileMetaData.getSchema == parquetSchema)
-            assert(footer.getFileMetaData.getKeyValueMetaData.get("cache-marker") == "preserved")
-            val file = directory.path.resolve(s"record-$recordIndex.parquet")
-            Files.write(file, record.buffer)
-            withResource(ParquetReader.builder[Group](new GroupReadSupport(), new Path(file.toUri))
-                .withConf(new Configuration()).build()) { reader =>
-              var group = reader.read()
-              var recordRows = 0
-              while (group != null) {
-                assert(group.getLong("id", 0) == rowIndex.toLong)
-                assert(group.getFieldRepetitionCount("text") == (if (rowIndex % 5 == 0) 0 else 1))
-                if (rowIndex % 5 != 0) {
-                  assert(group.getString("text", 0) == "dictionary-" + rowIndex % 11)
-                }
-                assert(group.getFieldRepetitionCount("value") == (if (rowIndex % 7 == 0) 0 else 1))
-                if (rowIndex % 7 != 0) assert(group.getDouble("value", 0) == rowIndex * 0.5)
-                rowIndex += 1
-                recordRows += 1
-                group = reader.read()
-              }
-              assert(recordRows == record.numRows)
-            }
-            recordIndex += 1
-          }
-          assert(rowIndex == 40000)
-          assert(recordIndex == original.getBlocks.size)
+  test("row-group records copy lazily and decode independently") {
+    val codec = CompressionCodecName.SNAPPY
+    val dictionary = true
+    withResource(new TemporaryDirectory) { directory =>
+      val bytes = writeFile(directory.path, codec, dictionary)
+      val wrapped = ParquetCachedBatchFiles.fromBytes(bytes)
+      val footerLength = ByteBuffer.wrap(bytes, bytes.length - 8, 4)
+        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt
+      val footerOffset = bytes.length - 8 - footerLength
+      var payloadReads = 0
+      var trailerReads = 0
+      val source = new ParquetCachedBatchFiles.EncodedSource {
+        override val length: Long = wrapped.length
+        override def readFully(offset: Long, destination: Array[Byte], start: Int,
+            count: Int): Unit = {
+          if (offset >= 4 && offset < footerOffset) payloadReads += 1
+          if (offset + count > bytes.length - 8) trailerReads += 1
+          wrapped.readFully(offset, destination, start, count)
         }
       }
-    }
-  }
-
-  test("source rejects out-of-range reads without copying") {
-    val source = ParquetCachedBatchFiles.fromBytes(Array[Byte](1, 2, 3))
-    val destination = Array.fill[Byte](4)(0)
-    intercept[IllegalArgumentException] { source.readFully(-1, destination, 0, 1) }
-    intercept[IllegalArgumentException] { source.readFully(2, destination, 0, 2) }
-    intercept[IllegalArgumentException] { source.readFully(0, destination, 4, 1) }
-    assert(destination.sameElements(Array.fill[Byte](4)(0)))
-    source.readFully(3, destination, 4, 0)
-  }
-
-  test("encoded streams support seeking, heap and direct reads, and exact EOF handling") {
-    val bytes = Array.tabulate[Byte](16385)(_.toByte)
-    val file = ParquetCachedBatchFiles.inputFile(ParquetCachedBatchFiles.fromBytes(bytes))
-    withResource(file.newStream()) { stream =>
-      val heap = ByteBuffer.allocate(bytes.length)
-      stream.readFully(heap)
-      assert(heap.array().sameElements(bytes))
-      assert(stream.getPos == bytes.length)
-      assert(stream.read() == -1)
-      assert(stream.read(new Array[Byte](0)) == 0)
-
-      stream.seek(1)
-      val direct = ByteBuffer.allocateDirect(bytes.length - 1)
-      stream.readFully(direct)
-      direct.flip()
-      val actual = new Array[Byte](direct.remaining())
-      direct.get(actual)
-      assert(actual.sameElements(bytes.drop(1)))
-      assert(stream.getPos == bytes.length)
-      assert(stream.read(ByteBuffer.allocateDirect(1)) == -1)
-
-      stream.seek(bytes.length - 1)
-      intercept[EOFException] { stream.readFully(new Array[Byte](2)) }
-      stream.seek(bytes.length - 1)
-      intercept[EOFException] { stream.readFully(ByteBuffer.allocateDirect(2)) }
-      intercept[IllegalArgumentException] { stream.seek(-1) }
-      intercept[IllegalArgumentException] { stream.seek(bytes.length + 1L) }
-    }
-  }
-
-  test("invalid magic and footer lengths are rejected") {
-    val shortFile = intercept[RuntimeException] {
-      ParquetCachedBatchFiles.readFooter(ParquetCachedBatchFiles.fromBytes(new Array[Byte](11)))
-    }
-    assert(shortFile.getMessage.contains("length is too low"))
-    withResource(new TemporaryDirectory) { directory =>
-      val bytes = writeFile(directory.path, CompressionCodecName.UNCOMPRESSED, dictionary = true)
-      val damagedMagic = bytes.clone()
-      damagedMagic(damagedMagic.length - 1) = 0
-      val invalidMagic = intercept[RuntimeException] {
-        ParquetCachedBatchFiles.readFooter(ParquetCachedBatchFiles.fromBytes(damagedMagic))
+      val original = ParquetCachedBatchFiles.readFooter(source)
+      assert(original.getBlocks.size > 1)
+      val columns = original.getBlocks.asScala.flatMap(_.getColumns.asScala)
+      assert(columns.exists(c =>
+        c.hasDictionaryPage && c.getFirstDataPageOffset > c.getDictionaryPageOffset))
+      var rowIndex = 0
+      var recordIndex = 0
+      val records = ParquetCachedBatchFiles.split(source)
+      val initialTrailerReads = trailerReads
+      assert(initialTrailerReads > 0)
+      assert(payloadReads == 0)
+      var more = records.hasNext
+      assert(payloadReads == 0)
+      while (more) {
+        val reads = payloadReads
+        val record = records.next()
+        assert(payloadReads > reads)
+        val footer = ParquetCachedBatchFiles.readFooter(
+          ParquetCachedBatchFiles.fromBytes(record.buffer))
+        assert(footer.getBlocks.size == 1)
+        assert(footer.getBlocks.get(0).getRowCount == record.numRows)
+        assert(footer.getFileMetaData.getSchema == parquetSchema)
+        assert(footer.getFileMetaData.getKeyValueMetaData.get("cache-marker") == "preserved")
+        val file = directory.path.resolve(s"record-$recordIndex.parquet")
+        Files.write(file, record.buffer)
+        withResource(ParquetReader.builder[Group](new GroupReadSupport(), new Path(file.toUri))
+            .withConf(new Configuration()).build()) { reader =>
+          var group = reader.read()
+          var recordRows = 0
+          while (group != null) {
+            assert(group.getLong("id", 0) == rowIndex.toLong)
+            assert(group.getFieldRepetitionCount("text") == (if (rowIndex % 5 == 0) 0 else 1))
+            if (rowIndex % 5 != 0) {
+              assert(group.getString("text", 0) == "dictionary-" + rowIndex % 11)
+            }
+            assert(group.getFieldRepetitionCount("value") == (if (rowIndex % 7 == 0) 0 else 1))
+            if (rowIndex % 7 != 0) assert(group.getDouble("value", 0) == rowIndex * 0.5)
+            rowIndex += 1
+            recordRows += 1
+            group = reader.read()
+          }
+          assert(recordRows == record.numRows)
+        }
+        recordIndex += 1
+        val afterRecord = payloadReads
+        more = records.hasNext
+        assert(payloadReads == afterRecord)
       }
-      assert(invalidMagic.getMessage.contains("Expected magic number at tail"))
-      val damagedLength = bytes.clone()
-      ByteBuffer.wrap(damagedLength, damagedLength.length - 8, 4)
-        .order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(Int.MaxValue)
-      val invalidLength = intercept[RuntimeException] {
-        ParquetCachedBatchFiles.split(ParquetCachedBatchFiles.fromBytes(damagedLength)).next()
-      }
-      assert(invalidLength.getMessage.contains("footer index is not within the file"))
+      assert(payloadReads > 0)
+      assert(trailerReads == initialTrailerReads)
+      assert(rowIndex == 40000)
+      assert(recordIndex == original.getBlocks.size)
     }
   }
 
@@ -206,42 +165,6 @@ class ParquetCachedBatchFilesSuite extends AnyFunSuite {
       intercept[IllegalArgumentException] {
         ParquetCachedBatchFiles.split(ParquetCachedBatchFiles.fromBytes(output.toByteArray)).next()
       }
-    }
-  }
-  test("row-group payload copying is lazy and does not reread the trailer") {
-    withResource(new TemporaryDirectory) { directory =>
-      val bytes = writeFile(directory.path, CompressionCodecName.SNAPPY, dictionary = true)
-      val footerLength = ByteBuffer.wrap(bytes, bytes.length - 8, 4)
-        .order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt
-      val footerOffset = bytes.length - 8 - footerLength
-      var payloadReads = 0
-      var trailerReads = 0
-      val wrapped = ParquetCachedBatchFiles.fromBytes(bytes)
-      val source = new ParquetCachedBatchFiles.EncodedSource {
-        override val length: Long = wrapped.length
-        override def readFully(offset: Long, destination: Array[Byte], start: Int,
-            count: Int): Unit = {
-          if (offset >= 4 && offset < footerOffset) payloadReads += 1
-          if (offset + count > bytes.length - 8) trailerReads += 1
-          wrapped.readFully(offset, destination, start, count)
-        }
-      }
-      val records = ParquetCachedBatchFiles.split(source)
-      val initialTrailerReads = trailerReads
-      assert(initialTrailerReads > 0)
-      assert(payloadReads == 0)
-      assert(records.hasNext)
-      assert(payloadReads == 0)
-      val firstRows = records.next().numRows
-      assert(firstRows > 0)
-      assert(payloadReads > 0)
-      val reads = payloadReads
-      assert(records.hasNext)
-      assert(payloadReads == reads)
-      val remainingRows = records.map(_.numRows).sum
-      assert(remainingRows > 0)
-      assert(firstRows + remainingRows == 40000)
-      assert(trailerReads == initialTrailerReads)
     }
   }
 

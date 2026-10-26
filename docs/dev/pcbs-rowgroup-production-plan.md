@@ -126,5 +126,34 @@ retained in verify355-initial.log. Lead independently inspected final logs/XML;
 all required checks passed, with no weakened assertions. No further audit blocker.
 The cross-version results are builds, not runtime suite runs.
 
+Test consolidation (2026-10-26), READY FOR REVIEW: human approved the test audit,
+superseding earlier requirements for separate Scala GPU-size/CPU-budget cases.
+Keep the real GPU integration size/type/projection checks; move CPU byte-budget
+and oversized-row coverage into three parameterized integration cases. Retain
+instrumented laziness, independent Java decoding, native extent/array-limit guards,
+forced spills, retry/replay, ownership cleanup and exact scan offset regression.
+Remove library-validation tests, redundant success matrices and private arithmetic
+microtests. Use the production buffer consumer in spill tests, folding automatic
+exhaustion cleanup into that test. No production source or released behavior changes.
+Workers/lead confirm MCP docker_exec only. Independent review is clear after fixing
+the merged lazy test to check every hasNext guard before/after payload counters.
+Net test-code reduction: 425 lines; no production source changes.
+
+Evidence E=/data/pcbs-oom/pcbs-test-consolidation, same tracked-source export,
+wrapper, suite selector and commands above (with this E):
+- Full cache integration: 623 passed, four default skips, eight workers, 93.712s;
+  cache-default-parallel.xml and .stdout.log. Three migrated CPU cases all ran.
+- CPU cache-target/existing-budget cases: nine records each, largest 17,563 bytes;
+  oversized-row case: three singleton records, largest 2,852 bytes.
+- GPU case: 19 records, largest 1,044,266 bytes; size guard unchanged.
+- Spark 3.5.5 verify: 35 Scala (previously 62) + 9 Java passed; Scala 35.370s,
+  reactor 6m03s; verify355.log. Scalastyle and licenses passed. Initial import-order
+  failure was fixed without disabling checks; verify355-initial.log preserves it.
+Retained risk checks were preserved or moved; only audit-approved redundant checks
+were removed. Lead inspected source/logs/XML and compared all eight test files with
+the build export; independent worker reviews found no remaining issue.
+No cross-version builds rerun for this test-only change; prior production builds
+above still apply.
+
 Entire production patch, including tests and tracker:
 `git diff github/main...pcbs-rowgroup-production`

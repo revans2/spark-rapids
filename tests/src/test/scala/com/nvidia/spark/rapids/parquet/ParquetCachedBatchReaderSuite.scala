@@ -42,7 +42,6 @@ import org.apache.spark.sql.columnar.CachedBatch
 import org.apache.spark.sql.rapids.execution.TrampolineUtil
 import org.apache.spark.sql.rapids.metrics.source.MockTaskContext
 import org.apache.spark.sql.types.{LongType, StringType, StructType}
-import org.apache.spark.util.TaskCompletionListener
 
 class ParquetCachedBatchReaderSuite extends AnyFunSuite with BeforeAndAfterEach {
   private val schema = new StructType().add("id", LongType).add("label", StringType)
@@ -120,31 +119,6 @@ class ParquetCachedBatchReaderSuite extends AnyFunSuite with BeforeAndAfterEach 
     values.toVector
   }
 
-  test("combined records preserve old multi-row-group data and column projection") {
-    val first = encoded(0, 400, dictionary = true)
-    val second = encoded(400, 400, dictionary = false)
-    assert(ParquetCachedBatchFiles.describe(first, schema).rowGroups > 1)
-    withResource(new ParquetCachedBatchReader(
-        Iterator[CachedBatch](first, second), schema, options, 1024 * 1024, 0)) { reader =>
-      assert(reader.hasNext)
-      withResource(reader.next()) { batch =>
-        assert(batch.numRows == 800)
-        val actual = ArrayBuffer.empty[Long]
-        val producer = batch.producer.get
-        while (producer.hasNext) {
-          withResource(producer.next) { table =>
-            assert(table.getNumberOfColumns == 1)
-            withResource(table.getColumn(0).copyToHost()) { host =>
-              (0 until table.getRowCount.toInt).foreach(i => actual += host.getLong(i))
-            }
-          }
-        }
-        assert(actual.toVector == (0L until 800L).toVector)
-      }
-      assert(!reader.hasNext)
-    }
-  }
-
   test("combined CPU-written row groups decode dictionary and plain labels with nulls") {
     val dictionary = encoded(0, 400, dictionary = true)
     val plain = encoded(400, 400, dictionary = false)
@@ -207,39 +181,6 @@ class ParquetCachedBatchReaderSuite extends AnyFunSuite with BeforeAndAfterEach 
       }
       assert(!reader.hasNext)
     }
-  }
-
-  test("zero-byte records keep row counts and order without constructing a native reader") {
-    val record = encoded(0, 4, dictionary = true)
-    val input = Iterator[CachedBatch](
-      ParquetCachedBatch(3, Array.emptyByteArray), record,
-      ParquetCachedBatch(0, Array.emptyByteArray))
-    withResource(new ParquetCachedBatchReader(input, schema, options, 1024 * 1024, 0)) { reader =>
-      withResource(reader.next()) { batch =>
-        assert(batch.numRows == 3)
-        assert(batch.producer.isEmpty)
-      }
-      withResource(reader.next()) { batch =>
-        assert(batch.numRows == 4)
-        assert(batch.producer.nonEmpty)
-      }
-      withResource(reader.next()) { batch =>
-        assert(batch.numRows == 0)
-        assert(batch.producer.isEmpty)
-      }
-      assert(!reader.hasNext)
-    }
-  }
-
-  test("bundle limits respect encoded hints, decoded hints and the integer row limit") {
-    val info = ParquetCachedBatchFiles.describe(encoded(0, 1, dictionary = false), schema)
-      .copy(rows = 1, encodedBytes = 2, estimatedDecodedBytes = 3)
-    assert(ParquetCachedBatchReader.fits(1, 2, 3, info, 6))
-    assert(!ParquetCachedBatchReader.fits(1, 5, 3, info, 6))
-    assert(!ParquetCachedBatchReader.fits(1, 2, 4, info, 6))
-    assert(!ParquetCachedBatchReader.fits(Int.MaxValue, 0, 0, info, Long.MaxValue))
-    assert(!ParquetCachedBatchReader.fits(1, 0, 0,
-      info.copy(rows = Int.MaxValue), Long.MaxValue))
   }
 
   test("shared reader replay skips output postprocessing and closes readers before inputs") {
@@ -334,30 +275,6 @@ class ParquetCachedBatchReaderSuite extends AnyFunSuite with BeforeAndAfterEach 
     assert(resourceCloses == 1)
   }
 
-  test("hasNext allocation retry and early close release reader before its inputs") {
-    var inject = true
-    val closes = ArrayBuffer.empty[String]
-    val input = new AutoCloseable {
-      override def close(): Unit = closes += "input"
-    }
-    val producer = new TableProducer(() => new ChunkedReader {
-      override def hasNext: Boolean = {
-        if (inject) {
-          inject = false
-          throw new GpuRetryOOM("hasNext allocation")
-        }
-        true
-      }
-      override def next: Table = throw new UnsupportedOperationException()
-      override def close(): Unit = closes += "reader"
-    }, Seq(input))
-    withResource(producer) { _ =>
-      assert(producer.hasNext)
-    }
-    producer.close()
-    assert(closes.toVector == Vector("reader", "reader", "input"))
-  }
-
   test("task completion releases both an active logical file and staged lookahead") {
     val record = encoded(0, 4, dictionary = true)
     val info = ParquetCachedBatchFiles.describe(record, schema)
@@ -399,34 +316,6 @@ class ParquetCachedBatchReaderSuite extends AnyFunSuite with BeforeAndAfterEach 
       val error = intercept[IllegalStateException](reader.next())
       assert(error.getMessage == "failed input")
       assert(SpillFramework.stores.hostStore.numHandles == 0)
-    }
-  }
-
-  test("closed bundles do not accumulate task completion callbacks") {
-    var registered = 0
-    val context = new MockTaskContext(1, partitionId = 0) {
-      override def addTaskCompletionListener(
-          listener: TaskCompletionListener): org.apache.spark.TaskContext = {
-        registered += 1
-        super.addTaskCompletionListener(listener)
-      }
-    }
-    TrampolineUtil.setTaskContext(context)
-    try {
-      val records = Iterator.fill[CachedBatch](1000)(
-        ParquetCachedBatch(1, Array.emptyByteArray))
-      withResource(new ParquetCachedBatchReader(
-          records, schema, options, 1024 * 1024, 0)) { reader =>
-        (0 until 1000).foreach { _ =>
-          withResource(reader.next())(batch => assert(batch.numRows == 1))
-        }
-        assert(!reader.hasNext)
-        assert(registered == 1)
-        context.markTaskComplete()
-        assert(SpillFramework.stores.hostStore.numHandles == 0)
-      }
-    } finally {
-      TrampolineUtil.unsetTaskContext()
     }
   }
 }

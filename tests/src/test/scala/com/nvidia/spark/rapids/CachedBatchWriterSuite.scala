@@ -20,7 +20,7 @@ import scala.collection.JavaConverters.asScalaIteratorConverter
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.collection.mutable
 
-import ai.rapids.cudf.{ColumnVector, CompressionType, DType, ParquetTableWriter, Rmm, Table}
+import ai.rapids.cudf.{ColumnVector, CompressionType, DType, ParquetTableWriter, ParquetWriterOptions, Rmm, Table}
 import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
 import com.nvidia.spark.rapids.CudfTestHelper.withRecordedHostAllocations
 import com.nvidia.spark.rapids.RapidsHostColumnBuilderSuite.{limits, withLimits}
@@ -148,6 +148,8 @@ class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
     val schema = new StructType().add("value", "string")
     List(false, true).foreach { comp =>
       val opts = ser.getParquetWriterOptions(comp, schema, rowGroupSizeBytes)
+      assert(opts.getRowGroupSizeRows == ParquetWriterOptions.builder().build()
+        .getRowGroupSizeRows)
       assert(
         (if (comp) {
           CompressionType.SNAPPY
@@ -155,71 +157,6 @@ class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
           CompressionType.NONE
         }) == opts.getCompressionType)
     }
-  }
-
-  test("GPU writer splits its output into small cache records") {
-    val targetBytes = 16L * 1024
-    val conf = new SparkConf()
-      .set(RapidsConf.PARQUET_CACHE_ROW_GROUP_SIZE_BYTES.key, targetBytes.toString)
-    withGpuSparkSession(spark => {
-      val ser = new ParquetCachedBatchSerializer
-      val values = (0 until 20000).map(_.toLong * 7919)
-      val attrs: Seq[Attribute] = Seq(AttributeReference("value", LongType, nullable = false)())
-      val schema = new StructType().add("value", LongType, nullable = false)
-      val cachedSchema = PCBSSchemaHelper.getSupportedSchemaFromUnsupported(attrs).toStructType
-      val target = new RapidsConf(TrampolineUtil.getSparkConf(spark))
-        .parquetCacheRowGroupSizeBytes
-      val cached = withResource(closeOnExcept(ColumnVector.fromLongs(values: _*)) { cv =>
-        new ColumnarBatch(Array(GpuColumnVector.from(cv, LongType)), values.length)
-      }) { batch =>
-        ser.compressColumnarBatchWithParquet(batch, cachedSchema, schema,
-          BYTES_ALLOWED_PER_BATCH, useCompression = false, rowGroupSizeBytes = target).toList
-      }
-      assert(cached.length > 1)
-      assert(cached.forall(record => record.numRows > 0 && record.sizeInBytes > 0))
-      // cuDF cuts at whole page fragments. For these uniform-width rows it shrinks fragments
-      // to the byte target; twice the target allows rounding and the independent file footer.
-      assert(cached.forall(_.sizeInBytes <= 2 * targetBytes),
-        s"record sizes: ${cached.map(_.sizeInBytes)}")
-      val (_, decoded) = buildAndReadBack(spark, ser,
-        spark.sparkContext.parallelize[CachedBatch](cached, numSlices = 1), attrs)
-      assert(cached.map(_.numRows).sum == values.length)
-      assert(decoded.flatten.map(_.getLong(0)) == values)
-    }, conf)
-  }
-
-  Seq((16 * 1024, 1024 * 1024), (32 * 1024, 16 * 1024)).foreach {
-    case (targetBytes, batchBytes) =>
-      test(s"CPU writer caps cache records at the smaller budget $targetBytes/$batchBytes") {
-        val settings = new SparkConf()
-          .set(RapidsConf.PARQUET_CACHE_ROW_GROUP_SIZE_BYTES.key, targetBytes.toString)
-          .set(RapidsConf.GPU_BATCH_SIZE_BYTES.key, batchBytes.toString)
-          .set("spark.sql.inMemoryColumnarStorage.compressed", "false")
-        withCpuSparkSession(spark => {
-          val plan = spark.range(0, 256, 1, 1)
-            .selectExpr("id", "lpad(cast(id as string), 512, '0') as value")
-            .queryExecution.executedPlan
-          val ser = new ParquetCachedBatchSerializer
-          val conf = TrampolineUtil.getSparkConf(spark)
-          val budget = math.min(targetBytes.toLong, ser.getBytesAllowedPerBatch(conf))
-          val cached = ser.convertInternalRowToCachedBatch(
-            plan.execute(), plan.output, MEMORY_ONLY, conf).collect().toList
-          assert(cached.length > 1)
-          assert(cached.forall(record => record.numRows > 0 && record.sizeInBytes > 0))
-          // UnsafeRow byte accounting caps row data; this two-column schema needs less than
-          // 4 KiB for Parquet page headers and the footer in each independent file.
-          assert(cached.forall(_.sizeInBytes <= budget + 4096),
-            s"record sizes: ${cached.map(_.sizeInBytes)}")
-          val decoded = ser.convertCachedBatchToInternalRow(
-            spark.sparkContext.parallelize[CachedBatch](cached, numSlices = 1),
-            plan.output, plan.output, conf).map(_.copy()).collect()
-          assert(cached.map(_.numRows).sum == 256)
-          assert(decoded.map(_.getLong(0)).toSeq == (0L until 256L))
-          decoded.foreach { row =>
-            assert(row.getUTF8String(1).toString == f"${row.getLong(0)}%0512d")
-          }
-        }, settings)
-      }
   }
 
   test("CPU writer returns a record before consuming the remaining input rows") {
@@ -265,30 +202,6 @@ class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
       assert(decoded.map(_.getLong(0)).toSeq == (0L until rowCount.toLong))
       decoded.zipWithIndex.foreach { case (row, id) =>
         assert(row.getUTF8String(1).toString == s"value-$id")
-      }
-    }, settings)
-  }
-
-  test("CPU writer admits a first row larger than its cache record budget") {
-    val settings = new SparkConf()
-      .set(RapidsConf.PARQUET_CACHE_ROW_GROUP_SIZE_BYTES.key, "1k")
-      .set("spark.sql.inMemoryColumnarStorage.compressed", "false")
-    withCpuSparkSession(spark => {
-      val plan = spark.range(0, 3, 1, 1)
-        .selectExpr("id", "lpad(cast(id as string), 2048, '0') as value")
-        .queryExecution.executedPlan
-      val ser = new ParquetCachedBatchSerializer
-      val conf = TrampolineUtil.getSparkConf(spark)
-      val cached = ser.convertInternalRowToCachedBatch(
-        plan.execute(), plan.output, MEMORY_ONLY, conf).collect().toList
-      assert(cached.map(_.numRows) == Seq(1, 1, 1))
-      assert(cached.forall(_.sizeInBytes > 0))
-      val decoded = ser.convertCachedBatchToInternalRow(
-        spark.sparkContext.parallelize[CachedBatch](cached, numSlices = 1),
-        plan.output, plan.output, conf).map(_.copy()).collect()
-      assert(decoded.map(_.getLong(0)).toSeq == Seq(0L, 1L, 2L))
-      decoded.foreach { row =>
-        assert(row.getUTF8String(1).toString == f"${row.getLong(0)}%02048d")
       }
     }, settings)
   }

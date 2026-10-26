@@ -632,6 +632,48 @@ def test_cache_converted_rows_across_batches():
         'spark.rapids.sql.cache.serializer.rowGroupSizeBytes': '1k'}) == []
 
 
+@_requires_pcbs_enabled
+@pytest.mark.parametrize('target_bytes,batch_bytes,value_bytes,rows', [
+    (16 * 1024, 1024 * 1024, 512, 256),
+    (32 * 1024, 16 * 1024, 512, 256),
+    (1024, 1024 * 1024, 2048, 3)],
+    ids=['cache-target', 'existing-budget', 'oversized-row'])
+def test_cache_cpu_record_budget(target_bytes, batch_bytes, value_bytes, rows, record_property):
+    def check(spark):
+        # A CPU SQL project supplies UnsafeRows, whose actual byte lengths drive the cap.
+        cached = spark.range(0, rows, 1, 1).selectExpr(
+            'id', "lpad(cast(id as string), {}, '0') as value".format(value_bytes)).cache()
+        try:
+            relation = _cached_relation(spark, cached)
+            assert not relation.cachedPlan().supportsColumnar(), 'expected the CPU row writer'
+            assert cached.count() == rows
+            records = relation.cacheBuilder().cachedColumnBuffers().collect()
+            record_property('cached_record_count', len(records))
+            record_property('max_cached_record_bytes',
+                            max(record.sizeInBytes() for record in records))
+            assert len(records) > 1
+            assert sum(record.numRows() for record in records) == rows
+            assert all(record.numRows() > 0 and record.sizeInBytes() > 0 for record in records)
+            if value_bytes > target_bytes:
+                # An oversized first row must make progress in its own record.
+                assert [record.numRows() for record in records] == [1] * rows
+            else:
+                # The existing batch budget reserves 0.5% for metadata. This two-column
+                # schema needs less than 4 KiB for Parquet page headers and its footer.
+                budget = min(target_bytes, int(batch_bytes - batch_bytes * 0.5 / 100))
+                assert all(record.sizeInBytes() <= budget + 4096 for record in records)
+            assert [tuple(row) for row in cached.collect()] == [
+                (i, str(i).zfill(value_bytes)) for i in range(rows)]
+        finally:
+            cached.unpersist(blocking=True)
+
+    with_cpu_session(check, conf={
+        'spark.sql.adaptive.enabled': 'false',
+        'spark.sql.inMemoryColumnarStorage.compressed': 'false',
+        'spark.rapids.sql.batchSizeBytes': str(batch_bytes),
+        'spark.rapids.sql.cache.serializer.rowGroupSizeBytes': str(target_bytes)})
+
+
 # One partition of 2300 values of 1 MiB: 2411724800 bytes, more than a cuDF column can hold.
 _over_2gib_rows = 2300
 _over_2gib_value_bytes = 1024 * 1024
@@ -777,16 +819,13 @@ def _row_group_cache_reads(spark, cached, on_gpu):
     # Compare every reordered value, including binary and nested nulls, rather than
     # hashing types that the GPU hash expression does not support.
     projected = cached.select('nested', 'payload', 'ts', 'amount', 'text', 'id')
-    summary = projected.agg(f.count('*'), f.sum('id'),
-        *[f.count(f.when(f.col(name).isNull(), 1)) for name in projected.columns])
     payload_only = cached.select('payload')
-    result = [sorted(projected.collect(), key=lambda row: row.id), summary.collect(),
+    result = [sorted(projected.collect(), key=lambda row: row.id),
               sorted(payload_only.collect(),
                      key=lambda row: (row.payload is not None, row.payload or b'')),
               cached.select().count()]
     if on_gpu:
         _assert_read_on_gpu_scan(spark, projected)
-        _assert_read_on_gpu_scan(spark, summary)
         _assert_read_on_gpu_scan(spark, payload_only)
     return result
 
