@@ -155,7 +155,7 @@ private[rapids] object ParquetCachedBatchFiles {
 
   /**
    * Adapt the scan's column-range copy/offset rewrite without re-encoding any values.
-   * Keep the original file metadata and distinct first-data/dictionary page offsets.
+   * Keep dictionary pages inside each chunk using the same offsets as the scan.
    */
   private def layout(block: BlockMetaData, startPosition: Long,
       footerStart: Long): (BlockMetaData, Vector[(Long, Int)]) = {

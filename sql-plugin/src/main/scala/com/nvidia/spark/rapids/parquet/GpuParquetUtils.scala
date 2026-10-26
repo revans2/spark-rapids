@@ -60,7 +60,9 @@ object GpuParquetUtils extends Logging {
         column.getEncodingStats,
         column.getEncodings,
         column.getStatistics,
-        Math.addExact(column.getFirstDataPageOffset, adjustment),
+        // Keep the dictionary page inside the read range even when parquet-mr drops its
+        // offset because the source file has no encoding statistics.
+        Math.addExact(column.getStartingPos, adjustment),
         dictionaryOffset,
         column.getValueCount,
         column.getTotalSize,
