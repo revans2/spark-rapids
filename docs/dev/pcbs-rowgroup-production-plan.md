@@ -1,6 +1,6 @@
 # Parquet cache production tracker
 
-Status: READY FOR REVIEW. Only the architect marks work DONE.
+Status: IN PROGRESS (2026-10-26 follow-up). Only the architect marks work DONE.
 Use MCP docker_exec for every project operation, worker handoff and checkpoint.
 Work in the main checkout on pcbs-rowgroup-production; no new worktrees.
 
@@ -25,8 +25,8 @@ OFF_HEAP storage. Escalate unavoidable released-contract changes.
 2. CPU cap: READY FOR REVIEW. The existing loop uses min(existing budget, target),
    Long accounting and first-row admission, avoiding the oversized-row stall.
    Initial output allocation is capped too. UnsafeRows use actual row bytes;
-   generic rows retain schema estimates. The CPU loop still queues a partition's
-   records eagerly. Neither CPU nor GPU targets guarantee a hard encoded bound.
+   generic rows retain schema estimates. The 2026-10-26 follow-up removes eager
+   partition queuing. Neither CPU nor GPU targets guarantee a hard encoded bound.
 3. Focused tests: READY FOR REVIEW. Four Scala cases check real writes and exact
    data: GPU 20k Longs at 16 KiB, records <= 2 * target; CPU target/global budgets
    16 KiB/1 MiB and 32 KiB/16 KiB, records <= budget + 4096; three oversized 2 KiB
@@ -39,7 +39,25 @@ OFF_HEAP storage. Escalate unavoidable released-contract changes.
    Removed the authorized storage/compression matrix, partial-unpersist, filter
    checks and EqualTo/Remainder/LessThan allowances, and unused 131k-row narrow shape.
 
-Verification (2026-10-24), evidence E=/data/pcbs-oom/pcbs-rowgroup-followup:
+Follow-up (2026-10-26): no unresolved spec contradiction. The authorized lazy CPU
+change supersedes the earlier cap-only scope. All released data contracts above
+remain unchanged; no compatibility adapter is needed for the branch's eager loop.
+- Uncompressed size guard: READY FOR REVIEW. Compression is false in the focused
+  Python fixture. Baseline: 19 records, max 1,044,266 bytes, PASS (7.099s test).
+  Scratch writer-only 8 MiB mutation: 4 records, max 4,882,036 bytes, expected FAIL
+  at the unchanged 2,162,688-byte size assertion; row count and multi-record checks
+  passed first. The test's 1 MiB assertion target stayed unchanged. Scratch file
+  restored and compared with main. Evidence: size-baseline.xml, size-mutant.xml
+  and size-mutant.stdout.log under the follow-up directory below.
+- Lazy CPU records: IMPLEMENTED, runtime verification pending. Iterator-owned carry
+  state replaces the partition queue; the host-columnar wrapper also stays lazy.
+  New 200-row test checks no reads on hasNext, only one record plus one carried row
+  on first next, then exact full row order/values. Existing expectations unchanged.
+- Acceptance: focused Scala suites and full cache_test.py with PCBS on Spark 3.5.5.
+  Park if any existing CachedBatchWriterSuite expectation needs more than timing changes.
+  Evidence: /data/pcbs-oom/pcbs-rowgroup-followup2. Commit each task with this tracker.
+
+Previous verification (2026-10-24), evidence E=/data/pcbs-oom/pcbs-rowgroup-followup:
 
 | Check | Result | Evidence under E |
 | --- | --- | --- |

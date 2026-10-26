@@ -752,6 +752,7 @@ def test_cache_partition_with_column_over_2gib(data_type, route):
 _pcbs_row_group_target = 1024 * 1024
 _pcbs_row_group_rows = 20001
 _pcbs_row_group_conf = copy_and_update(_pcbs_gpu_scan_conf, {
+    'spark.sql.inMemoryColumnarStorage.compressed': 'false',
     'spark.rapids.sql.batchSizeBytes': '1g',
     'spark.rapids.sql.cache.serializer.rowGroupSizeBytes': str(_pcbs_row_group_target)})
 
