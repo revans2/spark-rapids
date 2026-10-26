@@ -405,6 +405,15 @@ trait GpuProjectExecLike extends GpuPartitioningPreservingUnaryExecNode with Gpu
 
   def projectList: Seq[Expression]
 
+  override protected def buildAttributeMap(): Map[Attribute, Attribute] = {
+    // Computed expressions do not preserve their input's partitioning.
+    projectList.collect {
+      case attr: Attribute => attr -> attr
+      case a @ GpuAlias(child: Attribute, _) => child -> a.toAttribute
+      case a @ Alias(child: Attribute, _) => child -> a.toAttribute
+    }.toMap
+  }
+
   override lazy val additionalMetrics: Map[String, GpuMetric] = Map(
     OP_TIME_LEGACY -> createNanoTimingMetric(DEBUG_LEVEL, DESCRIPTION_OP_TIME_LEGACY))
 

@@ -28,7 +28,8 @@ import org.mockito.Mockito.{never, spy, verify}
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.{
-  AttributeReference, Expression, Literal, NamedExpression}
+  Alias, Ascending, AttributeReference, Expression, Literal, NamedExpression, SortOrder}
+import org.apache.spark.sql.catalyst.plans.physical.{RangePartitioning, UnknownPartitioning}
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.rapids.execution.TrampolineUtil
@@ -53,6 +54,28 @@ class ProjectExprSuite extends SparkQueryCompareTestSuite {
   def forceHostColumnarToGpu(): SparkConf = {
     // turns off BatchScanExec, so we get a CPU BatchScanExec together with a HostColumnarToGpu
     new SparkConf().set("spark.rapids.sql.exec.BatchScanExec", "false")
+  }
+
+  test("project partitioning follows direct attributes rather than output positions") {
+    val id = AttributeReference("id", LongType, nullable = false)()
+    val child = GpuRangeExec(0L, 100L, 1L, 16, Seq(id), 1024L * 1024)
+    val key = GpuAlias(GpuRemainder(id, GpuLiteral(10L), failOnError = false), "k")()
+    val value = GpuAlias(id, "v")()
+    val cpuAlias = Alias(id, "cpu_alias")()
+    // Modulo does not preserve range partitioning; the direct alias of id still does,
+    // even when it follows a computed column or moves to a different output position.
+    val projections = Seq(
+      (List[NamedExpression](id), id),
+      (List[NamedExpression](value), value.toAttribute),
+      (List[NamedExpression](cpuAlias), cpuAlias.toAttribute),
+      (List[NamedExpression](key, value), value.toAttribute),
+      (List[NamedExpression](value, key), value.toAttribute))
+    projections.foreach { case (expressions, partitionKey) =>
+      val project = GpuProjectExec(expressions, child)
+      assert(project.outputPartitioning ==
+        RangePartitioning(Seq(SortOrder(partitionKey, Ascending)), 16))
+    }
+    assert(GpuProjectExec(List(key), child).outputPartitioning == UnknownPartitioning(16))
   }
 
   test("rand is okay") {

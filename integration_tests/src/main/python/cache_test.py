@@ -291,6 +291,19 @@ def function_to_test_on_df(with_x_session, df_gen, func_on_df, test_conf):
 
     assert_equal(reg_result, cached_result)
 
+@pytest.mark.parametrize('aqe_enabled', ['true', 'false'])
+@allow_non_gpu('InMemoryTableScanExec', 'ColumnarToRowExec')
+def test_cache_project_partitioning(aqe_enabled):
+    def query(spark):
+        cached = (spark.range(0, 100, 1, 16).selectExpr('id % 10 AS k', 'id AS v')
+            .persist(StorageLevel.MEMORY_AND_DISK))
+        return cached.groupBy('k').agg(f.max('v').alias('max_v')).orderBy('k')
+
+    assert_gpu_and_cpu_are_equal_collect(query, conf={
+        'spark.sql.adaptive.enabled': aqe_enabled,
+        'spark.sql.shuffle.partitions': '4'})
+
+
 @pytest.mark.parametrize('data_gen', all_gen, ids=idfn)
 @pytest.mark.parametrize('with_x_session', [with_gpu_session, with_cpu_session])
 @pytest.mark.parametrize('enable_vectorized_conf', enable_vectorized_confs, ids=idfn)
