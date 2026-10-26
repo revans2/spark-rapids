@@ -222,6 +222,53 @@ class CachedBatchWriterSuite extends SparkQueryCompareTestSuite {
       }
   }
 
+  test("CPU writer returns a record before consuming the remaining input rows") {
+    val settings = new SparkConf()
+      .set(RapidsConf.PARQUET_CACHE_ROW_GROUP_SIZE_BYTES.key, "1k")
+      .set("spark.sql.inMemoryColumnarStorage.compressed", "false")
+    withCpuSparkSession(spark => {
+      val attrs: Seq[Attribute] = Seq(
+        AttributeReference("id", LongType, nullable = false)(),
+        AttributeReference("value", StringType, nullable = false)())
+      val cachedAttrs = PCBSSchemaHelper.getSupportedSchemaFromUnsupported(attrs)
+      val rowCount = 200
+      var consumedRows = 0
+      val input = (0 until rowCount).iterator.map { id =>
+        consumedRows += 1
+        InternalRow(id.toLong, UTF8String.fromString(s"value-$id"))
+      }
+      val ser = new ParquetCachedBatchSerializer
+      val conf = TrampolineUtil.getSparkConf(spark)
+      val sharedConf = spark.sparkContext.broadcast(conf.getAllConfs)
+      val producer = new ser.CachedBatchIteratorProducer[InternalRow](
+        input, cachedAttrs, attrs, sharedConf)
+      val cached = try {
+        withResource(new producer.InternalRowToCachedBatchIterator) { records =>
+          assert(consumedRows == 0)
+          assert(records.hasNext)
+          assert(consumedRows == 0)
+          val first = records.next()
+          // The next row crosses the byte budget, so it must be retained for the next call.
+          assert(consumedRows == first.numRows + 1)
+          assert(consumedRows < rowCount)
+          first :: records.toList
+        }
+      } finally {
+        sharedConf.destroy()
+      }
+      assert(cached.length > 1)
+      assert(consumedRows == rowCount)
+      assert(cached.map(_.numRows).sum == rowCount)
+      val decoded = ser.convertCachedBatchToInternalRow(
+        spark.sparkContext.parallelize[CachedBatch](cached, numSlices = 1),
+        attrs, attrs, conf).map(_.copy()).collect()
+      assert(decoded.map(_.getLong(0)).toSeq == (0L until rowCount.toLong))
+      decoded.zipWithIndex.foreach { case (row, id) =>
+        assert(row.getUTF8String(1).toString == s"value-$id")
+      }
+    }, settings)
+  }
+
   test("CPU writer admits a first row larger than its cache record budget") {
     val settings = new SparkConf()
       .set(RapidsConf.PARQUET_CACHE_ROW_GROUP_SIZE_BYTES.key, "1k")

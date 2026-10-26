@@ -49,10 +49,13 @@ remain unchanged; no compatibility adapter is needed for the branch's eager loop
   passed first. The test's 1 MiB assertion target stayed unchanged. Scratch file
   restored and compared with main. Evidence: size-baseline.xml, size-mutant.xml
   and size-mutant.stdout.log under the follow-up directory below.
-- Lazy CPU records: IMPLEMENTED, runtime verification pending. Iterator-owned carry
-  state replaces the partition queue; the host-columnar wrapper also stays lazy.
-  New 200-row test checks no reads on hasNext, only one record plus one carried row
-  on first next, then exact full row order/values. Existing expectations unchanged.
+- Lazy CPU records: READY FOR REVIEW. Iterator-owned carry state replaces the
+  partition queue; the host-columnar wrapper also stays lazy. The new 200-row test
+  checks no reads on hasNext, only one record plus one carried row on first next,
+  then exact full row order/values. Spark 3.5.5 verify passed all 60 Scala + 9 Java
+  tests, including every existing writer expectation unchanged (verify355.log).
+  Source and test copies matched main byte-for-byte; independent review found no
+  blocker. No assertion or data changes were required to obtain this pass.
 - Acceptance: focused Scala suites and full cache_test.py with PCBS on Spark 3.5.5.
   Park if any existing CachedBatchWriterSuite expectation needs more than timing changes.
   Evidence: /data/pcbs-oom/pcbs-rowgroup-followup2. Commit each task with this tracker.

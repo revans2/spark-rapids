@@ -1211,43 +1211,39 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
         }
       }
 
+      private lazy val cachedBatches = convertRowIteratorToCachedBatch(getIterator)
+
       override def hasNext: Boolean = {
-        if (queue.isEmpty && !iter.hasNext) {
+        val hasMore = cachedBatches.hasNext
+        if (!hasMore) {
           // iterator has exhausted, we should clean up
           close()
         }
-        queue.nonEmpty || iter.hasNext
+        hasMore
       }
-
-      private val queue = new mutable.Queue[CachedBatch]()
 
       //estimate the size of a row
       val estimatedSize: Long = cachedAttributes.map { attr =>
         attr.dataType.defaultSize.toLong
       }.sum
 
-      override def next(): CachedBatch = {
-        if (queue.isEmpty) {
-          queue ++= convertRowIteratorToCachedBatch(getIterator)
-        }
-        if (!queue.isEmpty) {
-          queue.dequeue()
-        } else {
-          throw new IllegalStateException("Encountered an empty batch")
-        }
-      }
+      override def next(): CachedBatch = cachedBatches.next()
 
       // The input can write its next row over the values of the row it returned when hasNext
       // is called, as whole-stage codegen does, so a row kept for the next batch is copied.
       protected def keepForNextBatch(row: InternalRow): InternalRow = row.copy()
 
       protected def convertRowIteratorToCachedBatch(
-          rowIterator: Iterator[InternalRow]): mutable.Queue[CachedBatch] = {
-        val queue = new mutable.Queue[CachedBatch]()
-        // to store a row if we have read it but there is no room in the parquet file to put it
-        // we will put it in the next CachedBatch
-        var leftOverRow: Option[InternalRow] = None
-        while (rowIterator.hasNext || leftOverRow.nonEmpty) {
+          rowIterator: Iterator[InternalRow]): Iterator[CachedBatch] = new Iterator[CachedBatch] {
+        // Keep a row that did not fit in the previous record for the next call to next().
+        private var leftOverRow: Option[InternalRow] = None
+
+        override def hasNext: Boolean = leftOverRow.nonEmpty || rowIterator.hasNext
+
+        override def next(): CachedBatch = {
+          if (!hasNext) {
+            throw new IllegalStateException("Encountered an empty batch")
+          }
           var rows = 0
           val stream = new ByteArrayOutputStream(
             math.min(ByteArrayOutputFile.BLOCK_SIZE.toLong, bytesAllowedPerBatch).toInt)
@@ -1258,8 +1254,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
             // The schema is empty, most probably it is because of the edge case where there
             // are no columns in the Dataframe but has rows so let's create an empty CachedBatch
             // with rows
-            queue += new ParquetCachedBatch(rowIterator.size, new Array[Byte](0))
-            return queue
+            return new ParquetCachedBatch(rowIterator.size, new Array[Byte](0))
           }
           val recordWriter = SQLConf.withExistingConf(conf) {
             parquetOutputFileFormat.getRecordWriter(outputFile, hadoopConf)
@@ -1297,9 +1292,8 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
           }
           // passing null as context isn't used in this method
           recordWriter.close(null)
-          queue += ParquetCachedBatch(rows, stream.toByteArray)
+          ParquetCachedBatch(rows, stream.toByteArray)
         }
-        queue
       }
     }
 
@@ -1341,7 +1335,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
         if (batch.numCols() == 0) {
           List(ParquetCachedBatch(batch.numRows(), new Array[Byte](0)))
         } else {
-          convertRowIteratorToCachedBatch(hostBatch.rowIterator().asScala).toList
+          convertRowIteratorToCachedBatch(hostBatch.rowIterator().asScala)
         }
       }
 
