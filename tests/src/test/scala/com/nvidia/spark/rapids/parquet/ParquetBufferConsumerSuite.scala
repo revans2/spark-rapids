@@ -73,9 +73,10 @@ class ParquetBufferConsumerSuite extends SparkQueryCompareTestSuite {
         val handles = SpillFramework.stores.hostStore.numHandles
         withResource(new ParquetBufferConsumer(numRows = 1)) { consumer =>
           val buffers = addRegions(consumer, new Array[Byte](24))
-          intercept[IllegalArgumentException] {
+          val error = intercept[RuntimeException] {
             if (useNext) consumer.records.next() else consumer.records.hasNext
           }
+          assert(error.getMessage.contains("Expected magic number at tail"))
           assert(buffers.forall(_.getRefCount == 0))
           assert(SpillFramework.stores.hostStore.numHandles == handles)
         }

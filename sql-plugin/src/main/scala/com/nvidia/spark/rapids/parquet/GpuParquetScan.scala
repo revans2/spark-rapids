@@ -1782,45 +1782,17 @@ trait ParquetPartitionReaderBase extends Logging with ScanWithMetrics
    * @param realStartOffset starting file offset of the first block
    * @return updated block metadata
    */
-  @scala.annotation.nowarn(
-    "msg=method getPath in class ColumnChunkMetaData is deprecated"
-  )
   protected def computeBlockMetaData(
       blocks: Seq[BlockMetaData],
       realStartOffset: Long): Seq[BlockMetaData] = {
-    val outputBlocks = new ArrayBuffer[BlockMetaData](blocks.length)
-    var totalBytesToCopy = 0L
-    blocks.foreach { block =>
-      val columns = block.getColumns.asScala
-      val outputColumns = new ArrayBuffer[ColumnChunkMetaData](columns.length)
-      columns.foreach { column =>
-        // update column metadata to reflect new position in the output file
-        val startPosCol = column.getStartingPos
-        val offsetAdjustment = realStartOffset + totalBytesToCopy - startPosCol
-        val newDictOffset = if (column.getDictionaryPageOffset > 0) {
-          column.getDictionaryPageOffset + offsetAdjustment
-        } else {
-          0
-        }
-        val columnSize = column.getTotalSize
-        //noinspection ScalaDeprecation
-        outputColumns += ColumnChunkMetaData.get(
-          column.getPath,
-          column.getPrimitiveType,
-          column.getCodec,
-          column.getEncodingStats,
-          column.getEncodings,
-          column.getStatistics,
-          column.getStartingPos + offsetAdjustment,
-          newDictOffset,
-          column.getValueCount,
-          columnSize,
-          column.getTotalUncompressedSize)
-        totalBytesToCopy += columnSize
+    var position = realStartOffset
+    blocks.map { block =>
+      val relocated = GpuParquetUtils.relocateBlock(block, position)
+      block.getColumns.asScala.foreach { column =>
+        position = Math.addExact(position, column.getTotalSize)
       }
-      outputBlocks += GpuParquetUtils.newBlockMeta(block, outputColumns.toSeq)
+      relocated
     }
-    outputBlocks.toSeq
   }
 
   /**

@@ -30,7 +30,7 @@ import com.nvidia.spark.rapids.RmmRapidsRetryIterator.withRetryNoSplit
 import org.apache.parquet.bytes.BytesUtils
 import org.apache.parquet.format.converter.ParquetMetadataConverter
 import org.apache.parquet.hadoop.ParquetFileReader
-import org.apache.parquet.hadoop.metadata.{BlockMetaData, ColumnChunkMetaData, ParquetMetadata}
+import org.apache.parquet.hadoop.metadata.{BlockMetaData, ParquetMetadata}
 import org.apache.parquet.io.{DelegatingSeekableInputStream, InputFile, SeekableInputStream}
 import org.apache.parquet.schema.MessageType
 
@@ -136,23 +136,14 @@ private[rapids] object ParquetCachedBatchFiles {
 
   @scala.annotation.nowarn("msg=method readFooter in class ParquetFileReader is deprecated")
   def readFooter(source: EncodedSource): ParquetMetadata = {
-    require(source.length >= FramingBytes, "Parquet file is smaller than its framing")
-    val head = new Array[Byte](4)
-    val tail = new Array[Byte](4)
-    source.readFully(0, head, 0, head.length)
-    source.readFully(source.length - 4, tail, 0, tail.length)
-    require(head.sameElements(Magic) && tail.sameElements(Magic),
-      "Expected a complete unencrypted Parquet file")
-    footerStart(source)
     ParquetFileReader.readFooter(inputFile(source), ParquetMetadataConverter.NO_FILTER)
   }
 
+  // Call only after Parquet has validated the footer and its length.
   private def footerStart(source: EncodedSource): Long = {
     val trailer = new Array[Byte](4)
     source.readFully(source.length - 8, trailer, 0, trailer.length)
     val footerLength = ByteBuffer.wrap(trailer).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt
-    require(footerLength > 0 && footerLength.toLong <= source.length - FramingBytes,
-      "Invalid Parquet footer length")
     source.length - 8 - footerLength
   }
 
@@ -168,35 +159,20 @@ private[rapids] object ParquetCachedBatchFiles {
    */
   private def layout(block: BlockMetaData, startPosition: Long,
       footerStart: Long): (BlockMetaData, Vector[(Long, Int)]) = {
-    var position = startPosition
-    val ranges = ArrayBuffer.empty[(Long, Int)]
-    val columns = block.getColumns.asScala.map { column =>
+    val ranges = block.getColumns.asScala.map { column =>
       val start = column.getStartingPos
       val bytes = column.getTotalSize
       checkRange(start, bytes, footerStart)
       require(start >= Magic.length && bytes <= Int.MaxValue, "Invalid column chunk extent")
-      val adjustment = Math.subtractExact(position, start)
-      val end = Math.addExact(position, bytes)
-      val dataOffset = Math.addExact(column.getFirstDataPageOffset, adjustment)
-      val dictionaryOffset = if (column.hasDictionaryPage) {
-        Math.addExact(column.getDictionaryPageOffset, adjustment)
-      } else {
-        0L
-      }
-      require(dataOffset >= position && dataOffset < end,
+      val end = Math.addExact(start, bytes)
+      require(column.getFirstDataPageOffset >= start && column.getFirstDataPageOffset < end,
         "First data page falls outside its column chunk")
-      require(dictionaryOffset == 0 ||
-        (dictionaryOffset >= position && dictionaryOffset < end),
+      require(column.getDictionaryPageOffset <= 0 ||
+        (column.getDictionaryPageOffset >= start && column.getDictionaryPageOffset < end),
         "Dictionary page falls outside its column chunk")
-      val rewritten = ColumnChunkMetaData.get(column.getPath, column.getPrimitiveType,
-        column.getCodec, column.getEncodingStats, column.getEncodings, column.getStatistics,
-        dataOffset, dictionaryOffset, column.getValueCount, bytes,
-        column.getTotalUncompressedSize)
-      ranges += ((start, bytes.toInt))
-      position = Math.addExact(position, bytes)
-      rewritten
-    }
-    (GpuParquetUtils.newBlockMeta(block, columns.toSeq), ranges.toVector)
+      (start, bytes.toInt)
+    }.toVector
+    (GpuParquetUtils.relocateBlock(block, startPosition), ranges)
   }
 
   /**
@@ -206,10 +182,11 @@ private[rapids] object ParquetCachedBatchFiles {
    */
   def split(source: EncodedSource): Iterator[ParquetCachedBatch] = {
     val metadata = readFooter(source)
+    val dataEnd = footerStart(source)
     metadata.getBlocks.asScala.iterator.map { original =>
       require(original.getRowCount >= 0 && original.getRowCount <= Int.MaxValue,
         "A row group exceeds the cached-record row limit")
-      val (rewritten, ranges) = layout(original, Magic.length, footerStart(source))
+      val (rewritten, ranges) = layout(original, Magic.length, dataEnd)
       val footer = footerBytes(metadata, Seq(rewritten))
       val bodySize = ranges.foldLeft(0L) { case (size, (_, bytes)) =>
         Math.addExact(size, bytes.toLong)
@@ -246,7 +223,8 @@ private[rapids] object ParquetCachedBatchFiles {
   /** Parquet uncompressed bytes and schema-based GPU estimates are hints, not memory caps. */
   def describe(batch: ParquetCachedBatch, schema: StructType): FileInfo = {
     require(batch.numRows >= 0, "Cached row count must be nonnegative")
-    val metadata = readFooter(fromBytes(batch.buffer))
+    val source = fromBytes(batch.buffer)
+    val metadata = readFooter(source)
     val rows = metadata.getBlocks.asScala.foldLeft(0L) { (total, block) =>
       require(block.getRowCount >= 0, "Parquet row count must be nonnegative")
       Math.addExact(total, block.getRowCount)
@@ -257,7 +235,7 @@ private[rapids] object ParquetCachedBatchFiles {
     }
     val gpuEstimate = GpuBatchUtils.estimateGpuMemory(schema, rows)
     FileInfo(batch.numRows, batch.buffer.length, math.max(uncompressed, gpuEstimate), metadata,
-      footerStart(fromBytes(batch.buffer)))
+      footerStart(source))
   }
 
   /** Owns its spillable file; every materialized buffer reference belongs to its caller. */
@@ -299,7 +277,6 @@ private[rapids] object ParquetCachedBatchFiles {
    */
   final class LogicalFile private[ParquetCachedBatchFiles] (
       val buffers: Array[HostMemoryBuffer],
-      val schema: MessageType,
       val numRows: Long,
       resources: Seq[HostMemoryBuffer]) extends AutoCloseable {
     private var closed = false
@@ -366,7 +343,7 @@ private[rapids] object ParquetCachedBatchFiles {
           }
         }
         buffers += tail
-        new LogicalFile(buffers.toArray, schema, rows, resources.toVector)
+        new LogicalFile(buffers.toArray, rows, resources.toVector)
       }
     }
   }

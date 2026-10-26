@@ -90,5 +90,41 @@ Park for changed existing writer expectations beyond call timing, released-contr
 regressions or unresolved spec contradictions. Commit each task with this tracker;
 mark READY FOR REVIEW, not DONE.
 
+Footer/reuse follow-up (2026-10-26), READY FOR REVIEW: user authorizes removing
+redundant footer validation and auditing scan/cache overlap. Parquet validates
+footers; cache reads its footer position once per input. Shared column relocation
+preserves distinct dictionary/data offsets, correcting the existing scan metadata
+error, with an actual scan-entry regression test. Cache retains source-range and
+native-slice checks. Remove the unused LogicalFile.schema field; keep separate
+scan I/O and cache slice ownership/retry loops. No release-contract change intended.
+Workers and lead confirm MCP docker_exec only; independent source review is clear.
+Review caught an incorrect hasDictionaryPage substitution; the helper now uses
+positive dictionary offsets, preserving the scan rule. Initial verify ran 62 Scala
+cases: 60 passed; two cleanup tests expected the removed wrapper's exception.
+Those now assert Parquet's specific tail-magic error; buffer/handle checks remain.
+
+Evidence E=/data/pcbs-oom/pcbs-rowgroup-reuse, same tracked-source export and
+Maven wrapper above; changed source/tests copied and compared byte-for-byte:
+
+| Check | Result | Evidence under E |
+| --- | --- | --- |
+| Full cache_test.py, PCBS, default eight workers | 620 passed, four default skips; 101.066s | cache-default-parallel.xml / .stdout.log |
+| GPU row-group case | 19 records, max 1,044,266 bytes; 5.268s | XML properties |
+| Mixed dictionary/plain and coalescing scan reads | 32 passed, no skips; 22.58s | scan-dictionary.xml / .stdout.log |
+| Spark 3.5.5 verify | 62 Scala + 9 Java passed; reactor 6m57s, Scala 45.060s | verify355.log |
+| Spark 3.3.4 SQL compile/package | PASS, 53.841s | package334.log |
+| Spark 4.0.1 / Scala 2.13 SQL compile/package | PASS, 49.038s | package401.log |
+
+355 uses the preceding verify command with GpuParquetUtilsSuite appended to S.
+Python uses the preceding full-cache command with this E. Scan command uses the
+same clean environment and launcher, TESTS=parquet_test.py,
+TEST='parquet_read_mixed_dictionary_plain_encoding or parquet_read_coalescing_multiple_files',
+without the PCBS serializer override, and --durations=10 -rs
+--junitxml="$E/scan-dictionary.xml" --log-file="$E/scan-dictionary.pytest.log".
+No benchmark claim is made for these acceptance timings. Initial failure is
+retained in verify355-initial.log. Lead independently inspected final logs/XML;
+all required checks passed, with no weakened assertions. No further audit blocker.
+The cross-version results are builds, not runtime suite runs.
+
 Entire production patch, including tests and tracker:
 `git diff github/main...pcbs-rowgroup-production`
