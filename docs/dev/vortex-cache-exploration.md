@@ -1,11 +1,13 @@
 # Vortex cache exploration
 
-Status: primary comparison ACTIVE with USER-SELECTED16GiB JVM heap,4GiB RAPIDS-managed
-host cap and32GiB sampled RSS early-stop guard. Earlier1GiB-heap/RSS4GiB runs are
-constrained-budget appendix evidence, NOT the primary normal-host baseline.
-Main report: vortex-cache-results.md; old detailed tables moved to
-vortex-cache-constrained-results.md. Historical report references below predate
-that move. Only the architect marks work DONE. Updated2026-10-27.
+Status: READY FOR REVIEW. All 24 primary cases passed with the user-selected
+16 GiB JVM heap, 4 GiB RAPIDS-managed host cap and 32 GiB sampled RSS guard.
+Both GPU-enabled and CPU-only population are measured at 256/512/1024/2048 MiB
+logical data per task, four partitions/two task slots. Final report:
+vortex-cache-results.md; machine-readable data: vortex-cache-results.csv.
+Earlier 1 GiB-heap/RSS4GiB runs are the separate constrained-budget appendix,
+not the normal-host baseline. Historical report references below predate that
+move. Only the architect marks work DONE. Updated 2026-10-27.
 AI-assisted work; no production implementation changes or PR publication.
 
 ## Scope, operating rules and accepted decision criteria
@@ -847,8 +849,94 @@ CPU1GiB/taskcohort IN PROGRESS after512footprintreview(maxRSS6.05GB<32GiB).
 Sameprofile exceptpreselectedtimeout600; no memorycap/repeat/operator changes.
 DefaultCPU1GiBPASS independentlyverified:4GiBlogicalresident,0disk,
 payload1743560044B,population82457.703ms,RSS4000350208B.
-PCBS/VortexCPU1GiB pending, CPU2GiB notrun. MCP-only confirmed everyhandoff/
-checkpoint; no parallelbenchmarks/builds/sourcechanges. PrimaryCPU-produced→
-GPU-consumed performance, alternateforcedencodings and unsupported-type Vortex
-fallback remainexplicit gaps, not silently covered by CPU-only timings. No extraencodingpolicy/batch-size optimization authorized
+PCBS/VortexCPU1GiB pending, CPU2GiB notrun at that checkpoint. MCP-only confirmed every
+handoff/checkpoint; no parallel benchmarks/builds/source changes. Primary
+CPU-produced→GPU-consumed performance, alternate forced encodings and unsupported-
+type Vortex fallback remain explicit gaps, not covered by CPU-only timings.
+
+## Final primary matrix and delivery: READY FOR REVIEW
+
+All 24 primary cases PASS: 3 formats x 4 task sizes x CPU/GPU population modes.
+GPU-produced caches were read on CPU and GPU; CPU-only jobs kept GPU SQL disabled
+throughout population and all reads, with RAPIDS still configured. Actual producer
+and consumer plans were verified, not inferred from configuration. All source
+partitions/rows and canonical logical data fit in cache at recorded snapshots,
+including 8 GiB total at 2 GiB/task. This does not rule out transient managed/GPU
+spill activity or prove maximum capacity.
+
+CPU-only 1 GiB/task and 2 GiB/task final data, independently reproduced:
+
+| Task MiB | Format | Payload B | Population ms | CPU full warm ms | Sampled whole-job RSS B |
+| --- | --- | ---: | ---: | ---: | ---: |
+|1024|Default|1743560044|82457.703|5485.507|4000350208|
+|1024|PCBS|2940954398|46421.181|20762.743|9390419968|
+|1024|Vortex|1958941632|22510.843|11287.980|7809339392|
+|2048|Default|3487118351|151765.038|10830.367|7251562496|
+|2048|PCBS|5881877158|88446.376|41659.611|15266975744|
+|2048|Vortex|3917795072|43817.920|24099.541|17076637696|
+
+Budgets/artifacts/data/method unchanged: actual16GiBheap/4gmanaged/32GiBreactive
+guard, original8MiB app78e042... and native/library provenance, two slots/four
+partitions, one population and one warmup/two measured reads per projection/mode.
+CPU-only cases have6reads/7matchingprogress events/8storage snapshots; GPU-input
+cases have12reads and14snapshots (new progress records in largest cases).
+Lead independently ran raw-case/progress checks, exact aggregate comparison across
+all six cases per size, every phase table, and final artifact-closure verification.
+No machine OOM or normal-budget guard/JVM failure occurred. All owned benchmark
+processes exited; ps and nvidia-smi compute-process query showed none remaining.
+
+### Material encoding-policy qualification
+
+Lead and worker read the decisive actual CPU/GPU PCBS writer paths. CPU
+ParquetOutputFileFormat.getRecordWriter explicitly uses UNCOMPRESSED; GPU
+getParquetWriterOptions selects SNAPPY when cache compression is enabled, as in
+these tests. CPU Configuration(false) does not copy normal Hadoop codec options.
+Git grep of main shows the same CPU UNCOMPRESSED call at line1412, so it is a
+released implementation fact, not introduced by this experiment. This adds
+evidence to the established release record; it does not invent a byte-identical
+encoding compatibility requirement. No production policy or configuration changed.
+
+Separate implementations also have different delegated dictionary/page policies.
+No actual footer/page audit or compression-matched CPU control was performed:
+do not attribute the measured byte gap solely to Snappy, dictionary choices or
+format-intrinsic compression. Parquet value encodings still apply with the
+UNCOMPRESSED codec. Forced Vortex strategies remain unexposed by Java/JNI and
+untested. Source evidence, hardware path distinctions and limitations are now
+prominent in the report.
+
+### Verified artifacts and review evidence
+
+Final report has separate population, full/narrow first/warm read-only and clearly
+COMPUTED population-plus-read tables, plus encoded payload, storage-accounted
+resident bytes, represented logical bytes, disk and sampled RSS. Overview shows
+largest CPU-only and GPU-enabled cases without mixing modes, budgets or read
+semantics. The CSV has72consumer/projection rows for24underlyingcases; population/
+payload/storage attributes repeat per cache and must not be summed as new data.
+
+CSV SHA256 d6939ff3fd4c33dbe6bb2a372e5c6b6f93c423b02b42581a8d8f7b399ead8a99.
+CSV uses LF line endings; Git whitespace checks pass without policy overrides.
+An independent worker recomputed1512fields from original JSON/manifests/source
+snapshots, preserving Python-int aggregate precision. Lead read that checker and
+independently reran it: PASS,24cases/72rows/errors[]. Evidence:
+ /data/tmp/review-cache-csv-independent.py and .json.
+All72detail phase rows, rounded report values and combined sums reproduced with
+verify-primary-report.py and verify-cpu-primary-report.py for all four sizes.
+Final runtime closure verification PASS; original app/native/dependencies unchanged.
+Review found no material numerical or scope issue. One wording finding changed
+'without spilling' to the evidenced absence of disk-backed cache blocks at recorded
+snapshots. Final tracker status updated from historical in-progress checkpoints.
+
+Remaining unverified criteria are explicit: primary CPU-produced→GPU-consumed
+performance, unsupported-type/decimal/timestamp/nested Vortex coverage, additional
+Spark versions, actual decoded IPC batch counts, bridge component profiling,
+forced/compression-matched encoding controls, larger managed-cap control, total
+native live allocation/endurance/maximum-capacity guarantees. These are follow-up
+evidence, not claimed completed. Next useful experiments are compression-matched
+CPU Parquet and Arrow bridge profiling/streaming before a format adoption decision.
+
+All project operations, worker tasks, resumption and checkpoints used MCP sandbox
+tools. No production serializer source, public configuration, Git local config or
+released contract changed. All task commits are signed off; no PR was published.
+Architect final acceptance remains outstanding; implementation/results are READY
+FOR REVIEW, not DONE. No extraencodingpolicy/batch-size optimization authorized
 as a substitute for completing these baseline measurements.
