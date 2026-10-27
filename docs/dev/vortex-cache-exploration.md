@@ -1,6 +1,6 @@
 # Vortex cache exploration
 
-Status: READY FOR REVIEW. All 24 primary cases passed with the user-selected
+Original zero-pool baseline: READY FOR REVIEW. All 24 primary cases passed with the user-selected
 16 GiB JVM heap, 4 GiB RAPIDS-managed host cap and 32 GiB sampled RSS guard.
 Both GPU-enabled and CPU-only population are measured at 256/512/1024/2048 MiB
 logical data per task, four partitions/two task slots. Final report:
@@ -9,6 +9,8 @@ Earlier 1 GiB-heap/RSS4GiB runs are the separate constrained-budget appendix,
 not the normal-host baseline. Historical report references below predate that
 move. Only the architect marks work DONE. Updated 2026-10-27.
 AI-assisted work; no production implementation changes or PR publication.
+Latest delivery: the 2 GiB pinned-pool matrix and one bounded copy improvement
+are READY FOR REVIEW (details below). All authorized runs have stopped.
 
 Profiling follow-up: READY FOR REVIEW; see vortex-cache-profiling.md. One original-
 artifact 256 MiB/task diagnostic reproduced 14.095 s full GPU reads. Independent
@@ -22,9 +24,9 @@ batched-reader experiment remains proposed, not verified. Existing release and
 compatibility classifications below still apply. All operations and profiling used
 MCP docker_exec; no machine-exhaustion testing or additional scale jobs performed.
 
-API follow-up: source plus runtime javap inspection found existing pinned-pool
-sharing and direct buffer upload APIs. Proposed first control is a modest shared
-pinned pool in the same small diagnostic; no new run or implementation performed.
+Initial API follow-up: source plus runtime javap inspection found existing pinned-
+pool sharing and direct buffer upload APIs. At that checkpoint the proposed first
+control was a modest shared pinned pool; subsequent results are recorded below.
 GpuDeviceManager disables cuDF's default pool and RAPIDS pool defaults to zero,
 which supplies a concrete alternative explanation to test before restructuring
 the bridge. Direct HostColumnVector.copyToDevice / device-buffer constructors
@@ -34,7 +36,7 @@ limits and native revision caveat. Released allocator defaults remain untouched;
 a configuration-only speedup would not establish out-of-box acceptance. All work
 used MCP docker_exec; delegated API discovery was independently checked.
 
-## Bridge controls and 2 GiB matrix READY FOR REVIEW; copy follow-up IN PROGRESS
+## All authorized exploration work READY FOR REVIEW
 
 Pinned-pool matrix COMPLETE, READY FOR REVIEW: 12 attempted outcomes independently
 verified, 11 PASS plus Default at 2048 MiB per task failed during GPU-to-row
@@ -46,14 +48,25 @@ Report: vortex-cache-pinned2g-results.md; CSV has 48
 consumer/projection rows. Exact aggregates, old/new source and dependency hashes,
 actual 2 GiB pool, heap/managed/RSS budgets, scans, payload and resident snapshots
 reproduced through /data/tmp/verify-pinned2g-lead.py; failure evidence separately
-verified through /data/tmp/verify-pinned2g-failure-lead.py. Further copy experiment
-IN PROGRESS: separate build compiled, ten lifecycle cases plus sink boundary/cap
-and four CPU/GPU-producer numeric/string correctness probes passed. First small
-256 MiB/task control: full GPU median 1.383 s (samples 1.099/1.667), compared with
-original 2 GiB-pool matrix 1.169 s; no benefit demonstrated. One fresh original /
-candidate pair will confirm; no chunk-size tuning or broader experiments. Park
-or revert the candidate if no reproducible useful gain. Artifact /data/tmp/
-vortex-spark-chunked-ipc remains separate; original matrix binaries unchanged.
+verified through /data/tmp/verify-pinned2g-failure-lead.py. Peer review independently
+reproduced 48 CSV rows / 84 Markdown rows and failure semantics with no findings.
+
+Bounded copy follow-up COMPLETE, READY FOR REVIEW: retained experimental chunked
+GPU IPC output after correctness/provenance checks and larger confirmation.
+Small initial comparison was mixed/negative (1.383 vs 1.169 s); a fresh repeat
+favored chunking (0.870 vs 1.272 s). At 2048 MiB/task, full GPU median improved
+9.127 -> 6.937 s (24%), while population stayed about 37 s; computed population
+plus one read 45.974 -> 44.029 s (4.2%). Narrow reads changed little. Same encoded
+payload/capacity, with slightly higher whole-job RSS; no memory-reduction claim.
+Ten lifecycle cases plus sink boundary/cap, provider retry reuse and four CPU/GPU-
+producer numeric/string probes passed. Root independently verified all six raw
+comparison cases; peer review reproduced 24 CSV rows and 12 report rows with no
+findings. Report: vortex-cache-copy-results.md / CSV. Removed unused flat provider
+after caller search; final rebuild/lifecycle passed. Measured app932418... versus
+final cleanup app51f506... distinction and exact measured source snapshots retained.
+Original baseline and matrix artifacts are unchanged. All jobs stopped; no GPU
+process remains. No more cases, tuning, native decoding or production fixes run.
+Only the architect marks DONE. Existing broader limitations remain explicit.
 
 Small controls and direct-buffer implementation are verified READY FOR REVIEW:
 see vortex-cache-bridge-results.md and its three-row CSV. All use 256 MiB/task,
@@ -83,15 +96,14 @@ the smaller non-pinned allowance; record/park failures rather than relax budgets
 No concurrent GPU jobs; ascending size prerequisites must verify before larger
 cases. Preserve released contracts/classifications below. Do not change production
 allocator defaults or claim configuration-only results meet out-of-box acceptance.
-One further candidate is being prepared independently while immutable baseline
-jobs run: fixed 64 KiB chunked IPC output for GPU reads, removing growing-array
-and final trimming copies sampled in pooled JFR. Encoding/cache records/CPU
-route stay unchanged; one valid IPC stream per decoded batch. Multi-file grouping
-was investigated and rejected for this batch: dtype equality and native footer
-concurrency add risk without eliminating per-file footer work. Measurements wait
-for the matrix; start at 256 MiB/task, then at most a larger confirming case if
-justified. Stop or revert the candidate on no reproducible useful benefit; do not
-pursue multiple speculative optimizations or implement native GPU decoding.
+The authorized single further candidate was fixed 64 KiB chunked IPC output for
+GPU reads, removing growing-array and final trimming copies sampled in pooled
+JFR. Encoding/cache records/CPU route stay unchanged; one valid IPC stream per
+decoded batch. Multi-file grouping was investigated and rejected: dtype equality
+and native footer concurrency add risk without eliminating per-file footer work.
+Measurements followed the matrix: one small control, one fresh matched repeat pair,
+then one larger confirmation justified by the repeat. No further speculative
+optimization, chunk-size tuning or native GPU decoding was attempted.
 Broader native/production policy changes require architect review.
 MCP docker_exec is required at every operation, handoff, resumption and progress
 checkpoint; workers must confirm continued use. Independently verify delegated

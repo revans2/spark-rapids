@@ -74,6 +74,50 @@ public final class VortexIpcCodec {
     byte[] result() { return Arrays.copyOf(bytes, size); }
   }
 
+  /** One IPC stream, with bounded fixed-size chunks and no flattening copy. */
+  static final class ChunkedSink extends OutputStream {
+    static final int CHUNK_BYTES = 64 * 1024;
+    private final byte[][] chunks;
+    private final int cap;
+    private int size;
+    ChunkedSink(int cap) {
+      if (cap < 0) throw new IllegalArgumentException("Negative IPC cap");
+      this.cap = cap;
+      chunks = new byte[(int) (((long) cap + CHUNK_BYTES - 1) / CHUNK_BYTES)][];
+    }
+    private void check(int added) {
+      if ((long) size + added > cap) {
+        throw new IllegalArgumentException("IPC/cache record exceeds cap " + cap);
+      }
+    }
+    private byte[] current() {
+      int index = size / CHUNK_BYTES;
+      if (chunks[index] == null) {
+        chunks[index] = new byte[Math.min(CHUNK_BYTES, cap - index * CHUNK_BYTES)];
+      }
+      return chunks[index];
+    }
+    @Override public void write(int value) {
+      check(1);
+      current()[size % CHUNK_BYTES] = (byte) value;
+      size++;
+    }
+    @Override public void write(byte[] bytes, int offset, int length) {
+      java.util.Objects.checkFromIndexSize(offset, length, bytes.length);
+      check(length);
+      while (length > 0) {
+        byte[] chunk = current();
+        int within = size % CHUNK_BYTES;
+        int count = Math.min(length, chunk.length - within);
+        System.arraycopy(bytes, offset, chunk, within, count);
+        size += count;
+        offset += count;
+        length -= count;
+      }
+    }
+    Object[] result() { return new Object[] {chunks, Integer.valueOf(size)}; }
+  }
+
   public static byte[] encode(byte[] ipc, int cap) throws Exception {
     if (ipc.length > cap) throw new IllegalArgumentException("IPC input exceeds cap");
     try (BufferAllocator allocator = new RootAllocator(4L * cap)) {
@@ -199,6 +243,20 @@ public final class VortexIpcCodec {
       }
     }
 
+    /** Returns owned chunks of one complete IPC stream; the consumer clears them after upload. */
+    public Object[] nextChunks() throws Exception {
+      try {
+        VectorSchemaRoot root = nextRoot();
+        if (root == null) return null;
+        ChunkedSink sink = new ChunkedSink(cap);
+        writeIpc(root, sink);
+        return sink.result();
+      } catch (Throwable failure) {
+        try { close(); } catch (Throwable cleanup) { failure.addSuppressed(cleanup); }
+        throw failure;
+      }
+    }
+
     /**
      * JDK-only borrowed view of one int/long batch. The buffers remain valid until the next
      * decoder operation or close; the caller must finish copying before advancing.
@@ -309,7 +367,7 @@ public final class VortexIpcCodec {
     }
   }
 
-  private static void writeIpc(VectorSchemaRoot root, Sink sink) throws Exception {
+  private static void writeIpc(VectorSchemaRoot root, OutputStream sink) throws Exception {
     try (ArrowStreamWriter writer = new ArrowStreamWriter(root, null, Channels.newChannel(sink))) {
       writer.start();
       writer.writeBatch();

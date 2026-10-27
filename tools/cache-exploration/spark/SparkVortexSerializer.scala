@@ -125,19 +125,33 @@ class SparkVortexSerializer extends ParquetCachedBatchSerializer {
           Iterator.single(new ColumnarBatch(Array.empty, record.numRows))
         } else {
           var decodedRows = 0
-          val batches = decodedIpc(record, indices, legacy = false).map { ipc =>
-            GpuSemaphore.acquireIfNecessary(TaskContext.get())
-            val result = withRetryNoSplit[ColumnarBatch] {
-              withResource(Table.readArrowIPCChunked(ArrowIPCOptions.DEFAULT, provider(ipc))) {
-                reader =>
+          val decoded = decodedChunkedIpc(record, indices)
+          val batches = decoded.map { ipc =>
+            val chunks = ipc(0).asInstanceOf[Array[Array[Byte]]]
+            val length = ipc(1).asInstanceOf[Integer].intValue()
+            try {
+              GpuSemaphore.acquireIfNecessary(TaskContext.get())
+              val result = withRetryNoSplit[ColumnarBatch] {
+                withResource(Table.readArrowIPCChunked(
+                    ArrowIPCOptions.DEFAULT, chunkProvider(chunks, length))) { reader =>
                   withResource(reader.getNextIfAvailable()) { table =>
                     require(table != null, "Expected one GPU IPC batch")
                     GpuColumnVector.from(table, types)
                   }
+                }
               }
+              decodedRows += result.numRows()
+              result
+            } catch {
+              case failure: Throwable =>
+                try { withResource(decoded) { _ => () } } catch {
+                  case cleanup: Throwable => failure.addSuppressed(cleanup)
+                }
+                throw failure
+            } finally {
+              // Keep chunks intact across retry attempts, then release every payload reference.
+              chunks.indices.foreach(i => chunks(i) = null)
             }
-            decodedRows += result.numRows()
-            result
           }
           new Iterator[ColumnarBatch] {
             override def hasNext: Boolean = {
@@ -222,6 +236,11 @@ object SparkVortexSerializer {
   def decodedIpc(record: VortexCacheRecord, indices: Array[Int],
       legacy: Boolean, registerTask: Boolean = true): Iterator[Array[Byte]] with AutoCloseable =
     decodedUnits[Array[Byte]](record, indices, legacy, registerTask, "next")
+
+  def decodedChunkedIpc(record: VortexCacheRecord,
+      indices: Array[Int]): Iterator[Array[AnyRef]] with AutoCloseable =
+    decodedUnits[Array[AnyRef]](record, indices, legacy = false,
+      registerTask = true, nextName = "nextChunks")
 
   private def decodedUnits[A <: AnyRef](record: VortexCacheRecord, indices: Array[Int],
       legacy: Boolean, registerTask: Boolean, nextName: String): Iterator[A] with AutoCloseable = {
@@ -383,15 +402,35 @@ object SparkVortexSerializer {
       }
     }
   }
-  def provider(bytes: Array[Byte]): HostBufferProvider = new HostBufferProvider {
-    private var offset = 0
-    override def readInto(buffer: HostMemoryBuffer, length: Long): Long = {
-      val count = math.min(length, bytes.length.toLong - offset).toInt
-      if (count > 0) {
-        buffer.setBytes(0, bytes, offset, count)
-        offset += count
+  def chunkProvider(chunks: Array[Array[Byte]], length: Int): HostBufferProvider = {
+    require(length >= 0 && length <= capBytes, "Chunked IPC length exceeds hard cap")
+    val chunkBytes = 64 * 1024
+    val count = ((length.toLong + chunkBytes - 1) / chunkBytes).toInt
+    require(chunks.length >= count, "Missing IPC chunks")
+    (0 until count).foreach { i =>
+      require(chunks(i) != null &&
+        chunks(i).length >= math.min(chunkBytes, length - i * chunkBytes),
+        "Truncated IPC chunk")
+    }
+    new HostBufferProvider {
+      private var owned = chunks
+      private var offset = 0
+      override def readInto(buffer: HostMemoryBuffer, requested: Long): Long = {
+        require(owned != null, "IPC provider is closed")
+        require(requested >= 0, "Negative IPC read length")
+        val amount = math.min(requested, length.toLong - offset).toInt
+        var copied = 0
+        while (copied < amount) {
+          val index = offset / chunkBytes
+          val within = offset % chunkBytes
+          val take = math.min(amount - copied, chunkBytes - within)
+          buffer.setBytes(copied, owned(index), within, take)
+          offset += take
+          copied += take
+        }
+        copied.toLong
       }
-      count.toLong
+      override def close(): Unit = { owned = null }
     }
   }
 

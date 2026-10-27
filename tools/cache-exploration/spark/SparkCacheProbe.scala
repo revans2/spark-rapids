@@ -16,11 +16,55 @@
 
 package org.apache.spark.sql.cacheexploration
 
+import ai.rapids.cudf.HostMemoryBuffer
+import com.nvidia.spark.rapids.Arm.withResource
+
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.storage.StorageLevel
 
 /** Small correctness/plan probe. It is deliberately not a performance or pressure benchmark. */
 object SparkCacheProbe {
+  private def checkChunkProvider(): Unit = {
+    val chunkBytes = 64 * 1024
+    val length = chunkBytes + 17
+    val chunks = Array.ofDim[Byte](2, chunkBytes)
+    (0 until length).foreach { i =>
+      chunks(i / chunkBytes)(i % chunkBytes) = (i * 37).toByte
+    }
+    withResource(SparkVortexSerializer.chunkProvider(chunks, length)) { provider =>
+      withResource(HostMemoryBuffer.allocate(chunkBytes + 10, false)) { host =>
+        require(provider.readInto(host, chunkBytes + 10) == chunkBytes + 10,
+          "Chunk provider boundary read length")
+        (0 until chunkBytes + 10).foreach { i =>
+          require(host.getByte(i) == (i * 37).toByte, "Chunk provider boundary bytes")
+        }
+        require(provider.readInto(host, 64) == 7, "Chunk provider tail length")
+        (0 until 7).foreach { i =>
+          require(host.getByte(i) == ((chunkBytes + 10 + i) * 37).toByte,
+            "Chunk provider tail bytes")
+        }
+        require(provider.readInto(host, 1) == 0, "Chunk provider EOF")
+      }
+    }
+    // Closing an attempt must not consume or clear chunks needed by a GPU retry.
+    withResource(SparkVortexSerializer.chunkProvider(chunks, length)) { retry =>
+      withResource(HostMemoryBuffer.allocate(4093, false)) { host =>
+        var position = 0
+        while (position < length) {
+          val expected = math.min(4093, length - position)
+          require(retry.readInto(host, 4093) == expected, "Retry provider read length")
+          (0 until expected).foreach { i =>
+            require(host.getByte(i) == ((position + i) * 37).toByte,
+              "Retry provider fresh position/bytes")
+          }
+          position += expected
+        }
+        require(retry.readInto(host, 1) == 0, "Retry provider EOF")
+      }
+    }
+    println("PASS chunk provider boundary/tail/EOF and retry reuse")
+  }
+
   def main(args: Array[String]): Unit = {
     val format = args.headOption.getOrElse("vortex")
     val population = if (args.length > 1) args(1) else "cpu"
@@ -38,6 +82,7 @@ object SparkCacheProbe {
       case "default" => "org.apache.spark.sql.execution.columnar.DefaultCachedBatchSerializer"
       case _ => throw new IllegalArgumentException("format must be vortex/vortex-direct/pcbs/default")
     }
+    if (format == "vortex") checkChunkProvider()
     val needsGpu = population == "gpu" || consumers.contains("gpu")
     val builder = SparkSession.builder().master("local[2]")
       .appName("Vortex cache correctness probe")

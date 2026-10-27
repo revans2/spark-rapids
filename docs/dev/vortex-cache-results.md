@@ -12,8 +12,9 @@ inside Arrow import. GPU copy execution was short. Treat these GPU read numbers
 as measurements of the current prototype bridge, not isolated Vortex decoding or
 PCIe transfer throughput. [Bounded bridge controls](vortex-cache-bridge-results.md)
 now demonstrate a substantial improvement with a shared pinned pool, plus a
-numeric direct-upload alternative. The user-authorized 2 GiB-pool matrix is a
-separate follow-up and does not overwrite these original numbers.
+numeric direct-upload alternative. The completed [2 GiB-pool matrix](vortex-cache-pinned2g-results.md)
+and [bounded copy improvement](vortex-cache-copy-results.md) are separate follow-ups
+and do not overwrite these original numbers.
 
 Each primary run uses two local task slots, four source/cache partitions, default
 DataFrame memory-and-disk storage, a 4 GiB RAPIDS-managed host-memory cap and a

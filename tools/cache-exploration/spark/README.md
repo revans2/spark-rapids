@@ -24,7 +24,8 @@ independence. Count-only consumption uses record row-count metadata.
 Spark uses Arrow 12 / Netty 4.1; Vortex uses Arrow 19 / Netty 4.2. A per-JVM loader
 with the Java platform loader as its parent owns Vortex's complete unshaded
 dependency closure. A reflective facade exchanges IPC byte arrays, primitive
-arguments, borrowed JDK ByteBuffers for the direct variant, and an opaque decoder object; no Spark/cuDF/Scala/Arrow object is
+arguments, bounded byte-array chunks for GPU IPC reads, borrowed JDK ByteBuffers
+for the direct variant, and an opaque decoder object; no Spark/cuDF/Scala/Arrow object is
 passed across the dependency boundary.
 
 CPU population uses Spark's own Arrow writer. CPU decode normalizes Utf8View to
@@ -80,6 +81,22 @@ for CPU population/consumption, and re-enable it for GPU consumption of the same
 cache. The probe checks every value/null/row order, full reads and reordered narrow
 projections, and asserts that GPU consumption contains an actual
 GpuInMemoryTableScan. It is a correctness probe, not a performance benchmark.
+
+## Chunked GPU IPC output
+
+The current GPU IPC route serializes each decoded Arrow root into fixed 64 KiB
+chunks, with the existing 64 MiB total stream cap, and feeds the cuDF provider
+across chunk boundaries. There is one complete valid IPC stream per decoded root.
+These transfer chunks do not change Spark cache record sizes or GPU output batch
+sizes. The encoder and CPU decoder still use their original paths.
+
+This avoids growing-array and final trimming copies. A fresh provider resets
+the cursor for every retry; closing it preserves the shared chunks until the
+outer upload succeeds or fails, when all chunk references are cleared.
+The lifecycle and correctness probes check stream parsing, values/nulls/order,
+boundaries, EOF, hard cap, early close and provider reuse.
+See docs/dev/vortex-cache-copy-results.md for mixed small-case results and the
+larger confirmation; the original matrix uses the archived pre-change binary.
 
 ## Direct-buffer GPU read experiment
 
