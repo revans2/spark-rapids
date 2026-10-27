@@ -1,6 +1,6 @@
 # Spark cache comparison with a 2 GiB pinned pool
 
-Status: IN PROGRESS. Independently verified 9/12 GPU-populated cases.
+Status: IN PROGRESS. Independently verified 10/12 attempted GPU-population cases: 9 passed, 1 failed.
 The original zero-pool [comparison](vortex-cache-results.md) and CSV are preserved.
 CPU-only producer cases were not rerun. No production defaults changed.
 
@@ -34,6 +34,7 @@ Spark storage estimates and whole-job RSS are distinct measurements.
 | 1024 | Default | 85.826 / 79.210 | 5.381 / 5.562 | 3.980 / 2.624 | 1.52x | 81.834 |
 | 1024 | PCBS | 5.760 / 2.788 | 20.291 / 20.289 | 1.043 / 0.787 | 1.33x | 3.576 |
 | 1024 | Vortex | 20.789 / 18.753 | 11.998 / 10.736 | 71.253 / 4.060 | 17.55x | 22.813 |
+| 2048 | Default | 321.273 / FAIL population | 10.095 / — | 7.646 / — | — | — |
 
 ## ID-only reads: baseline to 2 GiB pool
 
@@ -48,6 +49,7 @@ Spark storage estimates and whole-job RSS are distinct measurements.
 | 1024 | Default | 0.167 / 0.178 | 0.396 / 0.351 |
 | 1024 | PCBS | 15.734 / 15.692 | 0.523 / 0.352 |
 | 1024 | Vortex | 0.948 / 0.973 | 3.399 / 0.764 |
+| 2048 | Default | 0.272 / — | 0.538 / — |
 
 ## Size, retained data and memory
 
@@ -62,8 +64,9 @@ Spark storage estimates and whole-job RSS are distinct measurements.
 | 1024 | Default | 4,294,967,296 | 1,743,560,044 / 1,743,560,044 | 1,662,574,592 | 15,233,388,544 / 16,868,012,032 | 39 |
 | 1024 | PCBS | 4,294,967,296 | 2,053,799,024 / 2,053,797,644 | 2,053,824,352 | 10,749,976,576 / 11,135,090,688 | 0 |
 | 1024 | Vortex | 4,294,967,296 | 1,959,914,440 / 1,959,914,440 | 1,959,937,032 | 9,508,372,480 / 12,832,215,040 | 0 |
+| 2048 | Default | — | 3,487,118,351 / — | — | 19,117,694,976 / 3,424,374,784 | 5 |
 
-All verified cases retained every logical row in memory with disk bytes zero at
+All successful cases retained every logical row in memory with disk bytes zero at
 all recorded snapshots. Residency does not prove no transient spilling occurred.
 Storage bytes use Spark SizeEstimator accounting; encoded bytes are a post-timing
 payload audit. Small PCBS payload-size differences are measured output variations,
@@ -113,6 +116,32 @@ it does not isolate per-phase live working memory.
 | 1024 | Vortex | cpu / cpu | id | 1.119 | 0.973 | 19.871 | 19.726 |
 | 1024 | Vortex | gpu / gpu | full | 4.412 | 4.060 | 23.165 | 22.813 |
 | 1024 | Vortex | gpu / gpu | id | 0.497 | 0.764 | 19.250 | 19.516 |
+| 2048 | Default | cpu / unmeasured | full | — | — | — | — |
+| 2048 | Default | cpu / unmeasured | id | — | — | — | — |
+| 2048 | Default | gpu / unmeasured | full | — | — | — | — |
+| 2048 | Default | gpu / unmeasured | id | — | — | — | — |
+
+## Failed population: Default at 2 GiB per task
+
+The 8 GiB-total Default GPU-populated case failed with CpuRetryOOM during
+GPU-to-row host export before cache population completed. The stack is
+AcceleratedColumnarToRowIterator.setupBatchAndClose -> ColumnView.copyToHost
+-> HostAlloc -> preCpuAlloc. The requested contiguous buffer was 2,147,475,456
+bytes, while tracked host allocations were about 201,326,344 bytes.
+The non-pinned allowance was 2,018 MiB and the 2 GiB pinned pool could not
+satisfy the request with its existing allocations. The job exited; no budget
+was increased or retry launched. Peak sampled RSS was 3,424,374,784 bytes,
+well below the 32 GiB guard. This is a managed-allocation failure, with no
+completed population, read, payload or residency result for that case.
+Its partial-work RSS is not comparable to successful full-job memory usage.
+CSV phase rows explicitly say FAIL_POPULATION and leave unmeasured fields empty.
+The failure occurs in the export feeding Default, before its CPU cache encoding;
+it does not establish a limit on CPU-only Default caching or machine RAM.
+The original zero-pool case succeeded under a different host-budget partition.
+Changing the pinned reservation can improve transfer overhead while reducing
+the space available for large non-pinned buffers. This configuration boundary
+must remain visible when comparing formats.
+
 
 [Machine-readable results](vortex-cache-pinned2g-results.csv) include every sample,
 baseline value, size and memory measurement. Raw outputs are under

@@ -36,8 +36,12 @@ used MCP docker_exec; delegated API discovery was independently checked.
 
 ## Bridge controls READY FOR REVIEW; 2 GiB pool matrix IN PROGRESS
 
-Pinned-pool matrix progress: 9/12 cases independently verified (all three formats
-at 256, 512 and 1024 MiB/task). Report: vortex-cache-pinned2g-results.md; CSV has 36
+Pinned-pool matrix progress: 10/12 attempted outcomes independently verified:
+9 PASS at 256/512/1024 MiB per task; Default at 2048 MiB per task failed during
+GPU-to-row export/population with managed CpuRetryOOM (2,147,475,456-byte request,
+2,018 MiB non-pinned allowance, sampled RSS 3,424,374,784 bytes). No budget raised
+or failure retried. Remaining 2048 MiB PCBS/Vortex cases continue independently.
+Report: vortex-cache-pinned2g-results.md; CSV has 40
 consumer/projection rows. Exact aggregates, old/new source and dependency hashes,
 actual 2 GiB pool, heap/managed/RSS budgets, scans, payload and resident snapshots
 reproduced through /data/tmp/verify-pinned2g-lead.py. Remaining sizes in progress.
@@ -1086,3 +1090,14 @@ Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048M
 pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/1024/vortex-gpu/worker-verified.json.
 Worker summary: {"status":"PASS","format":"vortex","task_mib":1024,"output":"/data/tmp/cache-pinned2g-16g/1024/vortex-gpu","logical_bytes":4294967296,"payload_bytes":1959914440,"records":512,"population_ms":18752.621466,"rss_peak_bytes":12832215040,"snapshot_count":14,"pool_exhaustion_lines":0,"reads":[{"mode":"cpu","narrow":false,"first_ms":11928.543498,"median_ms":10736.320306000001},{"mode":"cpu","narrow":true,"first_ms":1118.591905,"median_ms":973.2702235},{"mode":"gpu","narrow":false,"first_ms":4411.993613,"median_ms":4060.4372045},{"mode":"gpu","narrow":true,"first_ms":497.102917,"median_ms":763.6122915}],"host_available_before":187725426688,"resident_storage_bytes":1959937032,"resident_logical_bytes":4294967296,"disk_storage_bytes":0}
 Lead independent verification/final acceptance remains outstanding.
+
+### Pinned2GiB worker case2048MiB/task Default: PARKED failure
+
+MCP docker_exec only. Original78e042 artifact, actual16GiBheap/4GiBmanaged
+host/2GiBpinned/2018MiBnonpinned/30MiBoverhead/32GiBguard verified. Population
+failed with CpuRetryOOM when GPU column-to-row copyToHost requested2147475456B;
+HostAlloc logged allocation refusal. RSS peak3424374784B; guard did not trip.
+No completed population/read/storage/audit outcome or encodedpayload measured.
+No retry or budget relaxation. Evidence /data/tmp/cache-pinned2g-16g/2048/default-gpu/
+worker-failure-verification.json plus exact manifests/result/stack/logs preserved.
+Independent2048PCBS/Vortex cases continue as authorized; do not reportall12PASS.
