@@ -102,7 +102,9 @@ should precede another full scale matrix or a decision against Vortex.
 ## API investigation: candidate fixes
 
 Read-only source and runtime Java API inspection found a smaller first experiment
-than restructuring IPC. These are candidate fixes; none has been benchmarked.
+than restructuring IPC. The initial API investigation below preceded implementation. Subsequent
+[bridge experiments](vortex-cache-bridge-results.md) measured shared pooling and
+the int/long direct-buffer route; retain the remaining candidates as proposals.
 
 1. **Test pooling first.** GpuDeviceManager.initializePinnedPoolAndOffHeapLimits
    explicitly configures cuDF's default pinned pool to zero. RAPIDS's

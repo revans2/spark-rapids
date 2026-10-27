@@ -29,13 +29,14 @@ object SparkCacheProbe {
     val consumers = if (args.length > 4) args(4).split(",") else Array("cpu")
     require(Set("cpu", "gpu").contains(population))
     require(consumers.forall(Set("cpu", "gpu").contains))
-    require(Set("fixed", "strings-low", "strings-wide").contains(fixture))
+    require(Set("fixed", "fixed-edge", "strings-low", "strings-wide").contains(fixture))
     require(rows > 0 && rows <= 100000, "Correctness probe is bounded to 100000 rows")
     val serializer = format match {
       case "vortex" => classOf[SparkVortexSerializer].getName
+      case "vortex-direct" => classOf[SparkVortexDirectBufferSerializer].getName
       case "pcbs" => "com.nvidia.spark.ParquetCachedBatchSerializer"
       case "default" => "org.apache.spark.sql.execution.columnar.DefaultCachedBatchSerializer"
-      case _ => throw new IllegalArgumentException("format must be vortex/pcbs/default")
+      case _ => throw new IllegalArgumentException("format must be vortex/vortex-direct/pcbs/default")
     }
     val needsGpu = population == "gpu" || consumers.contains("gpu")
     val builder = SparkSession.builder().master("local[2]")
@@ -51,7 +52,12 @@ object SparkCacheProbe {
       val expressions = Seq(
         "id * 17L - 991L AS id",
         "CAST(CASE WHEN id % 13 = 0 THEN NULL ELSE (id * 37) % 1009 END AS INT) AS key") ++
-        (if (fixture == "fixed") Seq.empty else Seq(
+        (if (fixture == "fixed-edge") Seq(
+          "CAST(NULL AS LONG) AS all_null_long",
+          "CAST(NULL AS INT) AS all_null_int",
+          "id * 29L - 17L AS all_valid_long",
+          "CAST(id * 11 - 23 AS INT) AS all_valid_int")
+        else if (fixture == "fixed") Seq.empty else Seq(
           if (fixture == "strings-low")
             "CASE WHEN id % 17 = 0 THEN NULL ELSE concat('group-', id % 32) END AS payload"
           else "CASE WHEN id % 17 = 0 THEN NULL " +
@@ -70,7 +76,11 @@ object SparkCacheProbe {
           require(row.getLong(0) == i * 17L - 991L, "id/order " + i)
           require(row.isNullAt(1) == (i % 13 == 0), "key null " + i)
           if (!row.isNullAt(1)) require(row.getInt(1) == (i * 37) % 1009, "key " + i)
-          if (fixture != "fixed") {
+          if (fixture == "fixed-edge") {
+            require(row.isNullAt(2) && row.isNullAt(3), "all-null columns " + i)
+            require(row.getLong(4) == i * 29L - 17L, "all-valid long " + i)
+            require(row.getInt(5) == i * 11 - 23, "all-valid int " + i)
+          } else if (fixture != "fixed") {
             val expected = if (i % 17 == 0) null
               else if (fixture == "strings-low") "group-" + (i % 32)
               else "row-" + i + "-varying-value"
@@ -91,6 +101,19 @@ object SparkCacheProbe {
           require(row.getLong(1) == i * 17L - 991L, "reordered id " + i)
           require(row.isNullAt(0) == (i % 13 == 0), "narrow null " + i)
           if (!row.isNullAt(0)) require(row.getInt(0) == (i * 37) % 1009, "narrow key " + i)
+        }
+        if (fixture == "fixed-edge") {
+          val reversed = cached.select(cached.columns.reverse.head,
+            cached.columns.reverse.tail: _*).collect()
+          require(reversed.length == rows, "Reversed row count")
+          reversed.zip(result).foreach { case (actual, original) =>
+            require(actual.toSeq == original.toSeq.reverse, "Reversed field values/nulls")
+          }
+          val ids = cached.select("id").collect()
+          require(ids.length == rows, "ID-only row count")
+          ids.zipWithIndex.foreach { case (row, i) =>
+            require(row.getLong(0) == i * 17L - 991L, "ID-only order " + i)
+          }
         }
         println("CONSUMER " + mode + " ROWS " + result.length + " PLAN\n" + plan)
         println("NARROW REORDERED PLAN\n" + narrow.queryExecution.executedPlan)

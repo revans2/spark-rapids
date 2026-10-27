@@ -60,6 +60,12 @@ def main():
     parser.add_argument('--build-dir', type=Path, default=Path('/data/tmp/vortex-spark-prototype'))
     parser.add_argument('--spark-home', type=Path, default=Path('/home/roberte/src/spark_3.5.5'))
     parser.add_argument('--format', choices=['default', 'pcbs', 'vortex'], required=True)
+    parser.add_argument('--vortex-class', choices=[
+        'org.apache.spark.sql.cacheexploration.SparkVortexSerializer',
+        'org.apache.spark.sql.cacheexploration.SparkVortexDirectBufferSerializer'],
+        default='org.apache.spark.sql.cacheexploration.SparkVortexSerializer')
+    parser.add_argument('--pinned-pool-size', choices=['0', '64m', '256m', '2g'], default='0',
+                        help='Exploration control; shared pool uses the managed host budget')
     parser.add_argument('--write-mode', choices=['cpu', 'gpu'], default='cpu')
     parser.add_argument('--read-modes', default='cpu,gpu')
     parser.add_argument('--fixture', choices=['fixed', 'fixed-wide', 'strings-low', 'strings-wide', 'interval'],
@@ -127,10 +133,12 @@ def main():
                '--conf', 'spark.rapids.memory.host.offHeapLimit.enabled=true',
                '--conf', 'spark.rapids.memory.host.offHeapLimit.size=' + args.offheap_limit,
                '--conf', 'spark.rapids.sql.enabled=' + str(args.write_mode == 'gpu').lower(),
-               '--conf', 'spark.executor.cores=' + str(args.tasks)]
+               '--conf', 'spark.executor.cores=' + str(args.tasks),
+               '--conf', 'spark.rapids.memory.pinnedPool.size=' + args.pinned_pool_size]
     if plugin:
         command += ['--conf', 'spark.plugins=com.nvidia.spark.SQLPlugin']
-    command += [str(snapshot), '--format', args.format, '--write-mode', args.write_mode,
+    command += [str(snapshot), '--format', args.format, '--vortex-class', args.vortex_class,
+                '--write-mode', args.write_mode,
                 '--read-modes', args.read_modes, '--fixture', args.fixture, '--rows', str(args.rows),
                 '--partitions', str(args.partitions), '--warmups', str(args.warmups),
                 '--repeats', str(args.repeats), '--storage', args.storage,
@@ -155,6 +163,8 @@ def main():
                 'prototype_sha256': hashlib.sha256(prototype.read_bytes()).hexdigest(),
                 'build_provenance_snapshot': str(args.output_dir / 'build-provenance.json'),
                 'managed_offheap_limit': args.offheap_limit,
+                'pinned_pool_size': args.pinned_pool_size,
+                'vortex_class': args.vortex_class,
                 'managed_offheap_limit_scope': 'Only RAPIDS-managed allocations after allocator initialization; excludes Arrow/Rust',
                 'sampled_rss_abort_threshold_bytes': args.rss_abort_bytes,
                 'memory_instrumented': args.measure_memory,

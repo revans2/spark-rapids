@@ -34,6 +34,42 @@ limits and native revision caveat. Released allocator defaults remain untouched;
 a configuration-only speedup would not establish out-of-box acceptance. All work
 used MCP docker_exec; delegated API discovery was independently checked.
 
+## Bridge controls READY FOR REVIEW; 2 GiB pool matrix IN PROGRESS
+
+Small controls and direct-buffer implementation are verified READY FOR REVIEW:
+see vortex-cache-bridge-results.md and its three-row CSV. All use 256 MiB/task,
+four partitions/two slots, heap 16 GiB, managed host cap 4 GiB, RSS guard 32 GiB.
+Original IPC full GPU read median: 13.241 s at pool zero, 1.339 s at pool 256 MiB;
+direct buffers with pool zero: 2.506 s (samples 3.230/1.782). Every case retained
+the same 1 GiB logical data / 489,897,376 encoded bytes, 128 records, disk zero.
+The 64 MiB pool exhausted; 256 MiB eliminated raw pinned calls inside import.
+Independent lead verification reproduced results/profiles and inspected decisive
+code. Peer review found no blockers. Separate direct build compiled; seven
+lifecycle cases, CPU/GPU-producer numeric edge probes and IPC string regression
+passed. Direct route supports cached int/long only; slices, duplicate projections,
+injected retry/task cancellation remain unverified. No production defaults changed.
+Shim preflight is not applicable: only Spark355-only exploratory tools changed,
+with no production shared callers, versioned shims or source-selection profiles.
+
+New user authorization: set pinned pool to 2 GiB and rerun every original GPU-enabled
+case (three formats x four task sizes), then investigate a bounded number of
+realistic further improvements and report. Keep the baseline CSV/artifacts intact.
+Matrix: original artifact78e..., original Vortex class, GPU population, CPU/GPU
+reads full+narrow, 256/512/1024/2048 MiB per task, four partitions/two slots, heap
+16 GiB, managed host cap 4 GiB including pinned reservation, sampled RSS stop
+32 GiB, per-run timeout 1200 s, one warmup/two timed reads, post-timing payload
+audit. Fresh /data/tmp/cache-pinned2g-16g/{size}/{format}-gpu. No CPU-only-producer
+reruns are required by this request. Default's large host allocations may encounter
+the smaller non-pinned allowance; record/park failures rather than relax budgets.
+No concurrent GPU jobs; ascending size prerequisites must verify before larger
+cases. Preserve released contracts/classifications below. Do not change production
+allocator defaults or claim configuration-only results meet out-of-box acceptance.
+After the matrix, use evidence to choose limited prototype-local optimization;
+broader native/production policy changes require architect review.
+MCP docker_exec is required at every operation, handoff, resumption and progress
+checkpoint; workers must confirm continued use. Independently verify delegated
+work and commit completed tasks with tracker updates. Only architect marks DONE.
+
 ## Scope, operating rules and accepted decision criteria
 
 Explore Vortex through host Arrow as an alternative cache representation to branch
@@ -964,3 +1000,11 @@ released contract changed. All task commits are signed off; no PR was published.
 Architect final acceptance remains outstanding; implementation/results are READY
 FOR REVIEW, not DONE. No extraencodingpolicy/batch-size optimization authorized
 as a substitute for completing these baseline measurements.
+
+### Pinned2GiB worker case 256MiB/task default: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/256/default-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"default","task_mib":256,"output":"/data/tmp/cache-pinned2g-16g/256/default-gpu","logical_bytes":1073741824,"payload_bytes":435890015,"records":420,"population_ms":19532.499451,"rss_peak_bytes":4938690560,"snapshot_count":14,"pool_exhaustion_lines":33,"reads":[{"mode":"cpu","narrow":false,"first_ms":1679.235396,"median_ms":1487.18586},{"mode":"cpu","narrow":true,"first_ms":190.684469,"median_ms":102.66789750000001},{"mode":"gpu","narrow":false,"first_ms":859.391117,"median_ms":572.678949},{"mode":"gpu","narrow":true,"first_ms":137.489368,"median_ms":133.0502785}],"host_available_before":187543429120,"resident_storage_bytes":437697968,"resident_logical_bytes":1073741824,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.

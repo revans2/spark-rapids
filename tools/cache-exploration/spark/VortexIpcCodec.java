@@ -181,21 +181,74 @@ public final class VortexIpcCodec {
 
     /** Returns one complete IPC batch, or null at EOF; never materializes the whole partition. */
     public byte[] next() throws Exception {
+      try {
+        VectorSchemaRoot root = nextRoot();
+        if (root == null) return null;
+        Sink sink = new Sink(cap);
+        if (legacy) {
+          try (VectorSchemaRoot normalized = legacyRoot(root, allocator)) {
+            writeIpc(normalized, sink);
+          }
+        } else {
+          writeIpc(root, sink);
+        }
+        return sink.result();
+      } catch (Throwable failure) {
+        try { close(); } catch (Throwable cleanup) { failure.addSuppressed(cleanup); }
+        throw failure;
+      }
+    }
+
+    /**
+     * JDK-only borrowed view of one int/long batch. The buffers remain valid until the next
+     * decoder operation or close; the caller must finish copying before advancing.
+     */
+    public Object[] nextBuffers() throws Exception {
+      try {
+        VectorSchemaRoot root = nextRoot();
+        if (root == null) return null;
+        int rows = root.getRowCount();
+        int columns = root.getFieldVectors().size();
+        int[] widths = new int[columns];
+        int[] nulls = new int[columns];
+        ByteBuffer[] data = new ByteBuffer[columns];
+        ByteBuffer[] validity = new ByteBuffer[columns];
+        long bytes = 0;
+        for (int c = 0; c < columns; c++) {
+          FieldVector vector = root.getVector(c);
+          if (!(vector.getField().getType() instanceof ArrowType.Int integer)
+              || !integer.getIsSigned()
+              || (integer.getBitWidth() != 32 && integer.getBitWidth() != 64)) {
+            throw new IllegalArgumentException("Direct buffer GPU decode supports signed int/long only");
+          }
+          widths[c] = integer.getBitWidth() / 8;
+          int length = Math.toIntExact((long) rows * widths[c]);
+          nulls[c] = vector.getNullCount();
+          data[c] = vector.getDataBuffer().nioBuffer(0, length).asReadOnlyBuffer();
+          int maskLength = Math.toIntExact(((long) rows + 7) / 8);
+          if (nulls[c] != 0) {
+            validity[c] = vector.getValidityBuffer().nioBuffer(0, maskLength).asReadOnlyBuffer();
+          }
+          bytes += length + (nulls[c] == 0 ? 0 : maskLength);
+          if (bytes > cap) {
+            throw new IllegalArgumentException("Direct buffer batch exceeds hard cap " + cap);
+          }
+        }
+        return new Object[] {Integer.valueOf(rows), widths, nulls, data, validity};
+      } catch (Throwable failure) {
+        try { close(); } catch (Throwable cleanup) { failure.addSuppressed(cleanup); }
+        throw failure;
+      }
+    }
+
+    private VectorSchemaRoot nextRoot() throws Exception {
       if (closed) return null;
       try {
         while (true) {
           if (reader != null && reader.loadNextBatch()) {
-            Sink sink = new Sink(cap);
             VectorSchemaRoot root = reader.getVectorSchemaRoot();
-            rowsRead += root.getRowCount();
-            if (legacy) {
-              try (VectorSchemaRoot normalized = legacyRoot(root, allocator)) {
-                writeIpc(normalized, sink);
-              }
-            } else {
-              writeIpc(root, sink);
-            }
-            return sink.result();
+            rowsRead = Math.addExact(rowsRead, root.getRowCount());
+            return root;
           }
           if (reader != null) { reader.close(); reader = null; }
           long partition = dev.vortex.jni.NativeScan.nextPartition(scanPointer);

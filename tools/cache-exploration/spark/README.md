@@ -24,7 +24,7 @@ independence. Count-only consumption uses record row-count metadata.
 Spark uses Arrow 12 / Netty 4.1; Vortex uses Arrow 19 / Netty 4.2. A per-JVM loader
 with the Java platform loader as its parent owns Vortex's complete unshaded
 dependency closure. A reflective facade exchanges IPC byte arrays, primitive
-arguments, and an opaque decoder object; no Spark/cuDF/Scala/Arrow object is
+arguments, borrowed JDK ByteBuffers for the direct variant, and an opaque decoder object; no Spark/cuDF/Scala/Arrow object is
 passed across the dependency boundary.
 
 CPU population uses Spark's own Arrow writer. CPU decode normalizes Utf8View to
@@ -80,6 +80,41 @@ for CPU population/consumption, and re-enable it for GPU consumption of the same
 cache. The probe checks every value/null/row order, full reads and reordered narrow
 projections, and asserts that GPU consumption contains an actual
 GpuInMemoryTableScan. It is a correctness probe, not a performance benchmark.
+
+## Direct-buffer GPU read experiment
+
+The alternate class
+`org.apache.spark.sql.cacheexploration.SparkVortexDirectBufferSerializer`
+inherits the original encoding and CPU read paths. Its GPU read route accepts
+only cached int/long schemas; even an ID-only GPU projection from a string cache
+is explicitly unsupported in this variant. No production serializer or allocator
+default changes.
+
+It borrows one decoded Arrow batch through JDK ByteBuffers, copies into owned
+host buffers using the plugin's default host allocator, and uploads through
+HostColumnVector.copyToDevice with exact null counts. Validity buffers are padded
+for cuDF. Uploads finish before the decoder advances; retries reuse the same
+borrowed batch. This avoids IPC on GPU reads but still copies host data. All
+Arrow/native limitations in the memory section below still apply.
+
+Build into a fresh directory such as `/data/tmp/vortex-spark-direct-buffer`.
+Select the variant with run_spark.py `--vortex-class` and use the existing small
+correctness probe as:
+
+```text
+vortex-direct cpu fixed-edge 513 cpu,gpu
+vortex-direct gpu fixed-edge 513 cpu,gpu
+```
+
+The fixed-edge probe adds all-null and all-valid numeric columns, reversed
+projection and ID-only reads. VortexLifecycleProbe also checks borrowed buffers
+and input release after exhaustion, partial close and unread close.
+
+run_spark.py's `--pinned-pool-size 0|64m|256m|2g` is a separate allocator control.
+The configured pinned pool shares the existing managed host budget; fallback,
+Arrow and Rust allocations prevent treating it as a total native-memory limit.
+Keep the original measured build intact and write each run to a fresh directory.
+See docs/dev/vortex-cache-profiling.md for why these experiments are needed.
 
 ## Memory limitations
 

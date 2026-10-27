@@ -10,7 +10,10 @@ not the normal-host baseline. No production serializer changes are proposed.
 reads and found substantial pinned-host allocation/free and host copy API costs
 inside Arrow import. GPU copy execution was short. Treat these GPU read numbers
 as measurements of the current prototype bridge, not isolated Vortex decoding or
-PCIe transfer throughput; the bridge needs a bounded follow-up experiment.
+PCIe transfer throughput. [Bounded bridge controls](vortex-cache-bridge-results.md)
+now demonstrate a substantial improvement with a shared pinned pool, plus a
+numeric direct-upload alternative. The user-authorized 2 GiB-pool matrix is a
+separate follow-up and does not overwrite these original numbers.
 
 Each primary run uses two local task slots, four source/cache partitions, default
 DataFrame memory-and-disk storage, a 4 GiB RAPIDS-managed host-memory cap and a

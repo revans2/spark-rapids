@@ -18,12 +18,14 @@ package org.apache.spark.sql.cacheexploration
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, OutputStream}
 import java.net.URLClassLoader
+import java.nio.ByteBuffer
+import java.util.Optional
 
 import scala.collection.JavaConverters._
 
 import ai.rapids.cudf.{
   ArrowIPCOptions, ArrowIPCWriterOptions, ColumnVector => CudfColumn, HostBufferConsumer,
-  HostBufferProvider, HostMemoryBuffer, Table}
+  DType, HostBufferProvider, HostColumnVector, HostMemoryBuffer, Table}
 import com.nvidia.spark.ParquetCachedBatchSerializer
 import com.nvidia.spark.rapids.{
   GpuColumnVector, GpuSemaphore, SpillableColumnarBatch, SpillPriorities}
@@ -151,6 +153,30 @@ class SparkVortexSerializer extends ParquetCachedBatchSerializer {
   }
 }
 
+/**
+ * Experimental GPU upload for caches containing only int/long, including projected scans.
+ * Cache encoding and CPU reads are inherited unchanged; string-cache GPU reads are an explicit gap.
+ */
+class SparkVortexDirectBufferSerializer extends SparkVortexSerializer {
+  override def gpuConvertCachedBatchToColumnarBatch(input: RDD[CachedBatch],
+      cached: Seq[Attribute], selected: Seq[Attribute], conf: SQLConf): RDD[ColumnarBatch] = {
+    require(cached.forall(a => a.dataType == IntegerType || a.dataType == LongType),
+      "Direct buffer Vortex GPU decode supports only int/long")
+    val indices = SparkVortexSerializer.selectedIndices(cached, selected)
+    val types = selected.map(_.dataType).toArray
+    input.mapPartitions { records =>
+      records.flatMap { raw =>
+        val record = raw.asInstanceOf[VortexCacheRecord]
+        if (selected.isEmpty) {
+          Iterator.single(new ColumnarBatch(Array.empty, record.numRows))
+        } else {
+          SparkVortexSerializer.directGpuBatches(record, indices, types)
+        }
+      }
+    }
+  }
+}
+
 object SparkVortexSerializer {
   // Harness constants, not production configuration or a total executor memory budget.
   val targetBytes: Int = 8 * 1024 * 1024
@@ -194,16 +220,20 @@ object SparkVortexSerializer {
     null, ipc, Int.box(capBytes)).asInstanceOf[Array[Byte]]
 
   def decodedIpc(record: VortexCacheRecord, indices: Array[Int],
-      legacy: Boolean, registerTask: Boolean = true): Iterator[Array[Byte]] with AutoCloseable = {
+      legacy: Boolean, registerTask: Boolean = true): Iterator[Array[Byte]] with AutoCloseable =
+    decodedUnits[Array[Byte]](record, indices, legacy, registerTask, "next")
+
+  private def decodedUnits[A <: AnyRef](record: VortexCacheRecord, indices: Array[Int],
+      legacy: Boolean, registerTask: Boolean, nextName: String): Iterator[A] with AutoCloseable = {
     var decoder = invoke(codecClass.getMethod("open", classOf[Array[Byte]],
       classOf[Array[Int]], java.lang.Boolean.TYPE, java.lang.Integer.TYPE),
       null, record.bytes, indices, Boolean.box(legacy), Int.box(capBytes))
     val expectedRows = record.numRows
-    val nextMethod = decoder.getClass.getMethod("next")
+    val nextMethod = decoder.getClass.getMethod(nextName)
     val closeMethod = decoder.getClass.getMethod("close")
     val rowsMethod = decoder.getClass.getMethod("rowsRead")
-    new Iterator[Array[Byte]] with AutoCloseable {
-      private var pending: Array[Byte] = null
+    new Iterator[A] with AutoCloseable {
+      private var pending: A = null.asInstanceOf[A]
       private var closed = false
       if (registerTask) {
         Option(TaskContext.get()).foreach(_.addTaskCompletionListener[Unit](_ => close()))
@@ -211,7 +241,7 @@ object SparkVortexSerializer {
       override def hasNext: Boolean = {
         if (!closed && pending == null) {
           try {
-            pending = invoke(nextMethod, decoder).asInstanceOf[Array[Byte]]
+            pending = invoke(nextMethod, decoder).asInstanceOf[A]
             if (pending == null) {
               require(invoke(rowsMethod, decoder).asInstanceOf[Integer].intValue == expectedRows,
                 "Vortex decoder row count")
@@ -223,18 +253,88 @@ object SparkVortexSerializer {
         }
         pending != null
       }
-      override def next(): Array[Byte] = {
+      override def next(): A = {
         if (!hasNext) throw new NoSuchElementException
         val result = pending
-        pending = null
+        pending = null.asInstanceOf[A]
         result
       }
       override def close(): Unit = if (!closed) {
         closed = true
-        pending = null
+        pending = null.asInstanceOf[A]
         val owned = decoder
         decoder = null
         invoke(closeMethod, owned)
+      }
+    }
+  }
+
+  def directGpuBatches(record: VortexCacheRecord, indices: Array[Int],
+      types: Array[DataType]): Iterator[ColumnarBatch] = {
+    val decoded = decodedUnits[Array[AnyRef]](
+      record, indices, legacy = false, registerTask = true, nextName = "nextBuffers")
+    decoded.map { buffers =>
+      try {
+        // The decoder retains the Arrow root across all retry attempts. Do not advance it until
+        // these synchronous uploads finish; task completion releases an abandoned decoder.
+        GpuSemaphore.acquireIfNecessary(TaskContext.get())
+        withRetryNoSplit[ColumnarBatch] {
+          val rows = buffers(0).asInstanceOf[Integer].intValue()
+          val widths = buffers(1).asInstanceOf[Array[Int]]
+          val nulls = buffers(2).asInstanceOf[Array[Int]]
+          val data = buffers(3).asInstanceOf[Array[ByteBuffer]]
+          val validity = buffers(4).asInstanceOf[Array[ByteBuffer]]
+          require(widths.length == types.length && nulls.length == types.length &&
+            data.length == types.length && validity.length == types.length,
+            "Direct buffer column count")
+          val validBytes = (((rows.toLong + 7) / 8 + 63) / 64) * 64
+          val bytes = widths.indices.map(i =>
+            rows.toLong * widths(i) + (if (nulls(i) == 0) 0L else validBytes)).sum
+          require(bytes <= capBytes, "Direct buffer upload exceeds hard cap")
+          withResource(new scala.collection.mutable.ArrayBuffer[CudfColumn]()) { columns =>
+            types.indices.foreach { i =>
+              val dtype = types(i) match {
+                case IntegerType => DType.INT32
+                case LongType => DType.INT64
+                case _ => throw new IllegalArgumentException("Direct buffer GPU type")
+              }
+              require(widths(i) == dtype.getSizeInBytes && nulls(i) >= 0 && nulls(i) <= rows,
+                "Direct buffer type/null count")
+              val host = closeOnExcept(
+                new scala.collection.mutable.ArrayBuffer[HostMemoryBuffer]()) { allocated =>
+                val hostData = HostMemoryBuffer.allocate(math.max(1L, rows.toLong * widths(i)), false)
+                allocated += hostData
+                hostData.asByteBuffer().put(data(i).duplicate())
+                val hostValid = if (nulls(i) == 0) {
+                  null
+                } else {
+                  val mask = HostMemoryBuffer.allocate(validBytes, false)
+                  allocated += mask
+                  mask.setMemory(0, validBytes, 0.toByte)
+                  mask.asByteBuffer().put(validity(i).duplicate())
+                  mask
+                }
+                val result = new HostColumnVector(
+                  dtype, rows.toLong, Optional.of(java.lang.Long.valueOf(nulls(i).toLong)),
+                  hostData, hostValid, null)
+                // The host column owns these buffers after successful construction.
+                allocated.clear()
+                result
+              }
+              columns += withResource(host)(_.copyToDevice())
+            }
+            withResource(new Table(columns.toArray: _*)) { table =>
+              require(table.getRowCount == rows, "Direct buffer GPU row count")
+              GpuColumnVector.from(table, types)
+            }
+          }
+        }
+      } catch {
+        case failure: Throwable =>
+          try { withResource(decoded) { _ => () } } catch {
+            case cleanup: Throwable => failure.addSuppressed(cleanup)
+          }
+          throw failure
       }
     }
   }
