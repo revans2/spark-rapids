@@ -630,3 +630,39 @@ MCP-only confirmed at user-steered handoff, launcher review and every worker
 checkpoint. Main budgets stay fixed; failure/guard/timeout stops for review.
 Next main GPU-producer256cohort uses /data/tmp/cache-main-16g and default timeout300;
 larger task sizes remain subject to lower-size footprint review.
+
+## PRIMARY16GiB / 256MiB-task cohort: READY FOR REVIEW
+
+All3GPU-producer cases PASS, original8MiB Vortex build,4partitions/2slots,
+1GiB canonical logical total,16GiB heap/4GiB managed/32GiB reactiveRSSguard.
+All logical data resident/no disk in every14snapshot set. Lead independently
+verified actualheapmax,guard,managedcap,artifactSHA,aggregates,actualreaderplans,
+auditedrows/payload and localstorage sums with verify-cache-scale.py.
+
+| Format | Payload B | Population ms | CPU full warm ms | GPU-enabled full warm ms | Whole-job RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Default |435890015|23012.288|1524.406|1170.159|5122056192|
+| PCBS |513454990|2502.820|5576.536|454.920|3980845056|
+| Vortex |489897376|6918.857|2675.958|13852.579|5558865920|
+
+Localresidentbytes437697968/513461696/489903072 respectively all represent1GiB
+logical data. DefaultGPU-enabled query usesCPUdecoder thenGPUconversion/aggregation;
+PCBS/Vortex actualGPUcache scans. Payload rankings numeric-workload-specific.
+Whole-jobRSS is not live-native/temporary-allocation measurement; don't infer
+pressure from these peaks alone or format speed limits from prototype routes.
+
+Worker primaryreport appended separatepopulation/read-only first+warmed/full+
+narrow/computedcombined tables. Lead independently reproduced ALL12phase rows,
+population/storage/payload/RSS from rawJSON using /data/tmp/verify-primary-report.py256.
+Historical report verification scripts updated to the constrained-report path and
+rerunPASS after the move, preserving reproducibility. Focused peer review of
+budget/encoding/failed-trial documentation clear. No production changes.
+
+After reviewing largest256-case RSS5558865920B against the32GiB guard and ample
+availablehostmemory, nextPRIMARY512GPU-producer cohort is IN PROGRESS, same
+budgets/concurrency/originalVortexunits,timeout300,warmup1/repeats2/audit.
+Default512PASS independentlyverified:2GiB logical allresident875395032B,
+payload871780099B,population42646.828ms,CPUfullwarm2779.819ms/GPU-enabled2006.628ms,
+RSS7943970816B. PCBS/Vortex512 pending. No1GiB/2GiBtaskprimaryrun yet, no16GiB
+CPU-producercohort yet. MCP-only confirmed at resumption/checkpoint; no concurrent
+benchmarks or builds. Stop/review on failure, no automatic limit changes.
