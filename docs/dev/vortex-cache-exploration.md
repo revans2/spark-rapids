@@ -64,8 +64,16 @@ the smaller non-pinned allowance; record/park failures rather than relax budgets
 No concurrent GPU jobs; ascending size prerequisites must verify before larger
 cases. Preserve released contracts/classifications below. Do not change production
 allocator defaults or claim configuration-only results meet out-of-box acceptance.
-After the matrix, use evidence to choose limited prototype-local optimization;
-broader native/production policy changes require architect review.
+One further candidate is being prepared independently while immutable baseline
+jobs run: fixed 64 KiB chunked IPC output for GPU reads, removing growing-array
+and final trimming copies sampled in pooled JFR. Encoding/cache records/CPU
+route stay unchanged; one valid IPC stream per decoded batch. Multi-file grouping
+was investigated and rejected for this batch: dtype equality and native footer
+concurrency add risk without eliminating per-file footer work. Measurements wait
+for the matrix; start at 256 MiB/task, then at most a larger confirming case if
+justified. Stop or revert the candidate on no reproducible useful benefit; do not
+pursue multiple speculative optimizations or implement native GPU decoding.
+Broader native/production policy changes require architect review.
 MCP docker_exec is required at every operation, handoff, resumption and progress
 checkpoint; workers must confirm continued use. Independently verify delegated
 work and commit completed tasks with tracker updates. Only architect marks DONE.
@@ -1007,4 +1015,36 @@ MCP docker_exec only; original78e042 artifact and released contracts preserved.
 Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
 pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/256/default-gpu/worker-verified.json.
 Worker summary: {"status":"PASS","format":"default","task_mib":256,"output":"/data/tmp/cache-pinned2g-16g/256/default-gpu","logical_bytes":1073741824,"payload_bytes":435890015,"records":420,"population_ms":19532.499451,"rss_peak_bytes":4938690560,"snapshot_count":14,"pool_exhaustion_lines":33,"reads":[{"mode":"cpu","narrow":false,"first_ms":1679.235396,"median_ms":1487.18586},{"mode":"cpu","narrow":true,"first_ms":190.684469,"median_ms":102.66789750000001},{"mode":"gpu","narrow":false,"first_ms":859.391117,"median_ms":572.678949},{"mode":"gpu","narrow":true,"first_ms":137.489368,"median_ms":133.0502785}],"host_available_before":187543429120,"resident_storage_bytes":437697968,"resident_logical_bytes":1073741824,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.
+
+### Pinned2GiB worker case 256MiB/task pcbs: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/256/pcbs-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"pcbs","task_mib":256,"output":"/data/tmp/cache-pinned2g-16g/256/pcbs-gpu","logical_bytes":1073741824,"payload_bytes":513454580,"records":140,"population_ms":1531.180698,"rss_peak_bytes":5236621312,"snapshot_count":14,"pool_exhaustion_lines":0,"reads":[{"mode":"cpu","narrow":false,"first_ms":6217.567998,"median_ms":5423.882254},{"mode":"cpu","narrow":true,"first_ms":4195.025585,"median_ms":4148.281150000001},{"mode":"gpu","narrow":false,"first_ms":460.209946,"median_ms":262.350739},{"mode":"gpu","narrow":true,"first_ms":163.851699,"median_ms":143.688081}],"host_available_before":187647840256,"resident_storage_bytes":513461272,"resident_logical_bytes":1073741824,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.
+
+### Pinned2GiB worker case 256MiB/task vortex: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/256/vortex-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"vortex","task_mib":256,"output":"/data/tmp/cache-pinned2g-16g/256/vortex-gpu","logical_bytes":1073741824,"payload_bytes":489897376,"records":128,"population_ms":5894.824981,"rss_peak_bytes":7911780352,"snapshot_count":14,"pool_exhaustion_lines":0,"reads":[{"mode":"cpu","narrow":false,"first_ms":3013.353489,"median_ms":2905.849256},{"mode":"cpu","narrow":true,"first_ms":306.437923,"median_ms":347.043055},{"mode":"gpu","narrow":false,"first_ms":1340.001668,"median_ms":1169.2595805},{"mode":"gpu","narrow":true,"first_ms":266.640512,"median_ms":228.282546}],"host_available_before":187580043264,"resident_storage_bytes":489903072,"resident_logical_bytes":1073741824,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.
+
+### Pinned2GiB worker case 512MiB/task default: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/512/default-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"default","task_mib":512,"output":"/data/tmp/cache-pinned2g-16g/512/default-gpu","logical_bytes":2147483648,"payload_bytes":871780099,"records":840,"population_ms":38719.420155,"rss_peak_bytes":7443652608,"snapshot_count":14,"pool_exhaustion_lines":37,"reads":[{"mode":"cpu","narrow":false,"first_ms":3002.440311,"median_ms":2764.8142635},{"mode":"cpu","narrow":true,"first_ms":218.847945,"median_ms":128.2925775},{"mode":"gpu","narrow":false,"first_ms":1411.93787,"median_ms":1069.827001},{"mode":"gpu","narrow":true,"first_ms":207.9447,"median_ms":173.59348}],"host_available_before":187526320128,"resident_storage_bytes":875395032,"resident_logical_bytes":2147483648,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.
+
+### Pinned2GiB worker case 512MiB/task pcbs: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/512/pcbs-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"pcbs","task_mib":512,"output":"/data/tmp/cache-pinned2g-16g/512/pcbs-gpu","logical_bytes":2147483648,"payload_bytes":1026899551,"records":280,"population_ms":1871.449762,"rss_peak_bytes":8676737024,"snapshot_count":14,"pool_exhaustion_lines":0,"reads":[{"mode":"cpu","narrow":false,"first_ms":11624.973828,"median_ms":10339.6714105},{"mode":"cpu","narrow":true,"first_ms":7810.706555,"median_ms":7786.411474},{"mode":"gpu","narrow":false,"first_ms":602.899804,"median_ms":458.3164305},{"mode":"gpu","narrow":true,"first_ms":251.89995,"median_ms":219.944318}],"host_available_before":187639808000,"resident_storage_bytes":1026912888,"resident_logical_bytes":2147483648,"disk_storage_bytes":0}
 Lead independent verification/final acceptance remains outstanding.
