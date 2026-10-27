@@ -358,4 +358,35 @@ actual GPU scans and payload audit. Producer SQL counters are reported with thei
 node names: GpuRange exposed4batches; GpuProject exposed no output-batch counter.
 Do not invent a final-wide batch count from the child counter. Lead read the full
 fixture/validation code; independent peer review is clear. Large scale cases have
-NOT yet run. Next step is the256MiB/task comparison, preserving the safety envelope.
+NOT yet run as of this implementation checkpoint. The following batch records actual scale results.
+
+## 256 MiB/task first scale checkpoint: IN PROGRESS
+
+MCP docker_exec only confirmed at worker resumption/checkpoint; source/build frozen
+at a4aead9cc2. No production or release classification changes. Two local slots,
+four partitions/two waves, 4,194,304 rows, 1 GiB total canonical logical data,
+1 GiB Java heap and 4 GiB RAPIDS-managed host cap, 4 GiB sampled RSS stop guard.
+
+Default/GPU producer: population completed in24564.578ms; all four partitions
+resident, representing all1GiB logical data in437697968BlockManager bytes,0disk.
+All six CPU full/narrow samples passed expected aggregates and actual CPU scans.
+Full first1740.541ms/warmed median1340.473ms; narrow first227.744ms/warmed91.204ms.
+FIRST GPU-enabled full read failed with Java heap space in
+DefaultCachedBatchSerializer.createAndDecompressColumn -> OnHeapColumnVector ->
+AbstractGpuCoalesceIterator. This was a bounded1GiB JVM heap failure, NOT host OOM
+or RSS guard. Whole-job sampled RSS peak2683441152B; process exited/GPUidle.
+No GPU-enabled read completed, and payload audit was not reached. Do not substitute
+serializer sizeInBytesStats for encoded payload. Preserve failure without tuning.
+
+Lead independently read stack/logs and reproduced result/row/partition/aggregate/
+phase/guard assertions with /data/tmp/verify-failed-default-scale.py. Evidence:
+ /data/tmp/cache-scale/256m/default-gpu/lead-verified-summary.json and original
+result/command/memory/source/provenance/logs. After review, independent PCBS/Vortex
+256MiB cases are authorized under unchanged limits; no default rerun or larger
+cases yet. Stop/review again on any new failure.
+
+Read-only versus population plus read evidence for the six original small-string
+cases is now in vortex-cache-results.md: first and warmed, full and narrow,
+CPU/GPU producers/consumers, actual reader, explicitly COMPUTED combined sums.
+Lead inspected source tables; no independent end-to-end combined claim.
+
