@@ -201,7 +201,7 @@ object DeltaSpark400DB173Provider extends DatabricksDeltaProviderBase {
     def pruneMetadataProject(
         project: GpuProjectExec,
         scan: GpuFileSourceScanExec): SparkPlan = {
-      project.copy(projectList = project.projectList.filterNot(_.name == "_metadata"))
+      project.withProjectList(project.projectList.filterNot(_.name == "_metadata"))
         .withNewChildren(Seq(
           scan.copy(
             originalOutput = scan.originalOutput.filterNot(_.name == "_tmp_metadata_row_index"),
@@ -474,7 +474,7 @@ private object DB173DVPredicatePushdown extends ShimPredicateHelper {
         case project @ ProjectExec(projectList, _) =>
           project.copy(projectList = projectList.filterNot(isDeletionVectorSkipRowColumnRef))
         case project @ GpuProjectExec(projectList, _, _) =>
-          project.copy(projectList = projectList.filterNot(isDeletionVectorSkipRowColumnRef))
+          project.withProjectList(projectList.filterNot(isDeletionVectorSkipRowColumnRef))
         case fsse: FileSourceScanExec =>
           fsse.copy(
             output = fsse.output.filterNot(attr => isDeletionVectorSkipRowColumn(attr.name)),
@@ -564,7 +564,8 @@ private object DB173DVPredicatePushdown extends ShimPredicateHelper {
         // identical projections: merging over an alias-computing child would drop the
         // alias's only producer ("Couldn't find <attr>"). Merge only pure pass-throughs.
         if (projSet1 == projSet2 && projList2.forall(_.isInstanceOf[AttributeReference])) {
-          GpuProjectExec(projList1, child, enablePreSplit1 && enablePreSplit2)
+          p.withProjectList(projList1, newChild = child,
+            preSplit = enablePreSplit1 && enablePreSplit2)
         } else {
           p
         }

@@ -107,7 +107,7 @@ class HashAggregatesSuite extends SparkQueryCompareTestSuite {
       forceSinglePassAgg = false,
       allowSinglePassAgg = true,
       allowNonFullyAggregatedOutput = false,
-      skipAggPassReductionRatio = Double.MaxValue)
+      skipAggPassReductionRatio = Double.MaxValue)()
 
     assert(aggregate.references.contains(inputAggBufferAttr))
   }
