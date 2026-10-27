@@ -388,5 +388,50 @@ cases yet. Stop/review again on any new failure.
 Read-only versus population plus read evidence for the six original small-string
 cases is now in vortex-cache-results.md: first and warmed, full and narrow,
 CPU/GPU producers/consumers, actual reader, explicitly COMPUTED combined sums.
-Lead inspected source tables; no independent end-to-end combined claim.
+Lead independently reproduced all24phase-table rows from original nanoseconds
+with /data/tmp/verify-first-phase-report.py; no independent end-to-end claim.
 
+## 256 MiB/task GPU cohort and accounting repair: READY FOR REVIEW
+
+PCBS/GPU and Vortex/GPU both passed all full/narrow CPU/GPU aggregates and audited
+rows, actual CPU/GPU cache plans and no CPU expression bridges. All use the identical
+fixed-wide1GiB logical input, two slots/four partitions and unchanged caps.
+Lead independently reran /data/tmp/verify-cache-scale.py against both raw results.
+
+| GPU producer | Payload B | Population ms | CPU full read warm median ms | GPU full read warm median ms | Whole-job sampled RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| PCBS |513454363|2689.563|5092.274|420.687|2537283584|
+| Vortex |489897376|6946.398|2736.383|10903.511|2756464640|
+
+PCBS retained768MiB logical data in385095928local memoryB and256MiB logical
+data only on disk (90851217B). Vortex retained768MiB logical in367427984memoryB
+and256MiB logical only on disk;223125668diskB ALSO includes a partition present
+in memory. Never sum overlapping memory/disk logical subsets. Default retained all
+logical data but failed its GPU-enabled read, as recorded above.
+
+Lead caught and fixed a material measurement error: storage_info mixed local
+BlockManager.getStatus blocks/logical subsets with getRDDStorageInfo byte totals.
+Vortex's aggregate244961864B lagged its actual local block sum367427984B.
+Decisive Spark3.5.5 source: BlockManager.getStatus reads memoryStore/diskStore;
+SparkContext.getRDDStorageInfo reads statusStore reports. Primary storage totals
+now sum the SAME sequential local-block observations; separate RDD metadata remains
+under rdd_reported_storage_info with an explicit lag caveat. This minimal tools-only
+repair changes no workload/serializer/timing. Source-only peer review clear; lead
+read the complete diff and reproduced corrected sums from original raw evidence.
+Original result files remain unchanged; lead-verified-summary.json derives corrected
+totals. This avoids mixing different metadata sources rather than claiming an
+atomic snapshot.
+
+Lead's independent CPU-producer Default256 case exercised the corrected function:
+all1GiB logical/437697968memoryB resident,0disk; counters match block sums. CPU
+full first1684.012/warm1421.167ms; narrow181.940/82.148ms; population21521.448ms.
+Its FIRST GPU full read also failed with the same Java heap stack; no GPU sample
+or payload audit. Whole-job RSS2521595904B, below guard; process exited. No caps
+were raised. Evidence /data/tmp/cache-scale/256m/default-cpu; independently verified
+with /data/tmp/verify-failed-default-scale.py. Broader Default GPU-enabled scale
+cases are parked after these controlled failures; this does not establish failure
+for CPU-only execution at larger sizes.
+
+PCBS/Vortex CPU-producer256 cases are the next bounded batch, IN PROGRESS. Still
+MCP-only; no concurrent GPU jobs, source/build frozen, stop/review on failure.
+No512MiB/task or larger case has run at this checkpoint.

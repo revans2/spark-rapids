@@ -146,17 +146,30 @@ def local_blocks(spark, rdd_id, partition_sizes):
 
 
 def storage_info(spark, rdd_id, partition_sizes):
+    """Keep local block accounting consistent; retain the separate RDD report as evidence."""
     blocks = local_blocks(spark, rdd_id, partition_sizes)
+    result = {
+        'rdd_id': rdd_id,
+        'resident_storage_bytes': sum(block['resident_bytes'] for block in blocks['blocks']),
+        'disk_storage_bytes': sum(block['disk_bytes'] for block in blocks['blocks']),
+        'cached_partitions': sum(block['resident_bytes'] > 0 or block['disk_bytes'] > 0
+                                 for block in blocks['blocks']),
+        'total_partitions': len(partition_sizes),
+        'rdd_reported_storage_info': None,
+        'rdd_reported_storage_info_caveat':
+            'Separate getRDDStorageInfo observation; its counters may lag local block status. '
+            'Primary bytes, cached partitions and logical subsets all use the same sequential '
+            'local block observations, not these separately reported counters.',
+        **blocks}
     infos = spark.sparkContext._jsc.sc().getRDDStorageInfo()
     for info in infos:
         if info.id() == rdd_id:
-            return {'rdd_id': rdd_id, 'resident_storage_bytes': info.memSize(),
-                    'disk_storage_bytes': info.diskSize(),
-                    'cached_partitions': info.numCachedPartitions(),
-                    'total_partitions': info.numPartitions(),
-                    'storage_level': info.storageLevel().description(), **blocks}
-    return {'rdd_id': rdd_id, 'resident_storage_bytes': 0, 'disk_storage_bytes': 0,
-            'cached_partitions': 0, 'total_partitions': None, **blocks}
+            result['rdd_reported_storage_info'] = {
+                'resident_storage_bytes': info.memSize(), 'disk_storage_bytes': info.diskSize(),
+                'cached_partitions': info.numCachedPartitions(), 'total_partitions': info.numPartitions(),
+                'storage_level': info.storageLevel().description()}
+            break
+    return result
 
 
 def heap(spark):
