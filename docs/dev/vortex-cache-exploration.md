@@ -505,3 +505,65 @@ Next bounded cohort is PCBS/GPU then Vortex/GPU1024MiB/task,4GiB logical total,
 unchanged budgets/300s timeout, IN PROGRESS. MCP-only confirmed at handoff and
 checkpoint; source remains frozen. No2GiB/task case or larger CPU producer run
 yet. Any new failure/guard/timeout stops the batch before a larger test.
+
+## 1 GiB/task original-record cohort and heap investigation: READY FOR REVIEW
+
+PCBS/GPU PASS at16777216rows/4GiB logical total, original8MiB-record Vortex
+comparison build and same source/caps/concurrency. Payload2053789695B/560records;
+population7070.628ms; CPU full warmed21635.687ms/GPU full1371.336ms.
+All4partitions are Spark-disk-only:1453409220diskB,0resident bytes/logical data.
+Whole-job RSS3429646336B. Lead independently verified all14snapshots, full/narrow
+CPU/GPU aggregates/plans/audit/guard with verify-cache-scale.py. Warmed file reads
+may benefit from OS page cache; these are not cold physical-disk IO measurements.
+
+Original Vortex/GPU at1GiB/task: population completed27066.909ms, all4logicalGiB
+on Spark disk (1783189437B),0resident. FIRST CPU full-read warmup FAILED with
+Java heap space at Arrays.copyOf -> VortexIpcCodec.Sink.reserve -> writeIpc ->
+Decoder.next -> cpuRows. Exit52; reads=[], no read timing or audited payload.
+RSS2379546624B, below guard, no host OOM or timeout. Original source/provenance/
+logs preserved in /data/tmp/cache-scale/1024m/vortex-gpu. Lead independently read
+the stack and reproduced assertions with verify-vortex-failed-scale.py. All owned
+processes exited. No cap increases or repeated failing case; batch stopped.
+
+Read-only worker investigation and lead decisive-code reading found:
+- Spark JavaSerializationStream resets ObjectOutputStream every100outer objects;
+  ObjectInputStream.readObject retains its handle table between resets. Both
+  VortexCacheRecord and ParquetCachedBatch are plain case classes strongly owning
+  byte arrays. This is a shared retention risk, not a Vortex-format-specific leak.
+- BlockManager.maybeCacheDiskValuesInMemory eagerly tries putIteratorAsValues.
+  On failure, PartiallyUnrolledIterator retains its vector until prefix exhaustion.
+  Logs before failure show412.7MiB and62.1MiB estimated concurrent prefixes.
+  These are estimates, and prefix/handle references can overlap: do NOT add them
+  as independent heap allocations. No heap dump establishes exact attribution.
+- No growing IPC-list/listener chain found in corrected CPU iterator. Its current
+  reader/decoder/pending arrays are cleared; IPC sink growth/finalization still
+  overlaps temporary Java arrays. Failure at allocation is not proof oversized unit.
+- Custom writeUnshared(array) alone would not remove outer-record handle ownership.
+  Mutating encoded cache bytes during decode would corrupt reusable/shared caches.
+  ObjectStreamReset/storage-level overrides are diagnostics/workarounds, not the
+  out-of-box design requested, so none were applied.
+
+## Smaller internal Vortex units: IN PROGRESS, isolated experiment
+
+Within the existing exploratory scope, change only the UNRELEASED prototype's
+internal target8MiB ->1MiB plus a plain-purpose comment. No production/config/
+API/shim/native changes; released PCBS/default contracts stay preserved. This is
+a mitigation experiment, not a claim of universal OOM safety or proven root cause.
+Original8MiB build remains untouched at /data/tmp/vortex-spark-prototype.
+
+New isolated /data/tmp/vortex-spark-prototype-1m build PASS; appSHA
+cdb79de3114e7cf1864e020b06831e90d21a4820f03229220cbe8363a5695ab4,
+original app78e04232b44e4a0569eb024ec0d911649719c560808c9bc457bceabe1f5f8824.
+Source/build-isolation peer review clear. Lead independently read the complete diff
+and verified BOTH full runtime closures, identical parent dependencies/native,
+and unchanged original app with /data/tmp/verify-vortex-build-variants.py.
+Worker also verified original29filetree byte-for-byte unchanged. Build needed
+modern sandbox Python instead of system3.6 for existing text=True; no environment
+or build-script changes were made. Source/build now frozen.
+
+Next ONLY runtime check is GPU-producer/CPU-consumer1GiB/task using NEWbuild-dir,
+same heap1g/managed4g/RSSguard4GiB/timeout300,2slots/4parts,warmup1/repeats2/audit:
+ /data/tmp/cache-scale-1m/1024m/vortex-gpu-cpu-only.
+MCP-only confirmed at every handoff/review/checkpoint. GPU consumption of this
+variant is unmeasured. Original failed8MiB result and its comparators remain
+separately labeled. No2GiB/task test has run; no larger-size step before review.
