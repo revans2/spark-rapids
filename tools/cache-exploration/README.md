@@ -170,19 +170,21 @@ building the prototype. The Vortex prototype is local Spark3.5.5-only and curren
 supports int/long/string. Its CPU row route differs from vectorized default/PCBS
 consumption; do not present its timings as the format's intrinsic limit.
 
-The launcher uses1GiB Java heap,4GiB RAPIDS-managed host cap and2task slots by default.
-The managed cap excludes Arrow/Rust. A sampled4GiB process-tree RSS guard and timeout
-stop conservative experiments; no machine-exhaustion search is authorized. Startup,
-reference and optional payload-audit work are included in whole-job memory samples.
-Payload audit runs AFTER timing/storage snapshots because it can recompute blocks.
+The launcher's conservative defaults remain a 1 GiB heap and a 4 GiB RSS guard.
+The user-selected primary baseline explicitly uses a 16 GiB heap, a 4 GiB
+RAPIDS-managed host cap and a 32 GiB sampled RSS early-stop guard. Arrow/Rust
+allocations are outside the managed cap; the RSS guard is reactive, not an OS limit.
+Earlier constrained-budget runs are reported separately. No machine-exhaustion
+search is authorized. Whole-job samples include startup, reference actions and
+the optional payload audit, which runs after timing/storage snapshots.
 
 ```text
-python tools/cache-exploration/run_spark.py --format pcbs --write-mode gpu \\
-  --read-modes cpu,gpu --fixture fixed-wide --task-size-mib 256 \\
-  --tasks 2 --partitions 4 --warmups 1 --repeats 2 --payload-audit \\
-  --output-dir /data/tmp/pcbs-256m-per-task
+python tools/cache-exploration/run_spark.py --format pcbs --write-mode gpu \
+  --read-modes cpu,gpu --fixture fixed-wide --task-size-mib 256 \
+  --tasks 2 --partitions 4 --heap 16g --offheap-limit 4g \
+  --rss-abort-bytes 34359738368 --warmups 1 --repeats 2 --payload-audit \
+  --output-dir /data/tmp/cache-main-16g/256m/pcbs-gpu
 ```
-
 Approved scale choices are256,512,1024,2048MiB logical data per task, using exactly
 two waves. The32-field fixed-wide fixture has a256B/row standardized estimate and
 streamed generation. It mixes monotonic, low-cardinality and hashed longs with nulls;

@@ -46,10 +46,17 @@ Run every project operation through MCP docker_exec.
 python tools/cache-exploration/spark/build.py \
   --vortex-classpath /data/tmp/vortex-java-runtime-classpath.txt \
   --native-lib /data/vortex/target/release/libvortex_jni.so \
-  --cudf-jar /home/roberte/.m2/repository/com/nvidia/cudf-spark-jni/26.12.0-SNAPSHOT/cudf-spark-jni-26.12.0-SNAPSHOT-cuda12.jar
+  --cudf-jar /home/roberte/.m2/repository/com/nvidia/cudf-spark-jni/26.12.0-SNAPSHOT/cudf-spark-jni-26.12.0-SNAPSHOT-cuda12.jar \
+  --build-dir /data/tmp/vortex-spark-prototype-rebuild
 ```
 
-Build output defaults to /data/tmp/vortex-spark-prototype. The build writes the
+Current source uses the original 8 MiB estimated record target. The measured build
+remains unchanged under `/data/tmp/vortex-spark-prototype`; use a separate output
+directory for rebuilds. An isolated 1 MiB-target trial under
+`/data/tmp/vortex-spark-prototype-1m` hit the earlier constrained 4 GiB RSS guard;
+its source is archived there. It is not the primary benchmark build, and the
+guard stop is not evidence of host OOM or a normal-host memory failure.
+The build writes the
 experiment jar and `plugin-jars.txt`, the comma-separated native/private/raw
 plugin dependencies for Spark submission. Use the current raw Spark355 module
 jars, including UDF and Delta probe modules needed by plugin startup. Artifact

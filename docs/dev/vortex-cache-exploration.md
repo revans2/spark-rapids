@@ -1,8 +1,11 @@
 # Vortex cache exploration
 
-Status: agreed measurement plan ACTIVE. Initial source investigation and GPU codec
-bridge READY FOR REVIEW; real PCBS/default-Spark baselines and CPU/GPU matrix remain
-in progress. Only the architect marks work DONE. Updated 2026-10-27.
+Status: primary comparison ACTIVE with USER-SELECTED16GiB JVM heap,4GiB RAPIDS-managed
+host cap and32GiB sampled RSS early-stop guard. Earlier1GiB-heap/RSS4GiB runs are
+constrained-budget appendix evidence, NOT the primary normal-host baseline.
+Main report: vortex-cache-results.md; old detailed tables moved to
+vortex-cache-constrained-results.md. Historical report references below predate
+that move. Only the architect marks work DONE. Updated2026-10-27.
 AI-assisted work; no production implementation changes or PR publication.
 
 ## Scope, operating rules and accepted decision criteria
@@ -566,4 +569,64 @@ same heap1g/managed4g/RSSguard4GiB/timeout300,2slots/4parts,warmup1/repeats2/aud
  /data/tmp/cache-scale-1m/1024m/vortex-gpu-cpu-only.
 MCP-only confirmed at every handoff/review/checkpoint. GPU consumption of this
 variant is unmeasured. Original failed8MiB result and its comparators remain
-separately labeled. No2GiB/task test has run; no larger-size step before review.
+separately labeled. No2GiB/task test had run at this checkpoint.
+
+## User correction and primary host-memory baseline: ACTIVE
+
+The user challenged whether our constrained envelope was creating the memory
+problem and noted substantial host RAM. That concern is valid: a4GiB RSS guard
+can stop legitimate JVM+plugin+Arrow/Rust use; it is not evidence of host OOM,
+native leak or an inherently unsuitable format. Lead moved too quickly from the
+constrained result to a record-size fix. Do not promote that inference.
+
+Isolated1MiB trial was ABORTED by our RSS guard at123.549s:
+RSS4473876480B/PSS4465615872B >4294967296threshold. memory.json records RSS_GUARD;
+command.json records ABORTED. No result.json: all completed timings/read checks/
+audit and exact active read iteration unverified. Lead independently read samples/
+logs and checked owned processes gone. No cap increases or reruns of that case.
+Trial source archived in /data/tmp/vortex-spark-prototype-1m; experimental source
+constant restored8MiB, no failed mitigation promoted. Old artifact tree unchanged.
+
+The user EXPLICITLY selected16GiB JVM heap for the PRIMARY comparison (async reply).
+Keep4GiB RAPIDS-managed host cap; use an explicit32GiB sampled RSS guard with
+conservative data/concurrency and no machine-exhaustion testing. Host MemTotal
+197679172KiB / MemAvailable183416320KiB observed before cohort. The guard is
+reactive, not an OS memory limit; Arrow/Rust remain outside the plugin cap.
+This is a separately authorized baseline, not retroactively raising limits to
+erase failures. All old negative evidence remains in constrained-results appendix.
+Further old-budget runs and record-size optimization are stopped.
+
+Minimal tools-only launcher change permits explicit --heap16g and guard<=32GiB;
+defaults1g/4GiB stay unchanged. Manifest reports actual configured guard and
+sampling limitations. Kill logic/data/task limits unchanged. Lead read entire
+diff; peer review clear; worker parser boundary tests pass. First actual new run
+independently verified16GiB heap max,32GiBguard,4gmanaged and original app SHA.
+Source/prototype remains original8MiB-target build78e042...; no native/prod/shim
+changes or compatibility scaffolding.
+
+PRIMARY256MiB/task Default/GPU PASS at1GiB logicaltotal: population23012.288ms,
+payload435890015B/420records; all four partitions memory resident437697968B,
+0disk. CPUfullwarm1524.406ms/GPU-enabledfull1170.159ms; actual defaultcache
+decoder remains CPU followed by HostColumnarToGpu/GpuHashAggregate. Whole-job
+sampled RSS5122056192B. Prior constrained GPU-read failure did not recur under
+this budget, which confirms that result was resource-envelope-specific.
+Lead independently ran verify-cache-scale.py with explicit main16g budget checks,
+all14local storage snapshots/aggregates/plans/audit and actual application SHA.
+Evidence /data/tmp/cache-main-16g/256m/default-gpu. PCBS/Vortex GPU producers
+same256MiB task size now in progress, serial; no higher main-size case yet.
+
+Encoding question: tested default adaptive Vortex choices against actualPCBS
+CPU/GPU and defaultSpark formats, NOT forced Vortex alternate encodings.
+Lead read nativeWriter.createStream -> session.write_options -> Rust default
+WriteStrategyBuilder/BtrBlocks path. Java/JNI exposes storage options/footer
+metadata, not encoding strategies. Rust supports alternate compressor/field
+strategies, requiring an explicit experimental binding extension to compare them.
+Default adaptive selector evaluates compression ratio, not measured decode speed.
+Actual per-column winners have not been audited; do not claim a forced codec or
+invent Java encoding flags. Encoding variation is a recorded gap; finish the
+representative resource baseline before deciding whether that extension is useful.
+
+MCP-only confirmed at user-steered handoff, launcher review and every worker
+checkpoint. Main budgets stay fixed; failure/guard/timeout stops for review.
+Next main GPU-producer256cohort uses /data/tmp/cache-main-16g and default timeout300;
+larger task sizes remain subject to lower-size footprint review.

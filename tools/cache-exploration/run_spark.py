@@ -72,11 +72,12 @@ def main():
     parser.add_argument('--warmups', type=int, default=2)
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--tasks', type=int, default=2)
-    parser.add_argument('--heap', choices=['512m', '1g', '2g'], default='1g')
+    parser.add_argument('--heap', choices=['512m', '1g', '2g', '16g'], default='1g',
+                        help='Explicit JVM heap budget; default 1g, primary benchmark baseline 16g')
     parser.add_argument('--offheap-limit', choices=['256m', '512m', '1g', '2g', '4g'], default='4g',
                         help='RAPIDS-managed host off-heap cap; excludes Arrow/Rust allocations')
     parser.add_argument('--rss-abort-bytes', type=int, default=4 * 1024 ** 3,
-                        help='Sampled early-stop guard; may be lowered, maximum 4 GiB')
+                        help='Sampled early-stop guard in bytes; default 4 GiB, maximum 32 GiB')
     parser.add_argument('--measure-memory', action='store_true',
                         help='Sample whole-job heap/RSS/PSS/GPU; collection overhead affects timings')
     parser.add_argument('--storage', choices=['dataframe-default', 'serialized-memory-and-disk',
@@ -88,8 +89,8 @@ def main():
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--timeout', type=float, default=300)
     args = parser.parse_args()
-    if args.rss_abort_bytes < 1 or args.rss_abort_bytes > 4 * 1024 ** 3:
-        parser.error('RSS guard must be positive and no greater than 4 GiB')
+    if args.rss_abort_bytes < 1 or args.rss_abort_bytes > 32 * 1024 ** 3:
+        parser.error('RSS guard must be positive and no greater than 32 GiB')
     if args.tasks < 1 or args.tasks > 4 or args.timeout <= 0:
         parser.error('tasks must be 1..4 and timeout positive')
     if args.task_size_mib is not None:
@@ -159,8 +160,9 @@ def main():
                 'memory_instrumented': args.measure_memory,
                 'scope': 'One fresh local JVM/cache; population is cold, reuse has explicit warmups. '
                          'JVM heap and RAPIDS-managed host memory are capped; Arrow/Rust are outside '
-                         'the plugin cap. Conservative dataset/concurrency bounds and a sampled '
-                         '4 GiB process-tree RSS abort guard avoid host exhaustion tests.'}
+                         'the plugin cap. Dataset/concurrency bounds apply independently. A sampled '
+                         f'{args.rss_abort_bytes} byte process-tree RSS early-stop guard monitors this '
+                         'experiment; samples may miss brief peaks.'}
     (args.output_dir / 'command.json').write_text(json.dumps(manifest, indent=2) + '\n')
     with (args.output_dir / 'stdout.txt').open('w') as stdout, \
             (args.output_dir / 'stderr.txt').open('w') as stderr:
