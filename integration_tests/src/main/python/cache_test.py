@@ -297,11 +297,15 @@ def test_cache_project_partitioning(aqe_enabled):
     def query(spark):
         cached = (spark.range(0, 100, 1, 16).selectExpr('id % 10 AS k', 'id AS v')
             .persist(StorageLevel.MEMORY_AND_DISK))
-        return cached.groupBy('k').agg(f.max('v').alias('max_v')).orderBy('k')
+        try:
+            return cached.groupBy('k').agg(f.max('v').alias('max_v')).orderBy('k').collect()
+        finally:
+            cached.unpersist(blocking=True)
 
-    assert_gpu_and_cpu_are_equal_collect(query, conf={
+    conf = {
         'spark.sql.adaptive.enabled': aqe_enabled,
-        'spark.sql.shuffle.partitions': '4'})
+        'spark.sql.shuffle.partitions': '4'}
+    assert_equal(with_cpu_session(query, conf), with_gpu_session(query, conf))
 
 
 @pytest.mark.parametrize('data_gen', all_gen, ids=idfn)
