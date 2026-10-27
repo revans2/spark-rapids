@@ -789,5 +789,66 @@ cross-product performance coverage from CPU-only runs.
 
 MCP-only confirmed each runtime checkpoint; no source/build changes while current
 comparative cohort runs. Finish currentVortexcase and reviewfootprint before
-next boundedCPUseries. No extraencodingpolicy/batch-size optimization authorized
+next boundedCPUseries.
+
+## PRIMARY GPU-producer matrix complete: READY FOR REVIEW
+
+All12mainGPU-producer cases (3formats x256/512/1024/2048MiB/task) PASS under
+16GiBheap/4gmanaged/32GiBreactiveRSSguard/2slots4parts, original8MiB Vortexapp.
+At2GiB/task all8GiB logicaldata resident/no disk in every14snapshot set.
+
+| Format | Payload B | Population ms | CPU full warm ms | GPU-enabled full warm ms | Whole-job RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Default |3487118351|321273.290|10094.548|7645.673|19117694976|
+| PCBS |4107649355|9738.901|42574.593|1578.360|9637453824|
+| Vortex |3919838784|41934.176|26639.627|178680.817|14475481088|
+
+Lead independently verified Vortexfinalrawcase/progress and allGPUcase reports
+using verify-cache-scale.py/verify-cache-progress.py/verify-primary-report.py
+25651210242048 (48first/warm/full/narrowphase rows pluscomputedtotals).
+LargestRSS19.12GB below32GiBguard; no normal-budgetOOM/guard stops. Default321s
+population capbackpressure explicitly included in primaryreport, not framed as
+intrinsicformatcost. GPU-scan labels clarified codecCPU forVortex/Default versus
+GPUParquet forPCBS. Newreport includesgeneration/transfer/cachematerialization
+in population definition. No full-liveness/native-working-memory census.
+
+ActualdecodedIPC/GPUoutputbatchcounts still UNVERIFIED. Read-only SparkUI REST
+discovery confirmedAPI exists, but GET localhost4040 returnedConnectionRefused
+after thebenchmarkfinished. No retries/portscans/newqueries/profiling/GC or added
+runtime jobs. Do not substitute1024outerrecords for IPCbatches or claim a proven
+GPUbottleneck without phaseprofiling.
+
+## PRIMARY CPU-only256/512MiB-task cohorts: READY FOR REVIEW
+
+All6cases PASS, pluginloaded but GPU SQLdisabled throughout population/ALLreads;
+actualCPUproducer/CPUreadplans, same originalapp/data/budgets/concurrency.
+Lead independently verified7progress events/8localstorage snapshots percase,
+all32-fieldaggregates/auditcounts, exactdata/logicalsize vsGPU-producerreference,
+actual16GiBheap/32GiBguard/4gcap and Sparkpluginloaded/SQLfalse.
+
+| Task MiB | Format | Payload B | Population ms | CPU full warm ms | Whole-job RSS B |
+| --- | --- | ---: | ---: | ---: | ---: |
+|256|Default|435890015|20019.692|1469.287|2120806400|
+|256|PCBS|735262340|12673.226|5561.717|5190844416|
+|256|Vortex|489848544|6278.025|2714.931|4223963136|
+|512|Default|871780099|38603.799|2857.102|3100147712|
+|512|PCBS|1470493190|23495.837|10611.852|6050312192|
+|512|Vortex|979576576|12091.614|5183.774|5709697024|
+
+Alllogicaldata resident/no disk atbothsizes; reportcacheaccounting separate from
+payload/RSS. CPUwriterPCBS payload differs materially fromGPUwriter; never reuse
+a GPU-producerencoded-size row for CPUproduction. Population and CPUfirst/warm/
+full/narrow/computedcombined tables generated via append-cpu-cohort.py and
+independently reproduced via verify-cpu-primary-report.py256512 (12phase rows).
+Independent worker review CPU256/2GiBcapqualification clear, no material findings.
+CPU-only here means SQLexecution, not proofprocessneverinitializesGPUhardware.
+
+CPU1GiB/taskcohort IN PROGRESS after512footprintreview(maxRSS6.05GB<32GiB).
+Sameprofile exceptpreselectedtimeout600; no memorycap/repeat/operator changes.
+DefaultCPU1GiBPASS independentlyverified:4GiBlogicalresident,0disk,
+payload1743560044B,population82457.703ms,RSS4000350208B.
+PCBS/VortexCPU1GiB pending, CPU2GiB notrun. MCP-only confirmed everyhandoff/
+checkpoint; no parallelbenchmarks/builds/sourcechanges. PrimaryCPU-produced→
+GPU-consumed performance, alternateforcedencodings and unsupported-type Vortex
+fallback remainexplicit gaps, not silently covered by CPU-only timings. No extraencodingpolicy/batch-size optimization authorized
 as a substitute for completing these baseline measurements.

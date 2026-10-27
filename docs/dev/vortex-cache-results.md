@@ -1,6 +1,8 @@
 # Spark cache comparison: 16 GiB JVM heap
 
-Status: IN PROGRESS. The user selected a 16 GiB JVM heap for the primary comparison.
+Status: IN PROGRESS. GPU-produced caches are verified at all four task sizes.
+CPU-only SQL execution is verified at 256 and 512 MiB/task; larger CPU cases are
+in progress. The user selected a 16 GiB JVM heap for the primary comparison.
 Earlier 1 GiB-heap runs are [constrained-memory experiments](vortex-cache-constrained-results.md),
 not the normal-host baseline. No production serializer changes are proposed.
 
@@ -26,7 +28,9 @@ encoding strategies; no forced-encoding comparison has been performed. The isola
 1 MiB-record trial hit its 4 GiB RSS guard under the earlier constrained envelope;
 that stop does not establish a memory problem on this host.
 
-Population, first-for-mode/projection reads and warmed read medians will be reported
+Population includes generating the deterministic projected input, encoding,
+transfers and cache materialization; it is not isolated codec throughput.
+Population, first-for-mode/projection reads and warmed read medians are reported
 separately. Warmed medians use two samples after one warmup. CPU reads precede GPU
 reads on the same stored data; first GPU is not a globally cold read. Full reads
 consume all fields; narrow reads select ID. Population-plus-read columns are
@@ -54,7 +58,8 @@ read passed the expected aggregates and actual cache-reader plan checks.
 These are preliminary results from one population sample and two measured reads
 after one warmup for each mode/projection.
 
-CPU-producer cases with the 16 GiB heap are pending; later sections cover larger GPU-producer cases.
+CPU-only producer results are reported separately below. These GPU-produced
+measurements do not cover GPU consumption of CPU-produced caches.
 The constrained-budget failures remain separate historical evidence; Default's
 earlier GPU-enabled read failure did not recur in this primary case.
 
@@ -138,7 +143,7 @@ and **2048 MiB total**, four partitions and two task slots/two waves.
 The primary settings remain a 16 GiB heap, 4 GiB RAPIDS-managed host cap and
 32 GiB reactive RSS guard, using the original 8 MiB Vortex outer target.
 Every full/narrow CPU/GPU read passed expected aggregates and actual-reader checks.
-CPU producers at this size are unmeasured. Population is one fresh-job sample;
+CPU-only producer results are reported separately below. Population is one fresh-job sample;
 warmed read medians use two samples after one warmup, so results are preliminary.
 
 ### Storage and process footprint
@@ -276,3 +281,210 @@ raw results, command/provenance snapshots, lead summaries, memory records and lo
 The lead independently verified budgets, all14 storage snapshots, aggregate and
 reader checks, audit counts and sampled RSS before report generation. Numerical
 phase tables are reproduced from original nanoseconds and independently checked.
+
+## Fixed-wide: 2 GiB logical per task, GPU producers
+
+All three GPU-producer cases **PASS** with **2048 MiB logical per task**
+and **8192 MiB total**, four partitions and two task slots/two waves.
+The primary settings remain a 16 GiB heap, 4 GiB RAPIDS-managed host cap and
+32 GiB reactive RSS guard, using the original 8 MiB Vortex outer target.
+Every full/narrow CPU/GPU read passed expected aggregates and actual-reader checks.
+CPU producers at this size are unmeasured. Population is one fresh-job sample;
+warmed read medians use two samples after one warmup, so results are preliminary.
+
+### Storage and process footprint
+
+| Format / GPU producer | Audited payload B | Records | Resident storage B | Logical resident MiB | Disk storage B | Sampled whole-job peak RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Default | 3,487,118,351 | 3356 | 3,335,300,728 | 8192 | 0 | 19,117,694,976 |
+| PCBS | 4,107,649,355 | 1124 | 4,107,702,824 | 8192 | 0 | 9,637,453,824 |
+| Vortex | 3,919,838,784 | 1024 | 3,919,883,904 | 8192 | 0 | 14,475,481,088 |
+
+All fourteen storage observations per format have unchanged totals: every row
+is resident, with no disk-only data or overlap. Storage-accounted bytes and logical
+subsets use the same local block inventory. The post-run audit covers all rows;
+its payload lengths are separate from BlockManager accounting. RSS includes
+startup, reference actions and audit, may miss peaks and is not live-native or
+temporary-memory accounting. This observed fit does not prove maximum capacity.
+
+### Population
+
+| Format / GPU producer | Population ms |
+| --- | ---: |
+| Default | 321273.290 |
+| PCBS | 9738.901 |
+| Vortex | 41934.176 |
+
+At this size, Default logged roughly 2 GiB host allocation requests while more
+than 2 GiB was already tracked, exceeding the fixed 4 GiB managed-host cap.
+Its population time includes that backpressure; it is not pure encoding throughput.
+A larger managed-host-cap control has not been run. This observation is specific
+to this input plan, concurrency and memory budget.
+
+### Read-only reuse and computed phase combinations
+
+First means the recorded warmup for the mode/projection; warmed is the median
+of the two following samples. CPU precedes GPU on the same cache, so first GPU
+is not globally cold. Default uses a CPU cache decoder before GPU conversion
+and aggregation; PCBS/Vortex use GPU cache scans for GPU-enabled queries.
+
+#### Full all-column read
+
+| Format / GPU producer | Consumer (cache reader) | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Default | CPU (CPU) | 10549.895 | 10094.548 | 331823.186 | 331367.839 |
+| Default | GPU-enabled (CPU cache decoder) | 8314.751 | 7645.673 | 329588.041 | 328918.963 |
+| PCBS | CPU (CPU) | 43258.512 | 42574.593 | 52997.414 | 52313.494 |
+| PCBS | GPU (GPU) | 2028.247 | 1578.360 | 11767.148 | 11317.261 |
+| Vortex | CPU (CPU) | 27505.363 | 26639.627 | 69439.539 | 68573.803 |
+| Vortex | GPU (GPU) | 167244.530 | 178680.817 | 209178.707 | 220614.993 |
+
+#### Narrow ID-only read
+
+| Format / GPU producer | Consumer (cache reader) | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Default | CPU (CPU) | 524.236 | 272.122 | 321797.526 | 321545.413 |
+| Default | GPU-enabled (CPU cache decoder) | 795.157 | 538.411 | 322068.448 | 321811.702 |
+| PCBS | CPU (CPU) | 33077.265 | 33031.808 | 42816.166 | 42770.709 |
+| PCBS | GPU (GPU) | 717.382 | 765.077 | 10456.283 | 10503.979 |
+| Vortex | CPU (CPU) | 2096.451 | 1848.183 | 44030.627 | 43782.359 |
+| Vortex | GPU (GPU) | 7745.977 | 7130.814 | 49680.153 | 49064.990 |
+
+Combined columns are computed additions of measured phases, not independently
+measured end-to-end jobs. Full queries consume all fields; narrow queries select ID.
+Vortex uses default adaptive encoding choices only. The CPU row-output and GPU
+IPC routes are prototype implementation choices, not intrinsic format limits.
+
+Evidence: /data/tmp/cache-main-16g/2048m/{default-gpu,pcbs-gpu,vortex-gpu}/
+raw results, command/provenance snapshots, lead summaries, memory records and logs.
+The lead independently verified budgets, all14 storage snapshots, aggregate and
+reader checks, audit counts and sampled RSS before report generation. Numerical
+phase tables are reproduced from original nanoseconds and independently checked.
+
+## Fixed-wide: 256 MiB logical per task, CPU-only SQL execution
+
+All three **CPU-produced / CPU-consumed** cases PASS at 256 MiB
+logical data per task, 1024 MiB total, four partitions and two local
+task slots/two waves. GPU SQL execution is disabled throughout population and
+all timed queries. The RAPIDS plugin remains loaded for the configured-off
+scenario; this is not a claim that the process has no GPU initialization.
+Resources are unchanged: 16 GiB JVM heap, 4 GiB RAPIDS-managed host cap and
+32 GiB sampled RSS guard. Vortex uses the original 8 MiB outer target.
+Population has one sample; each full/narrow read has one warmup and two samples.
+
+### Storage and process footprint
+
+| Format / CPU producer | Audited payload B | Records | Resident storage B | Logical resident MiB | Disk storage B | Sampled whole-job peak RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Default | 435,890,015 | 420 | 437,697,968 | 1024 | 0 | 2,120,806,400 |
+| PCBS | 735,262,340 | 136 | 735,268,848 | 1024 | 0 | 5,190,844,416 |
+| Vortex | 489,848,544 | 136 | 489,854,608 | 1024 | 0 | 4,223,963,136 |
+
+All eight storage observations per case agree: every row is resident and disk
+storage is zero. Resident storage bytes are Spark accounting estimates; payload
+lengths are actual audited arrays, and RSS is a sampled whole-job footprint.
+The audit follows timing/storage observations and covers all rows. These are
+observed fits, not maximum capacities or isolated working-memory measurements.
+
+### Population
+
+| Format / CPU producer | Population ms |
+| --- | ---: |
+| Default | 20019.692 |
+| PCBS | 12673.226 |
+| Vortex | 6278.025 |
+
+### CPU read-only reuse and computed phase combinations
+
+First is the warmup for that projection; warmed is the median of two following
+samples. Full queries consume all fields; narrow queries select ID only.
+
+#### Full all-column read
+
+| Format / CPU producer | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | ---: | ---: | ---: | ---: |
+| Default | 1705.744 | 1469.287 | 21725.436 | 21488.979 |
+| PCBS | 5925.487 | 5561.717 | 18598.714 | 18234.943 |
+| Vortex | 2909.689 | 2714.931 | 9187.714 | 8992.956 |
+
+#### Narrow ID-only read
+
+| Format / CPU producer | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | ---: | ---: | ---: | ---: |
+| Default | 193.505 | 81.404 | 20213.197 | 20101.096 |
+| PCBS | 4237.744 | 4211.434 | 16910.971 | 16884.661 |
+| Vortex | 266.162 | 274.580 | 6544.187 | 6552.605 |
+
+Combined columns are computed additions of measured phases, not independently
+measured end-to-end runs. These cases do not measure GPU consumption of
+CPU-produced caches. CPU and GPU PCBS writers can produce different payloads;
+compare the producer labels rather than assuming identical encoded data.
+
+Evidence: /data/tmp/cache-main-16g/256m/{default-cpu-only,pcbs-cpu-only,vortex-cpu-only}/
+raw results, source/artifact manifests, lead summaries, progress and memory logs.
+All aggregates, CPU producer/reader plans, budgets, storage snapshots and audited
+counts were independently checked before these preliminary tables were generated.
+
+## Fixed-wide: 512 MiB logical per task, CPU-only SQL execution
+
+All three **CPU-produced / CPU-consumed** cases PASS at 512 MiB
+logical data per task, 2048 MiB total, four partitions and two local
+task slots/two waves. GPU SQL execution is disabled throughout population and
+all timed queries. The RAPIDS plugin remains loaded for the configured-off
+scenario; this is not a claim that the process has no GPU initialization.
+Resources are unchanged: 16 GiB JVM heap, 4 GiB RAPIDS-managed host cap and
+32 GiB sampled RSS guard. Vortex uses the original 8 MiB outer target.
+Population has one sample; each full/narrow read has one warmup and two samples.
+
+### Storage and process footprint
+
+| Format / CPU producer | Audited payload B | Records | Resident storage B | Logical resident MiB | Disk storage B | Sampled whole-job peak RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Default | 871,780,099 | 840 | 875,395,032 | 2048 | 0 | 3,100,147,712 |
+| PCBS | 1,470,493,190 | 268 | 1,470,505,992 | 2048 | 0 | 6,050,312,192 |
+| Vortex | 979,576,576 | 268 | 979,588,464 | 2048 | 0 | 5,709,697,024 |
+
+All eight storage observations per case agree: every row is resident and disk
+storage is zero. Resident storage bytes are Spark accounting estimates; payload
+lengths are actual audited arrays, and RSS is a sampled whole-job footprint.
+The audit follows timing/storage observations and covers all rows. These are
+observed fits, not maximum capacities or isolated working-memory measurements.
+
+### Population
+
+| Format / CPU producer | Population ms |
+| --- | ---: |
+| Default | 38603.799 |
+| PCBS | 23495.837 |
+| Vortex | 12091.614 |
+
+### CPU read-only reuse and computed phase combinations
+
+First is the warmup for that projection; warmed is the median of two following
+samples. Full queries consume all fields; narrow queries select ID only.
+
+#### Full all-column read
+
+| Format / CPU producer | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | ---: | ---: | ---: | ---: |
+| Default | 2946.366 | 2857.102 | 41550.165 | 41460.900 |
+| PCBS | 10932.754 | 10611.852 | 34428.590 | 34107.689 |
+| Vortex | 5359.904 | 5183.774 | 17451.519 | 17275.388 |
+
+#### Narrow ID-only read
+
+| Format / CPU producer | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | ---: | ---: | ---: | ---: |
+| Default | 221.135 | 138.149 | 38824.933 | 38741.947 |
+| PCBS | 8318.834 | 8242.842 | 31814.671 | 31738.679 |
+| Vortex | 610.700 | 431.667 | 12702.314 | 12523.281 |
+
+Combined columns are computed additions of measured phases, not independently
+measured end-to-end runs. These cases do not measure GPU consumption of
+CPU-produced caches. CPU and GPU PCBS writers can produce different payloads;
+compare the producer labels rather than assuming identical encoded data.
+
+Evidence: /data/tmp/cache-main-16g/512m/{default-cpu-only,pcbs-cpu-only,vortex-cpu-only}/
+raw results, source/artifact manifests, lead summaries, progress and memory logs.
+All aggregates, CPU producer/reader plans, budgets, storage snapshots and audited
+counts were independently checked before these preliminary tables were generated.
