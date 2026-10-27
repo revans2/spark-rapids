@@ -32,9 +32,15 @@ reads on the same stored data; first GPU is not a globally cold read. Full reads
 consume all fields; narrow reads select ID. Population-plus-read columns are
 explicitly computed sums, not independently measured end-to-end jobs.
 
-Default's GPU-enabled query uses a CPU cache decoder followed by GPU work.
-PCBS and Vortex can use direct GPU cache scans. Vortex's current CPU row-output
-and GPU Arrow IPC paths are prototype choices, not intrinsic format speed limits.
+Producer/consumer mode names refer to Spark execution, not necessarily codec hardware.
+Default encodes and decodes its cache on CPU, including for GPU-enabled queries.
+PCBS's GPU path uses cuDF Parquet encoding/decoding on GPU. Vortex encoding and
+decoding remain on CPU; its GPU path transfers through host Arrow and returns
+GPU batches for downstream GPU work. A GPU cache-reader label identifies the
+Spark scan node/output, not a claim that Vortex decompression runs on GPU.
+This prototype opens a cuDF IPC reader for each decoded IPC batch; that bridge's
+cost has not been isolated from Vortex decoding. CPU row-output and GPU IPC paths
+are implementation choices, not intrinsic format speed limits.
 Whole-job RSS includes startup, reference actions and the optional post-run audit;
 it does not isolate temporary encoding or decoding memory. Observed residency is
 not a proven maximum capacity, and OS file caching can affect disk-backed reads.
@@ -137,7 +143,7 @@ warmed read medians use two samples after one warmup, so results are preliminary
 
 ### Storage and process footprint
 
-| Format / GPU producer | Audited payload B | Records | Resident storage B | Logical resident MiB | Disk storage B | Whole-job peak RSS B |
+| Format / GPU producer | Audited payload B | Records | Resident storage B | Logical resident MiB | Disk storage B | Sampled whole-job peak RSS B |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Default | 871,780,099 | 840 | 875,395,032 | 2048 | 0 | 7,943,970,816 |
 | PCBS | 1,026,907,683 | 280 | 1,026,921,048 | 2048 | 0 | 3,675,885,568 |
@@ -193,6 +199,79 @@ Vortex uses default adaptive encoding choices only. The CPU row-output and GPU
 IPC routes are prototype implementation choices, not intrinsic format limits.
 
 Evidence: /data/tmp/cache-main-16g/512m/{default-gpu,pcbs-gpu,vortex-gpu}/
+raw results, command/provenance snapshots, lead summaries, memory records and logs.
+The lead independently verified budgets, all14 storage snapshots, aggregate and
+reader checks, audit counts and sampled RSS before report generation. Numerical
+phase tables are reproduced from original nanoseconds and independently checked.
+
+## Fixed-wide: 1 GiB logical per task, GPU producers
+
+All three GPU-producer cases **PASS** with **1024 MiB logical per task**
+and **4096 MiB total**, four partitions and two task slots/two waves.
+The primary settings remain a 16 GiB heap, 4 GiB RAPIDS-managed host cap and
+32 GiB reactive RSS guard, using the original 8 MiB Vortex outer target.
+Every full/narrow CPU/GPU read passed expected aggregates and actual-reader checks.
+CPU producers at this size are unmeasured. Population is one fresh-job sample;
+warmed read medians use two samples after one warmup, so results are preliminary.
+
+### Storage and process footprint
+
+| Format / GPU producer | Audited payload B | Records | Resident storage B | Logical resident MiB | Disk storage B | Sampled whole-job peak RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Default | 1,743,560,044 | 1680 | 1,662,574,592 | 4096 | 0 | 15,233,388,544 |
+| PCBS | 2,053,799,024 | 560 | 2,053,825,704 | 4096 | 0 | 10,749,976,576 |
+| Vortex | 1,959,914,440 | 512 | 1,959,937,032 | 4096 | 0 | 9,508,372,480 |
+
+All fourteen storage observations per format have unchanged totals: every row
+is resident, with no disk-only data or overlap. Storage-accounted bytes and logical
+subsets use the same local block inventory. The post-run audit covers all rows;
+its payload lengths are separate from BlockManager accounting. RSS includes
+startup, reference actions and audit, may miss peaks and is not live-native or
+temporary-memory accounting. This observed fit does not prove maximum capacity.
+
+### Population
+
+| Format / GPU producer | Population ms |
+| --- | ---: |
+| Default | 85826.450 |
+| PCBS | 5759.752 |
+| Vortex | 20788.708 |
+
+### Read-only reuse and computed phase combinations
+
+First means the recorded warmup for the mode/projection; warmed is the median
+of the two following samples. CPU precedes GPU on the same cache, so first GPU
+is not globally cold. Default uses a CPU cache decoder before GPU conversion
+and aggregation; PCBS/Vortex use GPU cache scans for GPU-enabled queries.
+
+#### Full all-column read
+
+| Format / GPU producer | Consumer (cache reader) | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Default | CPU (CPU) | 5560.953 | 5381.009 | 91387.403 | 91207.459 |
+| Default | GPU-enabled (CPU cache decoder) | 4368.756 | 3979.743 | 90195.205 | 89806.192 |
+| PCBS | CPU (CPU) | 21954.334 | 20290.702 | 27714.086 | 26050.455 |
+| PCBS | GPU (GPU) | 1745.185 | 1043.448 | 7504.938 | 6803.200 |
+| Vortex | CPU (CPU) | 12273.539 | 11997.896 | 33062.247 | 32786.605 |
+| Vortex | GPU (GPU) | 70528.447 | 71252.518 | 91317.155 | 92041.227 |
+
+#### Narrow ID-only read
+
+| Format / GPU producer | Consumer (cache reader) | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Default | CPU (CPU) | 279.652 | 167.120 | 86106.102 | 85993.569 |
+| Default | GPU-enabled (CPU cache decoder) | 419.565 | 396.185 | 86246.015 | 86222.634 |
+| PCBS | CPU (CPU) | 15684.423 | 15733.824 | 21444.175 | 21493.576 |
+| PCBS | GPU (GPU) | 455.833 | 523.178 | 6215.586 | 6282.930 |
+| Vortex | CPU (CPU) | 861.450 | 948.139 | 21650.159 | 21736.847 |
+| Vortex | GPU (GPU) | 3895.371 | 3399.091 | 24684.080 | 24187.800 |
+
+Combined columns are computed additions of measured phases, not independently
+measured end-to-end jobs. Full queries consume all fields; narrow queries select ID.
+Vortex uses default adaptive encoding choices only. The CPU row-output and GPU
+IPC routes are prototype implementation choices, not intrinsic format limits.
+
+Evidence: /data/tmp/cache-main-16g/1024m/{default-gpu,pcbs-gpu,vortex-gpu}/
 raw results, command/provenance snapshots, lead summaries, memory records and logs.
 The lead independently verified budgets, all14 storage snapshots, aggregate and
 reader checks, audit counts and sampled RSS before report generation. Numerical

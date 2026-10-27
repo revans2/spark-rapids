@@ -702,4 +702,52 @@ is LOWER than payloadsum; lead read MemoryStore.DeserializedValuesHolder.getBuil
 which uses SizeEstimator.estimate(arrayValues). Therefore residentbyte counters
 are Spark storage-accounting estimates, not exact physical/liveheap size. Report
 now says this explicitly; don't infer physical heap smaller than unique payload
-or use estimates as allocation census. PCBS/Vortex main1GiB cases pending.
+or use estimates as allocation census. PCBS/Vortex main1GiB cases were pending
+at that checkpoint.
+
+## PRIMARY16GiB / 1GiB-task cohort: READY FOR REVIEW
+
+All3GPU-producer cases PASS at4GiB logical total, all4partitions memory resident/
+0disk across14snapshots, same original8MiB Vortex app and16GiBheap/4gmanaged/
+32GiBRSSguard/2slots/4parts. Lead independently verified all three raw cases via
+verify-cache-scale.py, including actualbudgets/artifacts/aggregates/plans/audits.
+
+| Format | Payload B | Population ms | CPU full warm ms | GPU-enabled full warm ms | Whole-job RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Default |1743560044|85826.450|5381.009|3979.743|15233388544|
+| PCBS |2053799024|5759.752|20290.702|1043.448|10749976576|
+| Vortex |1959914440|20788.708|11997.896|71252.518|9508372480|
+
+Storage-accountedresidentbytes1662574592/2053825704/1959937032 respectively
+representall4GiB logical data. Vortex completes the EXACT CPU-read path that
+failed with1GiBheap; no record-size fix is necessary to pass this normal-budget
+case. Preserve oldnegative as different-resource evidence, not a fixedbug claim.
+LargestRSS15.23GB still below32GiBguard and amplehostRAM. PeakRSS includes dead
+heap objects/temporaries as well as live data, so it is not a live-memory census.
+
+Lead appended same full/narrow first/warm/read-only/computedphasecombined tables
+via append-primary-cohort.py1024 and independently reproduced ALL12phase rows,
+population/payload/storage/RSS via verify-primary-report.py1024. Mainreport now
+explicitly distinguishes CODEC hardware: Vortex always encodes/decodes onCPU,
+even when Spark GPUscan emitsGPUbatches through Arrow; PCBSusesGPUParquetcodec
+onGPU path; DefaultusesCPUcodec thenGPUconversion. GPUscan label never implies
+VortexGPUdecompression. Current per-IPC-batch cuDF reader overhead is not isolated
+from Vortex decode; format-intrinsic performance remains unestablished.
+
+Focused independent peer review of lead-generated512report and SizeEstimator
+qualification clear; verified source SizeEstimator samples largeobject arrays.
+One header wording made consistent as 'Sampled whole-job peak RSS B'.
+
+Next final requested size is PRIMARY2GiB/task GPU-producer cohort,8GiB logical
+total, IN PROGRESS. Same memorycaps/concurrency/data/schema/records/repeats;
+EXPLICIT timeout900 chosen BEFORE launch because1GiBVortexwholejob307.8s predicts
+>600s at2GiB/task. Duration only, not memory/acceptance relaxation. Stopbatchon
+failure/guard/timeout; no automaticlimit changes. MCP-only confirmed at handoff
+and progresscheckpoints. No CPU-producer16GiB cohort yet.
+
+A minimal7line Pythonjob observability change prints flushed JSON population/
+read phase scalars AFTER existing timerstop/checks/snapshots. No extraJVMcalls,
+fixtures/budgets/operators/encoding changes. py_compilePASS and focused peerreview
+clear; current2GiB run captures updatedjobsource. Runtime matching of13stdout
+events to finalresult remains pending. This fixes evidence loss on future guard/
+timeouts without claiming a completedoverallrun from partialphase events.

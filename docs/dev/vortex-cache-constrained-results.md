@@ -6,6 +6,9 @@ In particular, a 4 GiB sampled RSS guard can interrupt legitimate host-memory us
 a guard stop is not a host OOM or proof of a format memory defect. Deserialized
 resident storage bytes are Spark SizeEstimator accounting estimates, not an exact
 heap census; encoded payload lengths and process RSS are separate measurements.
+GPU reader labels identify Spark GPU scan nodes/outputs: Vortex itself encodes
+and decodes on CPU through the host Arrow bridge, while cuDF Parquet uses GPU
+codecs on the PCBS GPU path. Default uses CPU cache decoding before GPU work.
 
 Source: six `/data/tmp/cache-first-comparison/<format>-<producer>/result.json` files.
 All cases use the original **strings-wide** fixture: 524,288 rows and two source
