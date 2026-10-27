@@ -74,7 +74,7 @@ private[rapids] object GpuRangeBoundaryPlan {
           val keyOnly = if (selected.length == pruned.output.length) {
             pruned
           } else {
-            GpuProjectExec(selected.toList, pruned)
+            GpuProjectExec(selected.toList, pruned)()
           }
           Some(GpuRangeBoundaryExec(keyOnly))
         }
@@ -115,7 +115,7 @@ private[rapids] object GpuRangeBoundaryPlan {
         // Keep project-local dependencies here instead of requesting aliases from the child scan.
         val childRequired = referencedExprIds(selected) -- localOutputIds
         prune(project.child, childRequired).map { child =>
-          project.copy(projectList = selected.toList, child = child)
+          project.withProjectList(selected.toList, newChild = child)
         }
       }
 
