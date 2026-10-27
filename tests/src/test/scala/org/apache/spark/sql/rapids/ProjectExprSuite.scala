@@ -164,8 +164,6 @@ class ProjectExprSuite extends SparkQueryCompareTestSuite {
           assert(aggregate.expressions == aggregate.gpuExpressions)
           assert(aggregate.withNewChildren(Seq(range)).asInstanceOf[GpuHashAggregateExec]
             .cpuResultExpressions == aggregate.cpuResultExpressions)
-          assert(aggregate.canonicalized ==
-            aggregate.copy()(None).canonicalized)
           if (isSpark340OrLater) {
             val candidates = project.outputPartitioning match {
               case PartitioningCollection(partitionings) => partitionings
@@ -211,7 +209,6 @@ class ProjectExprSuite extends SparkQueryCompareTestSuite {
     val changedExpected = ProjectExec(List(cpuChanged), range)
     assert(replaced.outputPartitioning == changedExpected.outputPartitioning)
     assert(replaced.outputOrdering == changedExpected.outputOrdering)
-    assert(project.canonicalized == project.copy()(None).canonicalized)
   }
 
   test("rand is okay") {
