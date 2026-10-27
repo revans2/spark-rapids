@@ -6,6 +6,12 @@ CPU-only jobs kept GPU SQL disabled throughout. The user selected a 16 GiB JVM h
 Earlier 1 GiB-heap runs are [constrained-memory experiments](vortex-cache-constrained-results.md),
 not the normal-host baseline. No production serializer changes are proposed.
 
+[Follow-up profiling](vortex-cache-profiling.md) reproduced the slow Vortex GPU
+reads and found substantial pinned-host allocation/free and host copy API costs
+inside Arrow import. GPU copy execution was short. Treat these GPU read numbers
+as measurements of the current prototype bridge, not isolated Vortex decoding or
+PCIe transfer throughput; the bridge needs a bounded follow-up experiment.
+
 Each primary run uses two local task slots, four source/cache partitions, default
 DataFrame memory-and-disk storage, a 4 GiB RAPIDS-managed host-memory cap and a
 32 GiB sampled process-tree RSS early-stop guard. Arrow/Rust allocations are outside

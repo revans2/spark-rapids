@@ -1,0 +1,100 @@
+# Vortex GPU cache-read profiling
+
+Status: READY FOR REVIEW. Diagnostic follow-up to the
+[primary comparison](vortex-cache-results.md), 2026-10-27. No implementation
+or baseline CSV changes.
+
+The slow GPU reads expose substantial host-side overhead in the prototype's
+Arrow-to-cuDF import path. They do not measure PCIe transfer time or establish
+Vortex's intrinsic decoding limit. The previous comparison needs this
+qualification before a format decision.
+
+## Reproduction and controls
+
+One Nsight Systems CUDA/NVTX/OS-runtime trace plus JVM Flight Recording reproduced
+the anomaly using the original application artifact
+SHA256 `78e04232b44e4a0569eb024ec0d911649719c560808c9bc457bceabe1f5f8824`.
+The fixed-wide fixture used 256 MiB logical data per task, four partitions,
+two task slots, GPU population and GPU reads: 1 GiB logical data overall.
+Heap remained 16 GiB, RAPIDS-managed host cap 4 GiB, sampled RSS stop guard
+32 GiB. Peak sampled process-tree RSS was 5,254,914,048 bytes; the job passed.
+
+Population took 7.327 seconds. Full reads took 12.936 seconds for warmup and
+14.095 seconds for the measured read; ID-only reads took 0.861 and 0.920 seconds.
+Read results and GPU scan execution were checked. This profiled diagnostic has
+one measured read per projection and does not replace the unprofiled baseline.
+
+Artifacts are under `/data/tmp/cache-profile-vortex-256/`: exact invocation in
+`outer-command.json`, runtime inputs/results in `run/`, `trace.nsys-rep`,
+`trace.sqlite`, `driver.jfr`, exported CUDA statistics and
+`lead-independent-verification.json`. Nsight Systems version:
+2026.3.1.157-263138048394v0. Trace options were
+`--trace=cuda,nvtx,osrt --sample=none --cpuctxsw=none --wait=all`.
+The runner used warmups=1, repeats=1, timeout=300 seconds.
+No larger stress run was needed.
+
+## Measured costs
+
+Whole-recording device execution time for host-to-device copies was **0.173
+seconds** across 44,446 copies / 2,214,342,176 bytes. Device-to-host copies took
+0.088 seconds. These totals include population and reference work as well as
+reads. They are GPU activity sums, not end-to-end query latency.
+
+The trace contains 512 `from_arrow` NVTX ranges. Independently querying the
+read-only SQLite export reproduced the following same-thread CUDA calls wholly
+contained inside those ranges:
+
+| Host API activity | Calls | Summed duration (seconds) |
+| --- | ---: | ---: |
+| cudaHostAlloc | 7,936 | 14.029 |
+| cudaFreeHost | 7,936 | 6.565 |
+| cudaMemcpyAsync_ptsz | 32,256 | 13.583 |
+| cuMemcpyAsync | 7,936 | 1.872 |
+| cudaStreamSynchronize_ptsz | 24,320 | 0.093 |
+
+These durations sum across task threads and both full reads plus narrow reads;
+they overlap in wall time. Same-thread nesting between API categories has not
+been excluded, so API totals must not be treated as disjoint time either.
+They must not be divided by one 14.095-second query
+to obtain percentages. Host copy API duration includes time spent in the
+driver/API; it is distinct from GPU copy execution time.
+
+256 import ranges each contained 31 pinned-host allocations and together
+lasted 39.640 summed thread-seconds. The other 256 had no such allocations and
+lasted 0.182 seconds. This strongly implicates nullable-column import overhead:
+the full projection has 31 nullable columns while ID is non-null. The trace
+does not by itself identify the allocation size or prove the precise native
+allocation call site.
+
+Pinned allocation/free accounted for 20.594 summed seconds inside import, and
+the two host copy APIs another 15.455 seconds. Explicit stream synchronization
+was small in this recording. Recorded GPU kernel and copy execution time does
+not account for the observed read latency.
+
+## Code evidence and next experiment
+
+`SparkVortexSerializer.scala` opens and closes a cuDF Arrow IPC reader for each
+decoded IPC batch. `VortexIpcCodec.Decoder.next` serializes each decoded Arrow
+root as its own complete IPC stream. Runtime cuDF Java bytecode confirms each
+provider-backed reader allocates a 10 MiB host staging buffer. This repeats
+reader setup, staging and per-column import work on the read path.
+
+The checked-out native cuDF source also recomputes nullable masks' null counts
+during host Arrow import. Its revision differs from the runtime native library;
+that source is explanatory evidence, not proof of the exact runtime allocation
+site. JFR additionally sampled Java IPC buffer copying and the native
+Arrow-to-cuDF conversion, but its sample counts are not a native CPU cost
+breakdown.
+
+A bounded follow-up should test reusing a reader over a valid continuous IPC
+stream and importing larger GPU batches, then profile the same small control.
+Simply increasing the requested row count on the current reader cannot combine
+separate streams; concatenating complete streams is not a valid substitute for
+implementing the streaming protocol. Whether batching amortizes the measured
+nullable-column cost remains unverified. A runtime-matched native allocation
+stack trace would further identify which allocations need pooling or removal.
+
+The GPU population/read asymmetry is therefore plausible: population uses cuDF
+Arrow export followed by CPU Vortex encoding, whereas reading traverses this
+expensive Arrow import path. A bridge repair and a small verified comparison
+should precede another full scale matrix or a decision against Vortex.

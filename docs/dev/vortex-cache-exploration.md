@@ -10,6 +10,18 @@ not the normal-host baseline. Historical report references below predate that
 move. Only the architect marks work DONE. Updated 2026-10-27.
 AI-assisted work; no production implementation changes or PR publication.
 
+Profiling follow-up: READY FOR REVIEW; see vortex-cache-profiling.md. One original-
+artifact 256 MiB/task diagnostic reproduced 14.095 s full GPU reads. Independent
+SQLite verification found 7,936 pinned allocations/frees inside from_arrow, taking
+20.594 summed thread-seconds; host copy APIs took another 15.455 seconds. Whole-
+recording GPU H2D activity was 0.173 seconds. Thread sums overlap and include both
+full reads; API-category nesting remains unverified. Focused independent review
+checked the report against saved trace evidence; git diff --check passed. The prior transfer label was too broad: current GPU latency includes
+expensive Arrow import overhead. No baseline numbers or code changed. A streaming/
+batched-reader experiment remains proposed, not verified. Existing release and
+compatibility classifications below still apply. All operations and profiling used
+MCP docker_exec; no machine-exhaustion testing or additional scale jobs performed.
+
 ## Scope, operating rules and accepted decision criteria
 
 Explore Vortex through host Arrow as an alternative cache representation to branch
