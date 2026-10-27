@@ -36,8 +36,8 @@ used MCP docker_exec; delegated API discovery was independently checked.
 
 ## Bridge controls READY FOR REVIEW; 2 GiB pool matrix IN PROGRESS
 
-Pinned-pool matrix progress: 6/12 cases independently verified (all three formats
-at 256 and 512 MiB/task). Report: vortex-cache-pinned2g-results.md; CSV has 24
+Pinned-pool matrix progress: 9/12 cases independently verified (all three formats
+at 256, 512 and 1024 MiB/task). Report: vortex-cache-pinned2g-results.md; CSV has 36
 consumer/projection rows. Exact aggregates, old/new source and dependency hashes,
 actual 2 GiB pool, heap/managed/RSS budgets, scans, payload and resident snapshots
 reproduced through /data/tmp/verify-pinned2g-lead.py. Remaining sizes in progress.
@@ -1061,4 +1061,28 @@ MCP docker_exec only; original78e042 artifact and released contracts preserved.
 Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
 pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/512/vortex-gpu/worker-verified.json.
 Worker summary: {"status":"PASS","format":"vortex","task_mib":512,"output":"/data/tmp/cache-pinned2g-16g/512/vortex-gpu","logical_bytes":2147483648,"payload_bytes":979946776,"records":256,"population_ms":9966.956979,"rss_peak_bytes":9308450816,"snapshot_count":14,"pool_exhaustion_lines":0,"reads":[{"mode":"cpu","narrow":false,"first_ms":5925.553031,"median_ms":5429.9417095},{"mode":"cpu","narrow":true,"first_ms":383.139081,"median_ms":648.519423},{"mode":"gpu","narrow":false,"first_ms":3151.084349,"median_ms":2415.9725295},{"mode":"gpu","narrow":true,"first_ms":368.077067,"median_ms":378.745828}],"host_available_before":187657662464,"resident_storage_bytes":979958104,"resident_logical_bytes":2147483648,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.
+
+### Pinned2GiB worker case 1024MiB/task default: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/1024/default-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"default","task_mib":1024,"output":"/data/tmp/cache-pinned2g-16g/1024/default-gpu","logical_bytes":4294967296,"payload_bytes":1743560044,"records":1680,"population_ms":79209.949277,"rss_peak_bytes":16868012032,"snapshot_count":14,"pool_exhaustion_lines":39,"reads":[{"mode":"cpu","narrow":false,"first_ms":5794.587066,"median_ms":5562.287463500001},{"mode":"cpu","narrow":true,"first_ms":272.866975,"median_ms":177.92969649999998},{"mode":"gpu","narrow":false,"first_ms":2733.638903,"median_ms":2623.9239509999998},{"mode":"gpu","narrow":true,"first_ms":198.801473,"median_ms":350.793324}],"host_available_before":187611234304,"resident_storage_bytes":1662574592,"resident_logical_bytes":4294967296,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.
+
+### Pinned2GiB worker case 1024MiB/task pcbs: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/1024/pcbs-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"pcbs","task_mib":1024,"output":"/data/tmp/cache-pinned2g-16g/1024/pcbs-gpu","logical_bytes":4294967296,"payload_bytes":2053797644,"records":560,"population_ms":2788.434355,"rss_peak_bytes":11135090688,"snapshot_count":14,"pool_exhaustion_lines":0,"reads":[{"mode":"cpu","narrow":false,"first_ms":21704.989952,"median_ms":20289.086413},{"mode":"cpu","narrow":true,"first_ms":15668.842329,"median_ms":15691.7482385},{"mode":"gpu","narrow":false,"first_ms":827.989689,"median_ms":787.410743},{"mode":"gpu","narrow":true,"first_ms":345.135374,"median_ms":351.5103255}],"host_available_before":187548172288,"resident_storage_bytes":2053824352,"resident_logical_bytes":4294967296,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.
+
+### Pinned2GiB worker case 1024MiB/task vortex: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/1024/vortex-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"vortex","task_mib":1024,"output":"/data/tmp/cache-pinned2g-16g/1024/vortex-gpu","logical_bytes":4294967296,"payload_bytes":1959914440,"records":512,"population_ms":18752.621466,"rss_peak_bytes":12832215040,"snapshot_count":14,"pool_exhaustion_lines":0,"reads":[{"mode":"cpu","narrow":false,"first_ms":11928.543498,"median_ms":10736.320306000001},{"mode":"cpu","narrow":true,"first_ms":1118.591905,"median_ms":973.2702235},{"mode":"gpu","narrow":false,"first_ms":4411.993613,"median_ms":4060.4372045},{"mode":"gpu","narrow":true,"first_ms":497.102917,"median_ms":763.6122915}],"host_available_before":187725426688,"resident_storage_bytes":1959937032,"resident_logical_bytes":4294967296,"disk_storage_bytes":0}
 Lead independent verification/final acceptance remains outstanding.

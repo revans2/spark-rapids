@@ -1,6 +1,6 @@
 # Spark cache comparison with a 2 GiB pinned pool
 
-Status: IN PROGRESS. Independently verified 6/12 GPU-populated cases.
+Status: IN PROGRESS. Independently verified 9/12 GPU-populated cases.
 The original zero-pool [comparison](vortex-cache-results.md) and CSV are preserved.
 CPU-only producer cases were not rerun. No production defaults changed.
 
@@ -31,6 +31,9 @@ Spark storage estimates and whole-job RSS are distinct measurements.
 | 512 | Default | 42.647 / 38.719 | 2.780 / 2.765 | 2.007 / 1.070 | 1.88x | 39.789 |
 | 512 | PCBS | 3.381 / 1.871 | 10.526 / 10.340 | 0.523 / 0.458 | 1.14x | 2.330 |
 | 512 | Vortex | 12.008 / 9.967 | 5.745 / 5.430 | 29.643 / 2.416 | 12.27x | 12.383 |
+| 1024 | Default | 85.826 / 79.210 | 5.381 / 5.562 | 3.980 / 2.624 | 1.52x | 81.834 |
+| 1024 | PCBS | 5.760 / 2.788 | 20.291 / 20.289 | 1.043 / 0.787 | 1.33x | 3.576 |
+| 1024 | Vortex | 20.789 / 18.753 | 11.998 / 10.736 | 71.253 / 4.060 | 17.55x | 22.813 |
 
 ## ID-only reads: baseline to 2 GiB pool
 
@@ -42,6 +45,9 @@ Spark storage estimates and whole-job RSS are distinct measurements.
 | 512 | Default | 0.127 / 0.128 | 0.217 / 0.174 |
 | 512 | PCBS | 7.964 / 7.786 | 0.256 / 0.220 |
 | 512 | Vortex | 0.733 / 0.649 | 1.678 / 0.379 |
+| 1024 | Default | 0.167 / 0.178 | 0.396 / 0.351 |
+| 1024 | PCBS | 15.734 / 15.692 | 0.523 / 0.352 |
+| 1024 | Vortex | 0.948 / 0.973 | 3.399 / 0.764 |
 
 ## Size, retained data and memory
 
@@ -53,6 +59,9 @@ Spark storage estimates and whole-job RSS are distinct measurements.
 | 512 | Default | 2,147,483,648 | 871,780,099 / 871,780,099 | 875,395,032 | 7,943,970,816 / 7,443,652,608 | 37 |
 | 512 | PCBS | 2,147,483,648 | 1,026,907,683 / 1,026,899,551 | 1,026,912,888 | 3,675,885,568 / 8,676,737,024 | 0 |
 | 512 | Vortex | 2,147,483,648 | 979,946,776 / 979,946,776 | 979,958,104 | 7,785,480,192 / 9,308,450,816 | 0 |
+| 1024 | Default | 4,294,967,296 | 1,743,560,044 / 1,743,560,044 | 1,662,574,592 | 15,233,388,544 / 16,868,012,032 | 39 |
+| 1024 | PCBS | 4,294,967,296 | 2,053,799,024 / 2,053,797,644 | 2,053,824,352 | 10,749,976,576 / 11,135,090,688 | 0 |
+| 1024 | Vortex | 4,294,967,296 | 1,959,914,440 / 1,959,914,440 | 1,959,937,032 | 9,508,372,480 / 12,832,215,040 | 0 |
 
 All verified cases retained every logical row in memory with disk bytes zero at
 all recorded snapshots. Residency does not prove no transient spilling occurred.
@@ -92,6 +101,18 @@ it does not isolate per-phase live working memory.
 | 512 | Vortex | cpu / cpu | id | 0.383 | 0.649 | 10.350 | 10.615 |
 | 512 | Vortex | gpu / gpu | full | 3.151 | 2.416 | 13.118 | 12.383 |
 | 512 | Vortex | gpu / gpu | id | 0.368 | 0.379 | 10.335 | 10.346 |
+| 1024 | Default | cpu / cpu | full | 5.795 | 5.562 | 85.005 | 84.772 |
+| 1024 | Default | cpu / cpu | id | 0.273 | 0.178 | 79.483 | 79.388 |
+| 1024 | Default | gpu / cpu | full | 2.734 | 2.624 | 81.944 | 81.834 |
+| 1024 | Default | gpu / cpu | id | 0.199 | 0.351 | 79.409 | 79.561 |
+| 1024 | PCBS | cpu / cpu | full | 21.705 | 20.289 | 24.493 | 23.078 |
+| 1024 | PCBS | cpu / cpu | id | 15.669 | 15.692 | 18.457 | 18.480 |
+| 1024 | PCBS | gpu / gpu | full | 0.828 | 0.787 | 3.616 | 3.576 |
+| 1024 | PCBS | gpu / gpu | id | 0.345 | 0.352 | 3.134 | 3.140 |
+| 1024 | Vortex | cpu / cpu | full | 11.929 | 10.736 | 30.681 | 29.489 |
+| 1024 | Vortex | cpu / cpu | id | 1.119 | 0.973 | 19.871 | 19.726 |
+| 1024 | Vortex | gpu / gpu | full | 4.412 | 4.060 | 23.165 | 22.813 |
+| 1024 | Vortex | gpu / gpu | id | 0.497 | 0.764 | 19.250 | 19.516 |
 
 [Machine-readable results](vortex-cache-pinned2g-results.csv) include every sample,
 baseline value, size and memory measurement. Raw outputs are under
