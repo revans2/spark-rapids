@@ -184,3 +184,87 @@ Runtime pressure, CPU paths, actual PCBS/Spark default comparisons, Spark classl
 projection and full type coverage remain UNVERIFIED. No current blanket conclusion.
 Shim preflight becomes mandatory if changes touch versioned sources, shared shim
 callers or build profiles; this isolated tools/documentation batch changes none.
+
+## CPU/GPU endpoints and real-PCBS tooling batch: READY FOR REVIEW
+
+User approved the qualified comparison matrix; implementation resumed after the
+capacity interruption. MCP-only confirmed again at every worker handoff/checkpoint.
+The standalone bridge now selects cpu-cpu, cpu-gpu, gpu-cpu or gpu-gpu endpoints,
+with optional same-encoded-byte alternate-reader verification outside timed work.
+CPU-only execution hides CUDA and makes no Cuda calls. Canonical Arrow-layout logical
+size, encoded bytes/row and device bytes are separate metrics. Cross-reader checking
+is disabled for isolated memory measurements. All four small nullable-string modes
+passed value/null/order/row and Arrow allocation checks; independent worker source
+review is clear. Lead independently ran CPU-only sampling: return0, five samples,
+no GPU process or unmatched GPU PID, populated heap/RSS/PSS observations. Evidence:
+/data/tmp/cache-bridge-lead-cpu-memory and /data/tmp/cache-bridge-worker-cpu-sampler-review.
+
+Actual PCBS harness calls branch encode/framing and ParquetCachedBatchReader, using
+separate large-parent and small-record targets. No Spark storage claim. Fresh build
+501da9cb5e63882f0c3833503130e239152b7d6e passed in1m12s without bypassing RAT/checks:
+
+```text
+rapids-plugin-mvn -nsu -ntp -DsecondaryCacheDir=/data/tmp/vortex-pcbs-zinc \\
+  -Dbuildver=355 -pl sql-plugin -am package -DskipTests \\
+  -l /data/tmp/vortex-pcbs-build-cache-fixed.log
+```
+
+Supported writable Zinc option resolved the earlier failure; changing user.home
+was investigated and discarded because it lost the existing Maven cache settings.
+The runner validates expected artifact revision and records SHA256/property provenance.
+Explicitly pin expected-revision501da9 when using these jars after tools-only commits.
+Unrelated pre-existing untracked sources remain in the checkout; artifact hashes
+identify the binaries actually tested. No production source edits were made.
+
+Worker checked all three1024-row PCBS fixtures. Lead read complete harness/runtime
+setup and independently reran final-default framing:16384 varying-string rows,
+688579 canonical logicalB,686531 deviceB,1GiB GPU target,4GiB reader soft target,
+64KiB cache record target =>10 records,467233 encodedB,max49193B. Every decoded
+value/null/order/row matched and host spill handles returned zero. Evidence:
+/data/tmp/pcbs-codec-lead-final-smoke/provenance.json. Cold smoke timings are NOT
+performance comparisons. Earlier worker bytes vary slightly due Parquet null-buffer
+contents; logical values/counts agree.
+
+Process sampler measure_process.py executes a precompiled exported Java argv,
+excluding javac, and records sampled treeRSS/PSS, jstat heap/GC and NVIDIA process
+residency. Fields distinguish missing data and unmatched PID namespaces; no heap
+subtraction is used to invent native allocation. Collection overhead and JVM startup
+are included; sampled peaks can miss short allocations. Independent review identified
+interrupt cleanup; process-group TERM/wait/KILL and timeout now handle it. Lead's
+0.3s timeout probe terminated both Python parent and sleep child (pgrep found none).
+On timeout/collector errors the sampler preserves partial logs and exits nonzero
+without summary.json. This initial tool expects an isolated JVM root, not a launcher
+that exits while leaving detached descendants.
+
+## Spark integration/accounting work in progress
+
+Local Spark runner now uses DataFrame's actual MEMORY_AND_DISK_DESER default;
+serialized storage is an explicitly separate experiment. Initial serialized smoke
+and corrected default-DESER smoke passed every small-row value. Driver heap snapshots
+are labeled; local execution is enforced. Reads collect the exact aggregation and
+record final executed plans, with separate read warmups. Population is one cold
+materialization per invocation: repeat fresh-cache/job samples before comparisons.
+
+Important source finding: Spark default sizeInBytesStats sums uncompressed column
+statistics; PCBS sums encoded array lengths. Never compare these as uniform encoded
+size. Accumulators also count recomputation and do not describe retained rows.
+The runner separates BlockManager footprint and canonical logical size; a tools-only
+post-run payload audit sums actual cache arrays and returns only per-partition scalar
+summaries. Audit is excluded from timed/capacity snapshots because it can recompute
+and change residency. New local block metadata snapshots map resident source partitions
+to logical rows/bytes; final runtime validation of this addition is pending.
+
+Experimental Spark serializer uses a PCBS wrapper subtype only to pass the existing
+concrete GPU scan gate; every serialization entry is overridden. A platform-parent
+URLClassLoader isolates the Vortex/Arrow19/Netty closure from SparkArrow12. Only JDK
+IPC bytes/primitive args cross the boundary. CPU output normalizes view strings to
+old Arrow; GPU output stays direct IPC. Supported types currently int/long/string;
+others are explicit gaps. This is local Spark3.5.5-only, not a released integration.
+
+Early small CPU/GPU/mixed same-cache and reordered-projection probes passed actual
+GpuInMemoryTableScan and full values. Supplemental UDF/Delta33x startup dependencies
+were rebuilt current501da9 (39.333s); provenance is at
+/data/tmp/vortex-spark-prototype/provenance.json. These probes precede final lifecycle
+review. Lead found closed decoder/source task-listener retention and Spark Arrow
+helper per-unit listener retention; fixes are in progress before pressure tests.
+No pressure, capacity, or comparative Spark performance result is established yet.

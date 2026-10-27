@@ -16,6 +16,7 @@
 """Compile/run the isolated Arrow/Vortex codec experiment without changing project builds."""
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -36,7 +37,21 @@ parser.add_argument("--warmups", type=int, default=2)
 parser.add_argument("--repeats", type=int, default=5)
 parser.add_argument("--cap-bytes", type=int, default=128 * 1024 * 1024)
 parser.add_argument("--heap", default="1g")
+parser.add_argument("--mode", choices=["cpu-cpu", "cpu-gpu", "gpu-cpu", "gpu-gpu"],
+                    default="gpu-gpu", help="Population-consumption endpoints")
+parser.add_argument("--codec", choices=["vortex", "parquet-proxy", "both"],
+                    help="Defaults to both for gpu-gpu and vortex otherwise")
+parser.add_argument("--verify-cross-read", action="store_true",
+                    help="Also validate the other reader outside timings; omit for memory measurements")
+parser.add_argument("--java-command-file", type=Path,
+                    help="Compile/stage, write the exact execution argv as JSON, and exit")
 args = parser.parse_args()
+if args.codec is None:
+    args.codec = "both" if args.mode == "gpu-gpu" else "vortex"
+if args.mode != "gpu-gpu" and args.codec != "vortex":
+    parser.error("parquet-proxy and both require --mode gpu-gpu")
+if args.mode == "cpu-cpu" and args.verify_cross_read:
+    parser.error("cpu-cpu remains CPU-only; use cpu-gpu to verify cross-reader compatibility")
 
 source = Path(__file__).resolve().with_name("CacheBridgeBench.java")
 args.build_dir.mkdir(parents=True, exist_ok=True)
@@ -59,9 +74,17 @@ digest = hasher.hexdigest()
 print("Native resource: " + str(native) + " SHA256=" + digest, file=sys.stderr, flush=True)
 print("Scope: isolated codec proxy; not Spark PCBS or heap-pressure validation",
       file=sys.stderr, flush=True)
-subprocess.run([
+command = [
     "java", "-ea", "-Xmx" + args.heap,
     "--add-opens=java.base/java.nio=ALL-UNNAMED",
     "-cp", str(args.build_dir) + os.pathsep + classpath, "CacheBridgeBench",
-    args.fixture, str(args.rows), str(args.warmups), str(args.repeats), str(args.cap_bytes)
-], check=True)
+    args.fixture, str(args.rows), str(args.warmups), str(args.repeats), str(args.cap_bytes),
+    args.mode, args.codec, str(args.verify_cross_read).lower()
+]
+if args.mode == "cpu-cpu":
+    command = ["env", "CUDA_VISIBLE_DEVICES="] + command
+if args.java_command_file is not None:
+    args.java_command_file.parent.mkdir(parents=True, exist_ok=True)
+    args.java_command_file.write_text(json.dumps(command, indent=2) + "\n")
+    sys.exit(0)
+subprocess.run(command, check=True)

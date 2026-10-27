@@ -39,6 +39,7 @@ import java.io.ByteArrayInputStream;
 import java.io.EOFException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.channels.Channels;
 import java.util.Arrays;
 import java.util.List;
@@ -49,6 +50,13 @@ import org.apache.arrow.c.ArrowSchema;
 import org.apache.arrow.c.Data;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.BigIntVector;
+import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.arrow.vector.ipc.ArrowReader;
 import org.apache.arrow.vector.ipc.ArrowStreamReader;
 import org.apache.arrow.vector.ipc.ArrowStreamWriter;
@@ -152,6 +160,69 @@ public final class CacheBridgeBench {
     return Long.toUnsignedString(mixed, 16) + "-value-" + row;
   }
 
+  /** Canonical Arrow-layout estimate, independent of allocator padding and device representation. */
+  static long logicalBytes(String fixture, int rows) {
+    long validity = (rows + 7L) / 8;
+    long size = rows * 12L + 2 * validity;
+    if (!fixture.equals("fixed")) {
+      size += validity + 4L * (rows + 1);
+      for (int i = 0; i < rows; i++) {
+        String text = value(fixture, i);
+        if (text != null) size += text.getBytes(StandardCharsets.UTF_8).length;
+      }
+    }
+    return size;
+  }
+
+  static Schema hostSchema(String fixture) {
+    Field id = Field.nullable("id", new ArrowType.Int(64, true));
+    Field key = Field.nullable("key", new ArrowType.Int(32, true));
+    return new Schema(fixture.equals("fixed") ? List.of(id, key)
+        : List.of(id, key, Field.nullable("payload", new ArrowType.Utf8())));
+  }
+
+  static void populateHost(VectorSchemaRoot root, String fixture, int rows) {
+    root.allocateNew();
+    BigIntVector id = (BigIntVector) root.getVector(0);
+    IntVector key = (IntVector) root.getVector(1);
+    VarCharVector payload = fixture.equals("fixed") ? null : (VarCharVector) root.getVector(2);
+    for (int i = 0; i < rows; i++) {
+      id.setSafe(i, i * 17L - 991);
+      if (i % 13 == 0) key.setNull(i);
+      else key.setSafe(i, (i * 37) % 1009);
+      if (payload != null) {
+        String text = value(fixture, i);
+        if (text == null) payload.setNull(i);
+        else payload.setSafe(i, text.getBytes(StandardCharsets.UTF_8));
+      }
+    }
+    root.setRowCount(rows);
+  }
+
+  static void validateHost(VectorSchemaRoot root, String fixture, int firstRow) {
+    if (root.getFieldVectors().size() != (fixture.equals("fixed") ? 2 : 3)) {
+      throw new AssertionError("host column count");
+    }
+    BigIntVector id = (BigIntVector) root.getVector(0);
+    IntVector key = (IntVector) root.getVector(1);
+    for (int i = 0; i < root.getRowCount(); i++) {
+      int row = firstRow + i;
+      if (id.isNull(i) || id.get(i) != row * 17L - 991) {
+        throw new AssertionError("host id/order at " + row);
+      }
+      if (key.isNull(i) != (row % 13 == 0)
+          || (!key.isNull(i) && key.get(i) != (row * 37) % 1009)) {
+        throw new AssertionError("host key/null at " + row);
+      }
+      if (!fixture.equals("fixed")) {
+        Object actual = root.getVector(2).getObject(i);
+        if (!Objects.equals(value(fixture, row), actual == null ? null : actual.toString())) {
+          throw new AssertionError("host payload at " + row);
+        }
+      }
+    }
+  }
+
   static Table fixture(String fixture, int rows) {
     long[] ids = new long[rows];
     Integer[] keys = new Integer[rows];
@@ -210,6 +281,38 @@ public final class CacheBridgeBench {
     int decodedRows;
   }
 
+  static void writeVortexBatch(VortexWriter writer, VectorSchemaRoot root,
+      BufferAllocator allocator) throws Exception {
+    try (ArrowArray array = ArrowArray.allocateNew(allocator);
+         ArrowSchema schema = ArrowSchema.allocateNew(allocator)) {
+      try {
+        Data.exportVectorSchemaRoot(allocator, root, null, array, schema);
+        writer.writeBatch(array.memoryAddress(), schema.memoryAddress());
+      } finally {
+        // Native consumes the array but only borrows the schema; close frees the structs.
+        try {
+          array.release();
+        } finally {
+          schema.release();
+        }
+      }
+    }
+  }
+
+  static CappedBytes encodeVortexHost(VectorSchemaRoot input, Session session,
+      BufferAllocator allocator, int cap, Sample sample) throws Exception {
+    long start = System.nanoTime();
+    CappedBytes encoded = new CappedBytes(cap);
+    try (VortexWriter writer = VortexWriter.builder(session, encoded,
+        input.getSchema(), allocator).build()) {
+      writeVortexBatch(writer, input, allocator);
+      writer.finish();
+    }
+    sample.encodeNs = System.nanoTime() - start;
+    sample.encodedBytes = encoded.size;
+    return encoded;
+  }
+
   static CappedBytes encodeVortex(Table input, Session session, BufferAllocator allocator,
       int cap, Sample sample) throws Exception {
     long start = System.nanoTime();
@@ -228,20 +331,7 @@ public final class CacheBridgeBench {
          VortexWriter writer = VortexWriter.builder(session, encoded,
              reader.getVectorSchemaRoot().getSchema(), allocator).build()) {
       while (reader.loadNextBatch()) {
-        try (ArrowArray array = ArrowArray.allocateNew(allocator);
-             ArrowSchema schema = ArrowSchema.allocateNew(allocator)) {
-          try {
-            Data.exportVectorSchemaRoot(allocator, reader.getVectorSchemaRoot(), null, array, schema);
-            writer.writeBatch(array.memoryAddress(), schema.memoryAddress());
-          } finally {
-            // Native consumes the array but only borrows the schema; close frees the structs.
-            try {
-              array.release();
-            } finally {
-              schema.release();
-            }
-          }
-        }
+        writeVortexBatch(writer, reader.getVectorSchemaRoot(), allocator);
       }
       writer.finish();
     }
@@ -251,13 +341,21 @@ public final class CacheBridgeBench {
   }
 
   static void decodeVortex(CappedBytes encoded, String fixture, int rows, Session session,
-      BufferAllocator allocator, int cap, Sample sample) throws Exception {
+      BufferAllocator allocator, int cap, boolean gpuOutput, Sample sample) throws Exception {
     long start = System.nanoTime();
     DataSource source = DataSource.open(session, readable(encoded));
     Scan scan = source.scan(ScanOptions.builder().ordered(true).build());
     while (scan.hasNext()) {
       try (ArrowReader reader = scan.next().scanArrow(allocator)) {
         while (reader.loadNextBatch()) {
+          int batchRows = reader.getVectorSchemaRoot().getRowCount();
+          if (!gpuOutput) {
+            long validationStart = System.nanoTime();
+            validateHost(reader.getVectorSchemaRoot(), fixture, sample.decodedRows);
+            sample.validationNs += System.nanoTime() - validationStart;
+            sample.decodedRows += batchRows;
+            continue;
+          }
           CappedBytes ipc = new CappedBytes(cap);
           try (ArrowStreamWriter writer = new ArrowStreamWriter(reader.getVectorSchemaRoot(), null,
               Channels.newChannel(ipc))) {
@@ -268,7 +366,6 @@ public final class CacheBridgeBench {
           long importStart = System.nanoTime();
           try (StreamedTableReader gpuReader = Table.readArrowIPCChunked(
               ArrowIPCOptions.DEFAULT, provider(ipc))) {
-            int batchRows = reader.getVectorSchemaRoot().getRowCount();
             try (Table decoded = gpuReader.getNextIfAvailable(batchRows)) {
               Cuda.deviceSynchronize();
               sample.importNs += System.nanoTime() - importStart;
@@ -322,43 +419,75 @@ public final class CacheBridgeBench {
     int warmups = args.length > 2 ? Integer.parseInt(args[2]) : 2;
     int repeats = args.length > 3 ? Integer.parseInt(args[3]) : 5;
     int cap = args.length > 4 ? Integer.parseInt(args[4]) : 128 * 1024 * 1024;
+    String mode = args.length > 5 ? args[5] : "gpu-gpu";
+    String codec = args.length > 6 ? args[6] : "both";
+    boolean crossRead = args.length > 7 && Boolean.parseBoolean(args[7]);
     if (!List.of("fixed", "strings-low", "strings-wide").contains(fixture)
+        || !List.of("cpu-cpu", "cpu-gpu", "gpu-cpu", "gpu-gpu").contains(mode)
+        || !List.of("vortex", "parquet-proxy", "both").contains(codec)
         || rows < 1 || rows > 2_000_000 || warmups < 0 || warmups > 20
         || repeats < 1 || repeats > 20 || cap < 65536 || cap > 512 * 1024 * 1024) {
-      throw new IllegalArgumentException("fixture rows warmups repeats cap: invalid bounds");
+      throw new IllegalArgumentException("fixture rows warmups repeats cap mode codec: invalid bounds");
     }
-    Session session = Session.create();
-    try (BufferAllocator allocator = new RootAllocator(2L * cap);
-         Table input = fixture(fixture, rows)) {
-      Cuda.deviceSynchronize();
-      long gpuBytes = input.getDeviceMemorySize();
+    if (!codec.equals("vortex") && !mode.equals("gpu-gpu")) {
+      throw new IllegalArgumentException("Parquet proxy supports gpu-gpu only");
+    }
+    if (crossRead && mode.equals("cpu-cpu")) {
+      throw new IllegalArgumentException("cpu-cpu must not initialize the GPU; use cpu-gpu to cross-check");
+    }
+    boolean gpuInput = mode.startsWith("gpu");
+    boolean gpuOutput = mode.endsWith("gpu");
+    long logicalBytes = logicalBytes(fixture, rows);
+    if (logicalBytes > cap) throw new IllegalArgumentException("logical input estimate exceeds unit cap");
+    if (gpuInput || gpuOutput) Cuda.deviceSynchronize();
+    Session session = codec.equals("parquet-proxy") ? null : Session.create();
+    try (BufferAllocator allocator = new RootAllocator(3L * cap);
+         VectorSchemaRoot host = gpuInput ? null
+             : VectorSchemaRoot.create(hostSchema(fixture), allocator);
+         Table input = gpuInput ? fixture(fixture, rows) : null) {
+      if (host != null) populateHost(host, fixture, rows);
+      if (gpuInput) Cuda.deviceSynchronize();
+      long gpuBytes = input == null ? 0 : input.getDeviceMemorySize();
       if (gpuBytes > cap) throw new IllegalArgumentException("GPU input exceeds unit cap");
-      System.out.println("codec,fixture,iteration,rows,input_gpu_bytes,encoded_bytes,"
-          + "export_ns,encode_ns,decode_ns,gpu_import_ns,roundtrip_ns");
+      long fixtureAllocation = allocator.getAllocatedMemory();
+      System.out.println("codec,mode,fixture,iteration,rows,logical_bytes,input_gpu_bytes,encoded_bytes,"
+          + "encoded_bytes_per_row,logical_to_encoded,export_ns,encode_ns,decode_ns,"
+          + "gpu_import_ns,roundtrip_ns,cross_read_checked");
+      int codecCount = codec.equals("both") ? 2 : 1;
       for (int i = -warmups; i < repeats; i++) {
-        // Alternate codec order to reduce systematic order bias.
-        for (int j = 0; j < 2; j++) {
-          boolean vortex = (j + Math.floorMod(i, 2)) % 2 == 0;
+        // Alternate codec order when both are selected; individual processes can isolate codecs.
+        for (int j = 0; j < codecCount; j++) {
+          boolean vortex = codec.equals("vortex")
+              || (codec.equals("both") && (j + Math.floorMod(i, 2)) % 2 == 0);
           Sample sample = new Sample();
           if (vortex) {
-            CappedBytes encoded = encodeVortex(input, session, allocator, cap, sample);
-            decodeVortex(encoded, fixture, rows, session, allocator, cap, sample);
+            CappedBytes encoded = gpuInput
+                ? encodeVortex(input, session, allocator, cap, sample)
+                : encodeVortexHost(host, session, allocator, cap, sample);
+            decodeVortex(encoded, fixture, rows, session, allocator, cap, gpuOutput, sample);
+            if (crossRead) {
+              // Compatibility work is outside the selected mode's timing; disable it for memory runs.
+              decodeVortex(encoded, fixture, rows, session, allocator, cap, !gpuOutput, new Sample());
+            }
           } else {
             parquet(input, fixture, cap, sample);
           }
+          if (allocator.getAllocatedMemory() != fixtureAllocation) {
+            throw new AssertionError("Arrow allocation remains live after codec unit: "
+                + (allocator.getAllocatedMemory() - fixtureAllocation));
+          }
           if (i >= 0) {
             long roundtrip = sample.exportNs + sample.encodeNs + sample.decodeNs;
-            System.out.printf("%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d%n",
-                vortex ? "vortex-ipc-bridge" : "cudf-parquet-proxy", fixture, i, rows,
-                gpuBytes, sample.encodedBytes, sample.exportNs, sample.encodeNs,
-                sample.decodeNs, sample.importNs, roundtrip);
+            System.out.printf(java.util.Locale.ROOT,
+                "%s,%s,%s,%d,%d,%d,%d,%d,%.6f,%.6f,%d,%d,%d,%d,%d,%s%n",
+                vortex ? "vortex" : "cudf-parquet-proxy", mode, fixture, i, rows,
+                logicalBytes, gpuBytes, sample.encodedBytes, (double) sample.encodedBytes / rows,
+                (double) logicalBytes / sample.encodedBytes, sample.exportNs, sample.encodeNs,
+                sample.decodeNs, sample.importNs, roundtrip, crossRead && vortex);
           }
         }
       }
-      if (allocator.getAllocatedMemory() != 0) {
-        throw new AssertionError("Arrow Java allocation remains live after iterations: "
-            + allocator.getAllocatedMemory());
-      }
     }
+    // Closing the root allocator checks zero after the reusable host fixture is also closed.
   }
 }
