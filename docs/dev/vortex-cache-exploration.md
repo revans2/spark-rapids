@@ -22,6 +22,18 @@ batched-reader experiment remains proposed, not verified. Existing release and
 compatibility classifications below still apply. All operations and profiling used
 MCP docker_exec; no machine-exhaustion testing or additional scale jobs performed.
 
+API follow-up: source plus runtime javap inspection found existing pinned-pool
+sharing and direct buffer upload APIs. Proposed first control is a modest shared
+pinned pool in the same small diagnostic; no new run or implementation performed.
+GpuDeviceManager disables cuDF's default pool and RAPIDS pool defaults to zero,
+which supplies a concrete alternative explanation to test before restructuring
+the bridge. Direct HostColumnVector.copyToDevice / device-buffer constructors
+accept known null counts; ColumnVector.fromArrow avoids IPC but still enters the
+native Arrow importer in mounted source. See profiling report for ownership/type
+limits and native revision caveat. Released allocator defaults remain untouched;
+a configuration-only speedup would not establish out-of-box acceptance. All work
+used MCP docker_exec; delegated API discovery was independently checked.
+
 ## Scope, operating rules and accepted decision criteria
 
 Explore Vortex through host Arrow as an alternative cache representation to branch

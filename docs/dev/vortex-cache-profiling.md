@@ -98,3 +98,56 @@ The GPU population/read asymmetry is therefore plausible: population uses cuDF
 Arrow export followed by CPU Vortex encoding, whereas reading traverses this
 expensive Arrow import path. A bridge repair and a small verified comparison
 should precede another full scale matrix or a decision against Vortex.
+
+## API investigation: candidate fixes
+
+Read-only source and runtime Java API inspection found a smaller first experiment
+than restructuring IPC. These are candidate fixes; none has been benchmarked.
+
+1. **Test pooling first.** GpuDeviceManager.initializePinnedPoolAndOffHeapLimits
+   explicitly configures cuDF's default pinned pool to zero. RAPIDS's
+   spark.rapids.memory.pinnedPool.size also defaults to zero. With a nonzero pool,
+   initialization can share it with cuDF (setCuioDefault defaults true).
+   Rmm/PinnedMemoryPool runtime signatures confirm the necessary APIs exist.
+   The mounted native source's null-count device_scalar allocates a one-element
+   pinned bounce buffer. This fits the allocation pattern, but native revision
+   mismatch still prevents asserting the exact runtime call site. A modest pool
+   in one otherwise unchanged small diagnostic is the cheapest test of whether
+   raw pin/unpin is the bottleneck. Account for the pool in the existing managed
+   host budget; fallback allocations mean a pinned pool is not a hard native
+   memory limit. This diagnostic configuration would not meet the out-of-box
+   acceptance criterion by itself or authorize changing production defaults.
+
+2. **Direct Java buffer upload.** The actual runtime exposes public
+   HostColumnVector constructors accepting data/validity buffers and
+   Optional<Long> nullCount, followed by copyToDevice(). It also exposes
+   ColumnVector constructors accepting device buffers and a known null count.
+   Runtime/source inspection confirms these bypass Arrow IPC and build columns
+   directly; the numeric fixture can supply its exact null counts instead of
+   entering Arrow import's recount path. Owned buffers need correct validity
+   padding, slice offsets and lifetime management; asynchronous copies require
+   retaining sources until completion. Strings, booleans, view layouts, decimals
+   and nested children require explicit layout/type handling and validation.
+   This could provide a prototype-local fix without a native build, but it is
+   not a ready general Arrow importer. Public HostMemoryBuffer APIs do not wrap
+   arbitrary Arrow addresses, so this Java route still needs owned staging and
+   copying; it is not a zero-copy host-to-device path.
+
+3. **ColumnVector.fromArrow.** This existing runtime API accepts ByteBuffers and
+   avoids IPC serialization. Its Java documentation limits the supported type
+   contract to primitives. Mounted JNI code still invokes cudf::from_arrow, so
+   using it alone is not established to remove nullable-column allocation cost.
+   Do not infer wider support from undocumented JNI switch cases.
+
+4. **Native Arrow C Data bridge.** C++ exposes from_arrow/from_arrow_host and
+   stream import APIs. A JNI bridge could consume decoded Arrow buffers without
+   serializing them back into IPC. Those APIs still use Arrow import machinery;
+   removing IPC alone does not establish that the pinned-allocation issue goes
+   away. The stream API consumes/releases its input stream, unlike the individual
+   array APIs; bounded consumption and ownership need explicit design.
+
+Reader reuse and larger bounded imports remain useful independent candidates,
+but pooling should be isolated first. If the shared-pool comparison supports
+this explanation, the final out-of-box solution needs a design review: manage small pinned
+allocations within the existing budget, avoid unnecessary null-count work, or
+use direct uploads. Do not silently change the released allocator defaults.
