@@ -200,3 +200,126 @@ Default Java-heap failure logs. Source-only peer review of the subsequent
 `storage_info` repair found no blocker: primary counters now use one sequential
 local-block observation set, with the separate potentially lagging RDD report
 retained as evidence. No build or runtime job was run for this report.
+
+
+## Fixed-wide: 512 MiB logical per task, GPU producers
+
+PCBS and Vortex both **PASS** at 8,388,608 rows: four partitions of 2,097,152
+rows, **512 MiB canonical logical data per task and 2 GiB total**. This uses the
+same fixed-wide fixture, two concurrent tasks/two waves, 1 GiB JVM heap and 4 GiB
+RAPIDS-managed host limit as the preceding cohort. The host limit excludes Arrow
+and Rust memory. All full/narrow CPU/GPU reads passed their expected aggregates
+and actual reader-plan checks, without CPU expression bridges.
+
+These remain preliminary single fresh-job population observations with two
+measured reuse samples after one warmup per mode/projection. CPU producers above
+256 MiB/task remain unmeasured. Larger Default GPU-enabled cases remain parked
+after the recorded 256 MiB failures; this does not establish failure for larger
+CPU-only Default execution.
+
+### Storage and process footprint
+
+| Format / producer | Audited payload B | Resident storage B | Disk storage B | Logical resident | Logical disk-only | Sampled whole-job peak RSS B |
+| --- | ---: | ---: | ---: | --- | --- | ---: |
+| PCBS / GPU | 1,026,901,869 | 256,727,704 | 545,052,644 | 512 MiB (1 partition) | 1536 MiB (3 partitions) | 2,849,349,632 |
+| Vortex / GPU | 979,946,776 | 244,969,488 | 668,576,200 | 512 MiB (1 partition) | 1536 MiB (3 partitions) | 2,988,404,736 |
+
+Both cases have identical after-population and after-read totals; all fourteen
+recorded storage snapshots per case agree. PCBS retained partition 2 in memory;
+Vortex retained partition 1. Each had the other three partitions only on disk,
+with **no memory/disk overlap** in these observations. All four logical partitions
+are represented once across those subsets. Primary physical bytes are sums of
+the same sequential local-block inventory as the logical subsets, not a mixture
+with separately reported RDD counters.
+
+The post-run audits counted **280 PCBS records** and **256 Vortex records**, each
+covering all 8,388,608 rows. Audited payload lengths are separate from BlockManager
+storage bytes and disk serialization/compression. The optional audit follows the
+storage/timing observations and can reread or recompute data and alter residency.
+
+These resident subsets are outcomes of single jobs under the fixed budgets and
+concurrent unrolling, not proven maximum capacities. Spark stores partitions
+atomically; smaller serializer records bound working allocations without making
+fractions of an oversized partition independently resident. Whole-job sampled RSS
+includes startup, reference actions and audit; it may miss brief peaks and does
+not isolate encoder/decoder or native working memory.
+
+### Population and read-only reuse
+
+All times are milliseconds. First means the recorded warmup for that
+mode/projection; warmed means the median of the following two samples. CPU reads
+precede GPU reads on the same cache, so first GPU is not globally cold. Full reads
+consume all fields; narrow reads consume ID only. CPU and GPU consumers use the
+corresponding actual cache readers. Vortex's CPU row-output route and separate GPU
+Arrow IPC units describe the current prototype, not intrinsic format ceilings.
+
+| Format / producer | Population ms |
+| --- | ---: |
+| PCBS / GPU | 4847.272 |
+| Vortex / GPU | 13329.875 |
+
+#### Full all-column read
+
+| Format / producer | Consumer (cache reader) | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PCBS / GPU | CPU (CPU) | 11307.121 | 10642.250 | 16154.393 | 15489.522 |
+| PCBS / GPU | GPU (GPU) | 963.589 | 748.136 | 5810.861 | 5595.409 |
+| Vortex / GPU | CPU (CPU) | 6359.496 | 5829.208 | 19689.371 | 19159.083 |
+| Vortex / GPU | GPU (GPU) | 22139.698 | 22329.740 | 35469.573 | 35659.616 |
+
+#### Narrow ID-only read
+
+| Format / producer | Consumer (cache reader) | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | --- | ---: | ---: | ---: | ---: |
+| PCBS / GPU | CPU (CPU) | 8415.872 | 8246.604 | 13263.144 | 13093.876 |
+| PCBS / GPU | GPU (GPU) | 509.853 | 523.121 | 5357.126 | 5370.393 |
+| Vortex / GPU | CPU (CPU) | 636.384 | 679.993 | 13966.259 | 14009.868 |
+| Vortex / GPU | GPU (GPU) | 1482.869 | 1569.608 | 14812.744 | 14899.483 |
+
+Combined columns are computed additions of measured phases, not independently
+measured end-to-end jobs. No CPU-producer or Default result at this task size is
+implied by these two GPU-producer cases.
+
+Evidence: unchanged raw results, lead summaries and memory records under
+`/data/tmp/cache-scale/512m/{pcbs-gpu,vortex-gpu}/`. Report verification reproduced
+all aggregate and actual-reader checks, fourteen storage snapshots per case,
+audited row/record/payload totals, phase medians and sums, and sampled RSS. No build
+or runtime job was run for this report.
+
+
+## Separate Default CPU-only control: 256 MiB logical per task
+
+A fresh **CPU-only** Default run **PASS** at the same 4,194,304-row fixed-wide
+input, 256 MiB/task and 1 GiB total. The RAPIDS plugin was loaded, with GPU SQL
+disabled for population and every read; this control did not attempt a GPU-enabled
+consumer. It is separate from both earlier Default runs that failed on their first
+GPU-enabled full read. Their unavailable payloads and failed read cells above
+remain unchanged.
+
+All six CPU full/narrow read samples passed their exact expected aggregates and
+CPU reader-plan checks. The eight population/read storage observations agree:
+**437,697,968 resident storage B** represent all four partitions/**1 GiB logical
+data**, with **0 disk B**. The post-run audit counted **435,890,015 payload B**
+and **420 records**, covering all rows. Sampled whole-job peak RSS was
+**1,973,252,096 B**; it includes startup, reference actions and audit and is not
+isolated decoder/native working memory.
+
+Default's audited payload is smaller than both PCBS and Vortex payloads measured
+at this same numeric fixture and task size. This is workload-specific evidence:
+Vortex is not uniformly smaller across formats. Payload size and BlockManager
+storage footprint remain distinct measurements.
+
+Population took **21087.453 ms**. The read-only phases and computed
+additions below use first-for-projection warmup and the following two-sample
+median; the additions are not independently measured end-to-end jobs.
+
+| CPU projection | First read ms | Warmed median ms | Computed population + first ms | Computed population + warmed ms |
+| --- | ---: | ---: | ---: | ---: |
+| Full all-column | 1607.114 | 1351.400 | 22694.567 | 22438.853 |
+| Narrow ID-only | 164.875 | 102.831 | 21252.328 | 21190.284 |
+
+Evidence: unchanged `result.json`, `lead-verified-summary.json` and `memory.json`
+under `/data/tmp/cache-scale/256m/default-cpu-only/`. Independent report checks
+reproduced aggregates, CPU plans, storage sums, audited totals, medians, phase sums
+and RSS. This control establishes neither a GPU-enabled pass nor behavior at
+larger CPU-only task sizes. No build or runtime job was run for this report.

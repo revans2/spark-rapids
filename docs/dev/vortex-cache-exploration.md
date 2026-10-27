@@ -467,3 +467,41 @@ source frozen at0bd17258c6; no concurrent jobs/builds. Stop/review on any failur
 Lead independently reproduced every completed256MiB report phase row (20 cells),
 six-case storage/population values and all14 unchanged storage snapshots per
 PCBS/Vortex case with /data/tmp/verify-wide-report.py; report READY FOR REVIEW.
+
+## 512 MiB/task GPU cohort and CPU-only Default control: READY FOR REVIEW
+
+Both512MiB/task GPU-producer cases PASS at8388608rows/2GiB logical, same frozen
+source/caps/concurrency, CPU+GPU full/narrow aggregates/plans/audit/14local storage
+snapshot checks. Lead independently ran verify-cache-scale.py for each result.
+
+| GPU producer | Payload B | Population ms | CPU full warm ms | GPU full warm ms | Whole-job RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| PCBS |1026901869|4847.272|10642.250|748.136|2849349632|
+| Vortex |979946776|13329.875|5829.208|22329.740|2988404736|
+
+Each retained one512MiB logical partition: PCBS256727704memoryB/545052644diskB;
+Vortex244969488memoryB/668576200diskB. Other three partitions were disk-only;
+no overlap in these snapshots. Whole-job RSS remains below the4GiB guard.
+Evidence /data/tmp/cache-scale/512m/<format>-gpu. No CPU producer above256 tested.
+
+A separate Default CPU-only256 run PASS with plugin loaded and GPU SQL disabled
+for population and all reads. This completes the previously unavailable payload
+measurement WITHOUT replacing failed-run evidence:435890015payloadB/420records,
+all1GiB logical resident in437697968storageB,0disk,1973252096RSSpeakB.
+Population21087.453ms, CPU full warmed1351.400ms, narrow102.831ms.
+Default's numeric payload is SMALLER than both PCBS/Vortex, unlike the initial
+string workload's ranking. Do not imply Vortex universally compresses best.
+Evidence /data/tmp/cache-scale/256m/default-cpu-only. Lead independently launched
+and verified all aggregate/plan/size/snapshot/guard checks with verify-cache-scale.py.
+Its success does not turn earlier GPU-enabled Default failures into passes.
+
+Worker report tables for both512 cases and this Default control were independently
+reproduced by lead with /data/tmp/verify-report-additions.py: population, all first/
+warmed read cells, computed combined additions, payload and local storage values.
+The report labels sequential observation/capacity/RSS limitations and partition
+atomicity; lead re-read Spark MemoryStore.putIterator decisive whole-block commit.
+
+Next bounded cohort is PCBS/GPU then Vortex/GPU1024MiB/task,4GiB logical total,
+unchanged budgets/300s timeout, IN PROGRESS. MCP-only confirmed at handoff and
+checkpoint; source remains frozen. No2GiB/task case or larger CPU producer run
+yet. Any new failure/guard/timeout stops the batch before a larger test.
