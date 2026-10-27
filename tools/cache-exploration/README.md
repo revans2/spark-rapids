@@ -161,3 +161,37 @@ Not yet covered: Spark integration, released PCBS behavior, constrained-heap
 pressure, spill/cancellation, native RSS/GPU peak-memory sampling, projection,
 decimal/timestamp/nested schemas, and large parent GPU batches. Do not infer
 default-Spark OOM resilience from this experiment.
+
+## Local Spark measurements
+
+The separate [Spark prototype](spark/README.md) and `spark_cache_bench.py` now cover
+actual Spark default/PCBS/Vortex cache paths. Launch them with `run_spark.py` after
+building the prototype. The Vortex prototype is local Spark3.5.5-only and currently
+supports int/long/string. Its CPU row route differs from vectorized default/PCBS
+consumption; do not present its timings as the format's intrinsic limit.
+
+The launcher uses1GiB Java heap,4GiB RAPIDS-managed host cap and2task slots by default.
+The managed cap excludes Arrow/Rust. A sampled4GiB process-tree RSS guard and timeout
+stop conservative experiments; no machine-exhaustion search is authorized. Startup,
+reference and optional payload-audit work are included in whole-job memory samples.
+Payload audit runs AFTER timing/storage snapshots because it can recompute blocks.
+
+```text
+python tools/cache-exploration/run_spark.py --format pcbs --write-mode gpu \\
+  --read-modes cpu,gpu --fixture fixed-wide --task-size-mib 256 \\
+  --tasks 2 --partitions 4 --warmups 1 --repeats 2 --payload-audit \\
+  --output-dir /data/tmp/pcbs-256m-per-task
+```
+
+Approved scale choices are256,512,1024,2048MiB logical data per task, using exactly
+two waves. The32-field fixed-wide fixture has a256B/row standardized estimate and
+streamed generation. It mixes monotonic, low-cardinality and hashed longs with nulls;
+it is different from the small string fixture. Start at256MiB and inspect footprint
+before advancing. A task may produce multiple GPU batches and many small cache records.
+Report only actual producer batch counters exposed by the plan, not inferred counts.
+
+Raw outputs separate population nanoseconds and every read sample/warmup, actual
+CPU/GPU cache scanning, encoded payload, BlockManager residency/spill, logical rows
+resident, driver heap and RMM counters. Final reports must distinguish read-only
+reuse from population+read. Label sums of phase times as computed totals. No pressure
+resilience or production compatibility claim follows from the first bounded runs.

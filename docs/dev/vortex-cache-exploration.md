@@ -268,3 +268,94 @@ were rebuilt current501da9 (39.333s); provenance is at
 review. Lead found closed decoder/source task-listener retention and Spark Arrow
 helper per-unit listener retention; fixes are in progress before pressure tests.
 No pressure, capacity, or comparative Spark performance result is established yet.
+
+## Local Spark prototype and first comparison: READY FOR REVIEW
+
+Implementation is confined to tools/cache-exploration; production contracts/source
+and build profiles remain unchanged. Lead inspected the decisive Scala/Java code,
+worker peer review covered native ownership/projection/cancellation, and independent
+lead runs reproduced CPU and direct GPU scans, per-partition payload/storage audit,
+all small-row values, and the unchanged four-case weak-reference lifecycle probe.
+The corrected native readable explicitly releases its byte-array reference after
+reader/scan/source/session closure. No background worker or Rust/ABI change was
+introduced. Deferred canceled Rust tasks may retain native buffers until subsequent
+runtime work; this is not a demonstrated total-native-memory budget.
+
+CPU scanning in this first Vortex prototype is row-based, whereas supported default
+Spark/PCBS schemas can use vectorized CPU output. GPU consumption currently passes
+separate Arrow IPC units through cuDF. Compare these implemented routes, not an
+intrinsic best-case limit for the format. Other Vortex schemas remain explicit gaps.
+
+Memory controls were qualified with the user: the Docker limit is the whole box,
+so NEVER target machine exhaustion. Use conservative bounded data/concurrency and
+an explicit RAPIDS-managed host limit; it does NOT cover Arrow/Rust allocations.
+A 256 MiB managed-cap smoke failed with CpuSplitAndRetryOOM in default row-to-column
+builders at only1024rows (128MiB already tracked;236912656B requested). Sampled RSS
+was1266384896B; no host OOM occurred. Retain failure at
+/data/tmp/vortex-lead-final-capped-gpu. Baseline now uses1GiB JVM heap,4GiB RAPIDS
+managed host limit,0pinned(default),2task slots. Startup logs confirm4066MiB nonpinned
+plus30MiB overhead. Dataset/unit caps and a sampled4GiB RSS early-stop guard remain;
+the guard is not an OS hard limit. Its deliberately lowered1-byte check recorded
+trigger sample and terminated the owned process group, with no survivor found.
+
+Launcher snapshots/verifies the exact ordered parent/child dependency closure,
+classes/native libraries and source; later builds cannot overwrite per-run evidence.
+Future runs snapshot the job source itself. JVM/Rust/Arrow working memory stays
+separate from encoded payload, BlockManager footprint and logical resident data.
+RMM tracked live/high-water counters exclude unused pool reservation; high water
+is cumulative for that JVM, not a phase peak. No high-water subtraction is used.
+
+Lead independently verified all six first-comparison JSON results and medians.
+Same524288rows /46476067canonical logicalB /2partitions/tasks /1GiBheap /4GiBmanaged
+cap, one warmup and two timed reuse samples, serial fresh JVMs. All data resident,
+no disk. Full query consumes all columns using xxhash64; no CPU expression bridge.
+Default requested-GPU reads still scan cache on CPU; PCBS/Vortex use direct GPU scans.
+Cold population is one sample per case, so all numbers remain preliminary.
+
+| Format / producer | Payload B | Resident B | Population ms | CPU read-only median ms | GPU-enabled read-only median ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Default / CPU |41236397|41273328|775.594|185.129|258.774|
+| Default / GPU |41236397|41273328|2245.839|146.216|250.506|
+| PCBS / CPU |44941123|44941536|1157.194|224.079|204.775|
+| PCBS / GPU |36709004|36709320|976.781|246.615|198.712|
+| Vortex / CPU |21124088|21124504|1221.914|248.621|815.468|
+| Vortex / GPU |21110496|21110824|1318.547|236.199|871.027|
+
+Whole-job sampled RSS ranged1527726080..1771909120B and includes startup/reference/
+audit work; do not label the difference pure encoder working memory. Evidence:
+/data/tmp/cache-first-comparison/<format>-<producer> (result,command,memory,
+verified-summary,source/artifact provenance). All six build-provenance snapshots
+share SHA7265fbd1efaddae77f05d9de0b2fbaf7c80ea7941d9c6bbba6640c391fa6fd22.
+Verification script /data/tmp/summarize-first-comparison.py. No guard/timeouts,
+autotuning, or host failures occurred. These are the first real Spark comparisons;
+the older cuDF codec-proxy timings must remain separately labeled.
+
+## User-qualified scale and final-report requirements: IN PROGRESS
+
+Final report MUST separate cache population, read-only reuse (first vs warmed,
+full vs projected) and write+read, broken down by CPU/GPU producer and consumer.
+Totals formed by adding measured phases are COMPUTED models, not independent
+end-to-end measurements. Consumer order is CPU then GPU on the same stored bytes.
+
+User requested about256MiB,512MiB,1GiB,2GiB LOGICAL data per TASK with multiple
+tasks and ideally two waves. Use2concurrent slots and4source/cache partitions.
+Task size is independent of GPU batch target and small cache records. Stream data;
+never collect a large dataset to the driver, search machine-OOM boundaries, or
+raise limits automatically after a guard/managed failure. Advance upward only after
+reviewing lower-size footprint. Preserve explicit unsupported/failed/incomplete cells.
+
+New fixed-wide fixture has32fields: ID/key plus10monotonic,10low-cardinality and
+10hash-derived longs with nulls. Its standardized nullable Arrow-layout estimate is
+252fixed bytes +32validity bits =256B/row for the selected row counts. Exact rows/task
+are1048576,2097152,4194304,8388608; total across4partitions up to33554432. Full queries
+hash all30extra columns and count nulls; narrow queries select ID only. Keep the
+original string fixture results separate: the workloads are different.
+
+Only the explicit --task-size-mib path may exceed the small-run row limit. It checks
+exact total/per-partition logical size and partitions==2*task slots. Small1024-row
+CPU/GPU smokes passed all32values and canonical262144B,4partitions/2waves, including
+actual GPU scans and payload audit. Producer SQL counters are reported with their
+node names: GpuRange exposed4batches; GpuProject exposed no output-batch counter.
+Do not invent a final-wide batch count from the child counter. Lead read the full
+fixture/validation code; independent peer review is clear. Large scale cases have
+NOT yet run. Next step is the256MiB/task comparison, preserving the safety envelope.
