@@ -434,4 +434,36 @@ for CPU-only execution at larger sizes.
 
 PCBS/Vortex CPU-producer256 cases are the next bounded batch, IN PROGRESS. Still
 MCP-only; no concurrent GPU jobs, source/build frozen, stop/review on failure.
-No512MiB/task or larger case has run at this checkpoint.
+No512MiB/task or larger case had run at that checkpoint.
+
+## 256 MiB/task complete producer/consumer matrix: READY FOR REVIEW
+
+PCBS/CPU and Vortex/CPU both PASS with identical logical input and all32field
+aggregates, CPU/GPU scan plans, no CPU expression bridge, audited row counts and
+unchanged caps. Lead independently ran /data/tmp/verify-cache-scale.py, including
+all14 per-action local-storage consistency checks. Peer review covered the small
+accounting change; production/build sources remain unchanged.
+
+| CPU producer | Payload B | Population ms | CPU full warm median ms | GPU full warm median ms | RSS peak B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| PCBS |735262340|14060.908|5644.279|696.969|2611281920|
+| Vortex |489848544|7170.255|2465.181|10715.521|2668290048|
+
+PCBS/CPU:183817312memoryB represents256MiB logical;382166705diskB represents
+three disk-only partitions/768MiB logical. Vortex/CPU:244925792memoryB represents
+512MiB logical;223294310diskB represents512MiB logical disk-only. Population and
+after-read snapshots retain these subsets. These figures show why producer mode
+and logical capacity must be separate from physical bytes. Evidence in
+/data/tmp/cache-scale/256m/<format>-cpu; full/narrow first/warm and computed
+population-plus-read totals are in vortex-cache-results.md.
+
+Lower-scale successful cases stayed below2.76GB whole-job sampled RSS, so the next
+bounded batch is PCBS/GPU and Vortex/GPU at512MiB/task,2GiB logical total, same
+two slots/four partitions and all budgets unchanged. Larger CPU-produced caches
+remain explicitly unmeasured. No higher-size Default GPU-enabled repeats: both
+producer modes already reached the bounded heap failure at256MiB. This is not a
+claim about larger CPU-only Default reads. MCP-only confirmed at resumption;
+source frozen at0bd17258c6; no concurrent jobs/builds. Stop/review on any failure.
+Lead independently reproduced every completed256MiB report phase row (20 cells),
+six-case storage/population values and all14 unchanged storage snapshots per
+PCBS/Vortex case with /data/tmp/verify-wide-report.py; report READY FOR REVIEW.
