@@ -337,6 +337,8 @@ def main():
         result['storage_after_population'] = storage_info(spark, rdd_id, partition_sizes)
         result['driver_heap_after_population'] = heap(spark)
         result['plugin_memory_after_population'] = plugin_memory(spark)
+        print(json.dumps({'phase': 'population', 'elapsed_ns': result['population_ns'],
+                          'rows': observed_rows}), flush=True)
         for mode in read_modes:
             spark.conf.set('spark.rapids.sql.enabled', str(mode == 'gpu').lower())
             for narrow in [False, True]:
@@ -360,6 +362,11 @@ def main():
                                             'storage': storage_info(spark, rdd_id, partition_sizes),
                                             'driver_heap_after_read': heap(spark),
                                             'plugin_memory_after_read': plugin_memory(spark)})
+                    print(json.dumps({'phase': 'read', 'requested_mode': mode,
+                                      'narrow': narrow, 'warmup': iteration < 0,
+                                      'iteration': iteration, 'elapsed_ns': elapsed,
+                                      'observed_cache_reader': reader_backend,
+                                      'aggregate_checked': True}), flush=True)
             if expected_rows is not None:
                 if validation_frame(frame).orderBy('id').collect() != expected_rows:
                     raise AssertionError('full row comparison failed for ' + mode)

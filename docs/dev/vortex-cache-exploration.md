@@ -751,3 +751,43 @@ fixtures/budgets/operators/encoding changes. py_compilePASS and focused peerrevi
 clear; current2GiB run captures updatedjobsource. Runtime matching of13stdout
 events to finalresult remains pending. This fixes evidence loss on future guard/
 timeouts without claiming a completedoverallrun from partialphase events.
+
+## Phase evidence and first2GiB-task cases: READY FOR REVIEW / cohort ACTIVE
+
+Untimed7line phase-print change now VERIFIED on real8GiB logical jobs: lead
+independently ran verify-cache-progress.py for Default andPCBS main2GiB/task.
+All13flushed JSONrecords match finalpopulation/read nanoseconds/mode/projection/
+warmup/iteration/actualreader exactly; aggregate_checked onlyafterpassedvalidation.
+Focused sourcepeerreview andpy_compilePASS. No newJVMcalls/timedregion changes.
+Implementation READY FOR REVIEW; capturedsourcehashc652baf... identifies change.
+
+Default primary2GiB/task PASS:8GiB logical allresident, payload3487118351B/
+3356records, storage-accounted3335300728B,0disk, RSS19117694976B.
+Population321273.290ms, CPUfullwarm10094.548ms/GPU-enabled7645.673ms.
+Lead independently verified allresource/app/aggregate/plan/audit/14snapshot checks.
+Logs show roughly2GiB host requests while~2.3GiB already managedallocated, exceeding
+fixed4GiBcap; repeated HostAlloc first-attempt backpressure before population
+completed. Do not treat this as hostOOM or attribute321s to formatintrinsics.
+This resource-cap interaction must accompany the reported population time.
+
+PCBS primary2GiB/task PASS:8GiB logical allresident, payload4107649355B/
+1124records, storage-accounted4107702824B,0disk, RSS9637453824B.
+Population9738.901ms, CPUfullwarm42574.593ms/GPUfull1578.360ms.
+Same independent raw/result/progresschecks PASS. Vortex2GiB primary run ACTIVE;
+no stoppingcondition reported. Same900s allowance and fixedbudgets; no otherjobs.
+
+User explicitly asked whether population numbers are GPU-enabled and whether
+CPU-only versions ran. Lead clarified: primary published cases so far GPU input
+execution, but Default/Vortex codecCPU versusPCBS GPUcodec. CPU-produced old1GiB
+budget cases exist, cannot mix with16GiB baseline. NEXT required mainseries is
+CPU-produced/CPU-read at ALL FOURtask sizes (256/512/1024/2048MiB), GPU SQL disabled
+throughout, same16GiBheap/managed4g/RSSguard32GiB/2slots4parts/records/methodology.
+Use --load-plugin torepresent serializer-on/GPU-SQL-off scenario. Primary
+CPU-produced→GPU-consumer performance remains unmeasured; earlier mixed-budget
+correctness/timing evidence stays separately qualified. Do not claim full
+cross-product performance coverage from CPU-only runs.
+
+MCP-only confirmed each runtime checkpoint; no source/build changes while current
+comparative cohort runs. Finish currentVortexcase and reviewfootprint before
+next boundedCPUseries. No extraencodingpolicy/batch-size optimization authorized
+as a substitute for completing these baseline measurements.
