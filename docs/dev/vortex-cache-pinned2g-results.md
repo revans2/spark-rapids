@@ -1,6 +1,6 @@
 # Spark cache comparison with a 2 GiB pinned pool
 
-Status: IN PROGRESS. Independently verified 10/12 attempted GPU-population cases: 9 passed, 1 failed.
+Status: READY FOR REVIEW. Independently verified 12/12 attempted GPU-population cases: 11 passed, 1 failed.
 The original zero-pool [comparison](vortex-cache-results.md) and CSV are preserved.
 CPU-only producer cases were not rerun. No production defaults changed.
 
@@ -13,6 +13,10 @@ no machine-exhaustion test is authorized.
 
 The deterministic fixed-wide numeric fixture, four partitions/two local task slots,
 default memory-and-disk storage and CPU-before-GPU read order match the baseline.
+The early 256 MiB baseline source predates added population/read progress logging.
+Independent source diff inspection found those flushed messages outside the timed
+intervals; data generation and measured actions are unchanged. Source snapshots
+are retained so this small instrumentation difference remains reviewable.
 There is one warmup and two measured reads per consumer/projection in each fresh
 JVM. These are two within-job samples, not two independent whole-experiment runs.
 Default cache decoding remains CPU even for GPU-enabled downstream execution.
@@ -35,6 +39,8 @@ Spark storage estimates and whole-job RSS are distinct measurements.
 | 1024 | PCBS | 5.760 / 2.788 | 20.291 / 20.289 | 1.043 / 0.787 | 1.33x | 3.576 |
 | 1024 | Vortex | 20.789 / 18.753 | 11.998 / 10.736 | 71.253 / 4.060 | 17.55x | 22.813 |
 | 2048 | Default | 321.273 / FAIL population | 10.095 / — | 7.646 / — | — | — |
+| 2048 | PCBS | 9.739 / 4.512 | 42.575 / 41.438 | 1.578 / 1.090 | 1.45x | 5.602 |
+| 2048 | Vortex | 41.934 / 36.848 | 26.640 / 27.069 | 178.681 / 9.127 | 19.58x | 45.974 |
 
 ## ID-only reads: baseline to 2 GiB pool
 
@@ -50,6 +56,8 @@ Spark storage estimates and whole-job RSS are distinct measurements.
 | 1024 | PCBS | 15.734 / 15.692 | 0.523 / 0.352 |
 | 1024 | Vortex | 0.948 / 0.973 | 3.399 / 0.764 |
 | 2048 | Default | 0.272 / — | 0.538 / — |
+| 2048 | PCBS | 33.032 / 31.427 | 0.765 / 0.522 |
+| 2048 | Vortex | 1.848 / 1.748 | 7.131 / 1.432 |
 
 ## Size, retained data and memory
 
@@ -65,6 +73,8 @@ Spark storage estimates and whole-job RSS are distinct measurements.
 | 1024 | PCBS | 4,294,967,296 | 2,053,799,024 / 2,053,797,644 | 2,053,824,352 | 10,749,976,576 / 11,135,090,688 | 0 |
 | 1024 | Vortex | 4,294,967,296 | 1,959,914,440 / 1,959,914,440 | 1,959,937,032 | 9,508,372,480 / 12,832,215,040 | 0 |
 | 2048 | Default | — | 3,487,118,351 / — | — | 19,117,694,976 / 3,424,374,784 | 5 |
+| 2048 | PCBS | 8,589,934,592 | 4,107,649,355 / 4,107,660,739 | 4,107,714,192 | 9,637,453,824 / 12,090,564,608 | 2 |
+| 2048 | Vortex | 8,589,934,592 | 3,919,838,784 / 3,919,838,784 | 3,919,883,904 | 14,475,481,088 / 16,960,266,240 | 0 |
 
 All successful cases retained every logical row in memory with disk bytes zero at
 all recorded snapshots. Residency does not prove no transient spilling occurred.
@@ -120,6 +130,14 @@ it does not isolate per-phase live working memory.
 | 2048 | Default | cpu / unmeasured | id | — | — | — | — |
 | 2048 | Default | gpu / unmeasured | full | — | — | — | — |
 | 2048 | Default | gpu / unmeasured | id | — | — | — | — |
+| 2048 | PCBS | cpu / cpu | full | 42.667 | 41.438 | 47.179 | 45.950 |
+| 2048 | PCBS | cpu / cpu | id | 31.421 | 31.427 | 35.933 | 35.939 |
+| 2048 | PCBS | gpu / gpu | full | 1.487 | 1.090 | 6.000 | 5.602 |
+| 2048 | PCBS | gpu / gpu | id | 0.513 | 0.522 | 5.025 | 5.034 |
+| 2048 | Vortex | cpu / cpu | full | 28.254 | 27.069 | 65.102 | 63.916 |
+| 2048 | Vortex | cpu / cpu | id | 1.700 | 1.748 | 38.547 | 38.596 |
+| 2048 | Vortex | gpu / gpu | full | 10.230 | 9.127 | 47.077 | 45.974 |
+| 2048 | Vortex | gpu / gpu | id | 1.313 | 1.432 | 38.161 | 38.279 |
 
 ## Failed population: Default at 2 GiB per task
 
@@ -138,6 +156,10 @@ CSV phase rows explicitly say FAIL_POPULATION and leave unmeasured fields empty.
 The failure occurs in the export feeding Default, before its CPU cache encoding;
 it does not establish a limit on CPU-only Default caching or machine RAM.
 The original zero-pool case succeeded under a different host-budget partition.
+At the inspected source, row conversion runs inside withRetry, while the later
+rowsCv.copyToHost call runs in its foreach consumer outside that retry closure.
+The observed host-allocation exception escapes there. Bounding those host exports
+or reviewing retry coverage is a separate production change, not implemented here.
 Changing the pinned reservation can improve transfer overhead while reducing
 the space available for large non-pinned buffers. This configuration boundary
 must remain visible when comparing formats.

@@ -34,17 +34,26 @@ limits and native revision caveat. Released allocator defaults remain untouched;
 a configuration-only speedup would not establish out-of-box acceptance. All work
 used MCP docker_exec; delegated API discovery was independently checked.
 
-## Bridge controls READY FOR REVIEW; 2 GiB pool matrix IN PROGRESS
+## Bridge controls and 2 GiB matrix READY FOR REVIEW; copy follow-up IN PROGRESS
 
-Pinned-pool matrix progress: 10/12 attempted outcomes independently verified:
-9 PASS at 256/512/1024 MiB per task; Default at 2048 MiB per task failed during
-GPU-to-row export/population with managed CpuRetryOOM (2,147,475,456-byte request,
-2,018 MiB non-pinned allowance, sampled RSS 3,424,374,784 bytes). No budget raised
-or failure retried. Remaining 2048 MiB PCBS/Vortex cases continue independently.
-Report: vortex-cache-pinned2g-results.md; CSV has 40
+Pinned-pool matrix COMPLETE, READY FOR REVIEW: 12 attempted outcomes independently
+verified, 11 PASS plus Default at 2048 MiB per task failed during GPU-to-row
+export/population with managed CpuRetryOOM (2,147,475,456-byte request, 2,018 MiB
+non-pinned allowance, sampled RSS 3,424,374,784 bytes). No budget raised or failure
+retried. Vortex at 2048 MiB/task improved full GPU read median 178.681 -> 9.127 s;
+PCBS 1.578 -> 1.090 s. Every successful case retained all logical data, disk zero.
+Report: vortex-cache-pinned2g-results.md; CSV has 48
 consumer/projection rows. Exact aggregates, old/new source and dependency hashes,
 actual 2 GiB pool, heap/managed/RSS budgets, scans, payload and resident snapshots
-reproduced through /data/tmp/verify-pinned2g-lead.py. Remaining sizes in progress.
+reproduced through /data/tmp/verify-pinned2g-lead.py; failure evidence separately
+verified through /data/tmp/verify-pinned2g-failure-lead.py. Further copy experiment
+IN PROGRESS: separate build compiled, ten lifecycle cases plus sink boundary/cap
+and four CPU/GPU-producer numeric/string correctness probes passed. First small
+256 MiB/task control: full GPU median 1.383 s (samples 1.099/1.667), compared with
+original 2 GiB-pool matrix 1.169 s; no benefit demonstrated. One fresh original /
+candidate pair will confirm; no chunk-size tuning or broader experiments. Park
+or revert the candidate if no reproducible useful gain. Artifact /data/tmp/
+vortex-spark-chunked-ipc remains separate; original matrix binaries unchanged.
 
 Small controls and direct-buffer implementation are verified READY FOR REVIEW:
 see vortex-cache-bridge-results.md and its three-row CSV. All use 256 MiB/task,
@@ -1101,3 +1110,19 @@ No completed population/read/storage/audit outcome or encodedpayload measured.
 No retry or budget relaxation. Evidence /data/tmp/cache-pinned2g-16g/2048/default-gpu/
 worker-failure-verification.json plus exact manifests/result/stack/logs preserved.
 Independent2048PCBS/Vortex cases continue as authorized; do not reportall12PASS.
+
+### Pinned2GiB worker case 2048MiB/task pcbs: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/2048/pcbs-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"pcbs","task_mib":2048,"output":"/data/tmp/cache-pinned2g-16g/2048/pcbs-gpu","logical_bytes":8589934592,"payload_bytes":4107660739,"records":1124,"population_ms":4512.125605,"rss_peak_bytes":12090564608,"snapshot_count":14,"pool_exhaustion_lines":2,"reads":[{"mode":"cpu","narrow":false,"first_ms":42667.214093,"median_ms":41437.66351300001},{"mode":"cpu","narrow":true,"first_ms":31420.528025,"median_ms":31427.1250805},{"mode":"gpu","narrow":false,"first_ms":1487.421849,"median_ms":1090.177071},{"mode":"gpu","narrow":true,"first_ms":512.790032,"median_ms":522.015491}],"host_available_before":187679199232,"resident_storage_bytes":4107714192,"resident_logical_bytes":8589934592,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.
+
+### Pinned2GiB worker case 2048MiB/task vortex: READY FOR REVIEW
+
+MCP docker_exec only; original78e042 artifact and released contracts preserved.
+Exact reference aggregates/readers/provenance/budgets/audit checked; actual2048MiB
+pinned pool startup recorded. Evidence /data/tmp/cache-pinned2g-16g/2048/vortex-gpu/worker-verified.json.
+Worker summary: {"status":"PASS","format":"vortex","task_mib":2048,"output":"/data/tmp/cache-pinned2g-16g/2048/vortex-gpu","logical_bytes":8589934592,"payload_bytes":3919838784,"records":1024,"population_ms":36847.511711,"rss_peak_bytes":16960266240,"snapshot_count":14,"pool_exhaustion_lines":0,"reads":[{"mode":"cpu","narrow":false,"first_ms":28254.215511,"median_ms":27068.816574999997},{"mode":"cpu","narrow":true,"first_ms":1699.681647,"median_ms":1748.4573814999999},{"mode":"gpu","narrow":false,"first_ms":10229.768138,"median_ms":9126.903113},{"mode":"gpu","narrow":true,"first_ms":1313.255089,"median_ms":1431.7087385}],"host_available_before":187741192192,"resident_storage_bytes":3919883904,"resident_logical_bytes":8589934592,"disk_storage_bytes":0}
+Lead independent verification/final acceptance remains outstanding.
