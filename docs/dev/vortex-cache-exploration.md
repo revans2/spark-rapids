@@ -666,3 +666,40 @@ payload871780099B,population42646.828ms,CPUfullwarm2779.819ms/GPU-enabled2006.62
 RSS7943970816B. PCBS/Vortex512 pending. No1GiB/2GiBtaskprimaryrun yet, no16GiB
 CPU-producercohort yet. MCP-only confirmed at resumption/checkpoint; no concurrent
 benchmarks or builds. Stop/review on failure, no automatic limit changes.
+
+## PRIMARY16GiB / 512MiB-task cohort: READY FOR REVIEW
+
+All3GPU-producer cases PASS at2GiB canonical logical total, all4partitions
+memory-resident/no disk across all14snapshots per case. Same original8MiB
+Vortex build,16GiBheap/managed4GiB/RSSguard32GiB/2slots/4parts.
+Lead independently verified all rawcases with verify-cache-scale.py, including
+actualresourcebudgets/artifact,expectedaggregates,readerplans,auditcounts/storage.
+
+| Format | Payload B | Population ms | CPU full warm ms | GPU-enabled full warm ms | Whole-job RSS B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Default |871780099|42646.828|2779.819|2006.628|7943970816|
+| PCBS |1026907683|3381.433|10525.747|523.472|3675885568|
+| Vortex |979946776|12008.372|5744.754|29643.115|7785480192|
+
+Localstorage-accountedbytes875395032/1026921048/979958104 respectively each
+represent2GiB logical data. Lead generated the same first/warm/full/narrow/
+computedcombined tables from rawJSON with append-primary-cohort.py512 and
+independently reproduced ALL12phase rows plus size/RSS/population using
+verify-primary-report.py256512. Java reportworker hit model capacity; lead
+continued from saved data without restarting or duplicating benchmarks.
+Data source/artifacts/resourcebudgets remained unchanged.
+
+Next main1GiB/task cohort IN PROGRESS, same memorybudgets/concurrency/methodology;
+EXPLICIT timeout600 selected BEFORE runs based on observed~30s/full Vortex read
+at512MiB/task. This extends duration only, not resourcecaps or repeatcriteria.
+MCP-only confirmed at resumption/checkpoints; no builds/concurrent benchmarks.
+No2GiB/task or16GiB CPU-producer run yet.
+
+Default primary1GiB/task PASS independently verified:4GiB logical allresident,
+payload1743560044B/1680records, population85826.450ms,CPUfullwarm5381.009ms/
+GPU-enabled3979.743ms,RSS15233388544B,0disk. BlockManager memory1662574592B
+is LOWER than payloadsum; lead read MemoryStore.DeserializedValuesHolder.getBuilder
+which uses SizeEstimator.estimate(arrayValues). Therefore residentbyte counters
+are Spark storage-accounting estimates, not exact physical/liveheap size. Report
+now says this explicitly; don't infer physical heap smaller than unique payload
+or use estimates as allocation census. PCBS/Vortex main1GiB cases pending.

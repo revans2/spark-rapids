@@ -3,7 +3,9 @@
 These are historical constrained-budget results, not the primary normal-host
 comparison. The user selected a [16 GiB-heap baseline](vortex-cache-results.md).
 In particular, a 4 GiB sampled RSS guard can interrupt legitimate host-memory use;
-a guard stop is not a host OOM or proof of a format memory defect.
+a guard stop is not a host OOM or proof of a format memory defect. Deserialized
+resident storage bytes are Spark SizeEstimator accounting estimates, not an exact
+heap census; encoded payload lengths and process RSS are separate measurements.
 
 Source: six `/data/tmp/cache-first-comparison/<format>-<producer>/result.json` files.
 All cases use the original **strings-wide** fixture: 524,288 rows and two source
