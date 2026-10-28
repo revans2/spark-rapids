@@ -2,7 +2,8 @@
 
 Status: IN PROGRESS — user returned repo; current-source baseline rebuilt and verified.
 Source/provenance repairs and the corrected 256MiB/task cohort are READY FOR REVIEW.
-Current-source CPU profiling is next; larger task/string matrix remains pending.
+Current-source CPU/GPU profiling is verified and READY FOR REVIEW below.
+Larger task/string matrix and proposed batching changes remain pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
 cohort section describe the older hash-pinned prebuilt jar, not this branch's
@@ -703,11 +704,115 @@ encode counters unchanged), no guard stops. Caps unchanged heap16GiB/host32inc
 pin2/RSS64/GPU24; actual managed host32GiB minus30MiB per-task overhead.
 Current PCBS has140cachedrecords (35/partition), versus4 in the historical
 artifact; all packed formats256. Do not attribute old PCBS CPU stacks to the
-current reader. Current-source CPU profiling still needed.
+current reader. Current-source profiling is recorded in the following section.
 
 Artifacts /data/tmp/nvcomp-spark-probe/current-{pcbs,snappy,ans,zstd,lz4,cascaded,
 uncompressed,default}-fixed-256; source-bound build-20. Root repro script
 /data/tmp/nvcomp-pcbs-rebuild-01/verify-current-cohort.py passed all8runs including
 six runtime class origins, rows, storage, caps, counters and audited bytes.
 Old artifacts were not overwritten/relabelled; no codec/batching optimization
-implemented. Next: profile current PCBS/Snappy/Cascaded host costs on this cohort.
+implemented. The current-source profiling follow-up is recorded below.
+
+## Current-source CPU/GPU diagnosis — READY FOR REVIEW
+
+Root completed serial diagnostic runs using the same source-bound build-20,
+settings and 4x256MiB fixed-wide data. Every operation, worker handoff and
+checkpoint remained MCP docker_exec only; worker confirmed read-only use and
+did not run GPU/Maven jobs. No production or prototype codec changes were made.
+
+CPU profiles: cpu-current-{pcbs,snappy,cascaded}-256 under
+/data/tmp/nvcomp-spark-probe. Packaged async-profiler used CPU ctimer 1ms and
+wall 5ms; one population plus five full and five id-only measured actions per
+format, with warmups excluded. Root inspected decisive pinned PCBS source and
+independently verified results/counter arithmetic. Worker checked all33 measured
+JFRs against raw event/thread metadata and analyzer output; root also inspected
+JDK jfr print output from the current PCBS full-read trace. No old
+Table.readParquet stack appeared; the current reader/chunked-reader paths did.
+
+Diagnostic read means below are separate from the unprofiled cohort medians.
+Worker CPU sums both concurrent task slots; it is not elapsed wall time.
+
+| Format | Phase | Wall ms | Worker CPU ms | Driver CPU ms |
+| --- | --- | ---: | ---: | ---: |
+| PCBS | Population | 1440.13 | 1446.62 | 271.28 |
+| PCBS | Full read | 278.39 | 303.12 | 86.94 |
+| PCBS | Id-only read | 163.51 | 150.58 | 53.10 |
+| Snappy | Population | 1844.98 | 2218.27 | 269.80 |
+| Snappy | Full read | 503.66 | 706.58 | 102.59 |
+| Snappy | Id-only read | 232.86 | 256.25 | 62.83 |
+| Cascaded | Population | 1954.79 | 2459.93 | 285.10 |
+| Cascaded | Full read | 718.89 | 1109.17 | 98.51 |
+| Cascaded | Id-only read | 351.56 | 520.41 | 52.77 |
+
+Current PCBS still stages complete encoded records from heap into native host
+memory in ParquetCachedBatchFiles.stage, through HostMemoryBuffer.setBytes and
+Unsafe.copyMemory. Root read this implementation and its caller:
+ParquetCachedBatchReader stages against the full cache schema; selected columns
+are applied later by native ParquetOptions/includeColumn. Logical-file footer
+rewriting/slicing adds no second payload copy. Full/id task CPU sample membership
+for this staging copy was361/305 respectively (overlapping stack memberships,
+not exclusive wall-time totals).
+
+The packed formats spend substantial CPU in CUDA driver calls. Driver leaf
+samples comprise26.6%/43.4%/46.5% of full-read task CPU samples for
+PCBS/Snappy/Cascaded respectively. Nearest Java callers in Snappy include scalar
+creation, fromScalar, casts, reductions, binary operations, null checks and column
+cleanup as well as decoding. Cascaded additionally shows substantial memcpy and
+allocation/free activity. Broad aggregate-iterator ancestry includes upstream
+cache consumption; it cannot by itself assign those samples to aggregation.
+These sample shares must not be converted to elapsed-time percentages.
+
+GPU diagnostic runs profile-current-{pcbs,snappy}-256 used Nsight CUDA/NVTX,
+one warmup and two measured reads. Root independently reproduced first full-read
+kernel counts and duration sums from SQLite/NVTX windows. No GPU event crossed
+any of the seven measured phase boundaries per run.
+
+| Format | Phase | Wall ms | Kernel events | Kernel union ms | H2D MiB | D2H MiB | Any GPU activity union ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| PCBS | Population | 1471.07 | 1330 | 164.05 | 7.881 | 494.110 | 199.67 |
+| PCBS | Full read 0 | 401.52 | 1024 | 29.09 | 497.685 | 14.652 | 56.69 |
+| PCBS | Id-only read 0 | 196.45 | 434 | 4.33 | 16.496 | 0.340 | 5.84 |
+| Snappy | Population | 1917.32 | 36858 | 210.40 | 1.893 | 524.348 | 285.41 |
+| Snappy | Full read 0 | 698.70 | 28804 | 105.43 | 522.194 | 0.844 | 146.25 |
+| Snappy | Id-only read 0 | 234.35 | 1602 | 13.22 | 521.640 | 0.831 | 48.21 |
+
+These are perturbed diagnostic runs, not replacement headline timings. Events
+include downstream query work, not codec kernels alone. Union times overlap and
+must not be added; time outside GPU activity is not measured CPU time. CPU and
+GPU profiles are separate jobs, so this is not an exact critical-path breakdown.
+
+Projection evidence is direct: PCBS id-only transfers16.5MiB versus497.7MiB
+full-read, whereas packed Snappy still transfers521.6MiB versus522.2MiB.
+Packed full-read kernel count28804 versus current PCBS1024, together with
+nearest CPU call contexts, supports investigating repeated small decoded GPU
+batches and downstream launch overhead. Cache audits count140 PCBS records and
+256 packed records, but these are NOT independently measured scan output batch
+counts: PCBS combines records through its chunked reader. Exact read-side batch
+counts remain unverified.
+
+GC collection totals across five full reads were6/18/7ms for
+PCBS/Snappy/Cascaded; GC is not the dominant observed explanation. Compilation
+counters show one warmup is not a fully steady-state guarantee.
+Sequential counter snapshots slightly widen the tight JFR/query window:
+maximum extra1.234ms Snappy and1.295ms Cascaded, with one PCBS id-only iteration4
+outlier4.800585ms (before-snapshot4.795587ms, after1.250858ms, no GC).
+The tight PCBS JFR window itself remained within0.306ms of collect.
+Root's initial arbitrary3ms counter-gap check caught that outlier; it was
+investigated and explicitly retained as a measurement limitation. No claim of
+an exact additive wall-time decomposition or uniformly sub1.3ms gaps is made.
+
+Root reproduction script
+/data/tmp/nvcomp-pcbs-rebuild-01/verify-current-profiles.py passed all three CPU
+and both GPU runs, including exact aggregates, rows, source origins, resident
+storage and counter arithmetic; it explicitly reports the counter-window
+outlier. Raw CPU evidence/thread/context JSON and reproduction scripts are
+beside it; original JFR/Nsight artifacts remain in their run directories.
+No guard stops, cache eviction or repopulation occurred. Peak CPU-run RSS was
+4.196/4.611/4.056GiB. All experiment processes finished and GPU was idle at
+checkpoint.
+
+Remaining: larger512/1024/2048MiB/task and representative string matrix.
+Recommended next controlled change for discussion: coalesce decoded GPU batches
+while retaining small compressed cache records, then measure launch/CPU/transfer
+effects. Reducing packing JNI calls is another candidate. Neither optimization
+is accepted or implemented; no architecture/acceptance criteria were changed.
