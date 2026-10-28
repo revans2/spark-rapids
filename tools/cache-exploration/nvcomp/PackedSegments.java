@@ -31,6 +31,8 @@ import java.util.List;
 public final class PackedSegments {
   /** Serialized descriptor: offset64, length64, type32, reserved32. */
   public static final int DESCRIPTOR_BYTES = 24;
+  /** Maximum uncompressed bytes per segment and per codec submission, not a row-batch size. */
+  public static final long MAX_SUBMISSION_BYTES = 256L * 1024 * 1024;
 
   public static final class Segment {
     public final long offset;
@@ -63,7 +65,7 @@ public final class PackedSegments {
   public static Segment[] describe(ContiguousTable packed, boolean typed) {
     long length = packed.getBuffer().getLength();
     if (length == 0) throw new IllegalArgumentException("Empty packed payload");
-    if (!typed) return new Segment[] {new Segment(0, length, 8)};
+    if (!typed) return bounded(new Segment[] {new Segment(0, length, 8)});
     long base = packed.getBuffer().getAddress();
     Table table = packed.getTable();
     List<Segment> regions = new ArrayList<>();
@@ -99,6 +101,29 @@ public final class PackedSegments {
       covered += region.length;
     }
     if (covered != length) throw new IllegalStateException("Incomplete packed segment coverage");
+    return bounded(result.toArray(new Segment[0]));
+  }
+
+  /** Split full-layout regions without changing their order, type widths or packed offsets. */
+  public static Segment[] bounded(Segment[] regions) {
+    List<Segment> result = new ArrayList<>();
+    long covered = 0;
+    for (Segment region : regions) {
+      if (region.offset != covered || region.offset % 8 != 0 || region.length <= 0
+          || (region.typeBits != 8 && region.typeBits != 32 && region.typeBits != 64)
+          || region.length % (region.typeBits / 8) != 0) {
+        throw new IllegalArgumentException("Invalid full-layout region");
+      }
+      long remaining = region.length;
+      long offset = region.offset;
+      while (remaining > 0) {
+        long take = Math.min(remaining, MAX_SUBMISSION_BYTES);
+        result.add(new Segment(offset, take, region.typeBits));
+        offset = Math.addExact(offset, take);
+        remaining -= take;
+      }
+      covered = Math.addExact(covered, region.length);
+    }
     return result.toArray(new Segment[0]);
   }
 }

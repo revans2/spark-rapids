@@ -219,7 +219,8 @@ public final class PackedCodecBench {
         int bits = d.getInt();
         int reserved = d.getInt();
         long compressedLength = d.getLong();
-        if (offset != covered || length <= 0 || offset % 8 != 0
+        if (offset != covered || length <= 0 || length > PackedSegments.MAX_SUBMISSION_BYTES
+            || offset % 8 != 0
             || (bits != 8 && bits != 32 && bits != 64) || length % (bits / 8) != 0
             || reserved != 0 || compressedLength != payloads[i].getLength()) {
           throw new IllegalStateException("Retained segment descriptor mismatch");
@@ -317,62 +318,162 @@ public final class PackedCodecBench {
     return System.nanoTime() - started;
   }
 
-  private static List<Map<String, Object>> compressionCalls(
-      String codec, long chunk, PackedSegments.Segment[] segments) {
-    List<Map<String, Object>> calls = new ArrayList<>();
-    if (codec.equals("uncompressed")) return calls;
-    int[] groups = codec.equals("cascaded-typed") ? new int[] {8, 32, 64} : new int[] {8};
-    for (int bits : groups) {
-      long blocks = 0;
-      int count = 0;
-      for (PackedSegments.Segment segment : segments) {
-        if (segment.typeBits == bits) {
-          blocks += (segment.length + chunk - 1) / chunk;
-          count++;
-        }
-      }
-      if (count != 0) {
-        Map<String, Object> call = map();
-        call.put("type_bits", bits);
-        call.put("segments", count);
-        call.put("blocks", blocks);
-        calls.add(call);
+  /** One actual native submission: homogeneous integer width and bounded input bytes. */
+  private static final class CodecSubmission {
+    final int typeBits;
+    final int[] indices;
+    final long inputBytes;
+    final long blocks;
+    final long blockBudget;
+    final long workspaceInputUpperBoundBytes;
+    CodecSubmission(int bits, List<Integer> indices, long bytes, long blocks, long chunk) {
+      this.typeBits = bits;
+      this.indices = indices.stream().mapToInt(Integer::intValue).toArray();
+      this.inputBytes = bytes;
+      this.blocks = blocks;
+      this.blockBudget = PackedSegments.MAX_SUBMISSION_BYTES / chunk;
+      this.workspaceInputUpperBoundBytes = Math.multiplyExact(blocks, chunk);
+      if (bytes > PackedSegments.MAX_SUBMISSION_BYTES || blocks > blockBudget
+          || workspaceInputUpperBoundBytes > PackedSegments.MAX_SUBMISSION_BYTES) {
+        throw new IllegalArgumentException("Submission workspace input bound exceeded");
       }
     }
-    return calls;
+    Map<String, Object> describe() {
+      Map<String, Object> result = map();
+      result.put("type_bits", typeBits);
+      result.put("segments", indices.length);
+      result.put("uncompressed_bytes", inputBytes);
+      result.put("blocks", blocks);
+      result.put("block_budget", blockBudget);
+      result.put("workspace_input_upper_bound_bytes", workspaceInputUpperBoundBytes);
+      return result;
+    }
   }
 
-  /** Each nonempty type group enters exactly one batched call; results retain descriptor order. */
+  private static List<CodecSubmission> submissions(
+      String codec, long chunk, PackedSegments.Segment[] segments) {
+    List<CodecSubmission> result = new ArrayList<>();
+    if (chunk <= 0 || PackedSegments.MAX_SUBMISSION_BYTES % chunk != 0) {
+      throw new IllegalArgumentException("Codec chunk must divide the submission byte bound");
+    }
+    long blockBudget = PackedSegments.MAX_SUBMISSION_BYTES / chunk;
+    if (codec.equals("uncompressed")) return result;
+    int[] groups = codec.equals("cascaded-typed") ? new int[] {8, 32, 64} : new int[] {8};
+    for (int bits : groups) {
+      List<Integer> indices = new ArrayList<>();
+      long bytes = 0;
+      long blocks = 0;
+      for (int i = 0; i < segments.length; i++) {
+        PackedSegments.Segment segment = segments[i];
+        if (segment.length <= 0 || segment.length > PackedSegments.MAX_SUBMISSION_BYTES) {
+          throw new IllegalArgumentException("Segment exceeds uncompressed submission bound");
+        }
+        if (segment.typeBits != bits) continue;
+        long segmentBlocks = (segment.length + chunk - 1) / chunk;
+        if (!indices.isEmpty() && (bytes + segment.length > PackedSegments.MAX_SUBMISSION_BYTES
+            || blocks + segmentBlocks > blockBudget)) {
+          result.add(new CodecSubmission(bits, indices, bytes, blocks, chunk));
+          indices = new ArrayList<>();
+          bytes = 0;
+          blocks = 0;
+        }
+        indices.add(i);
+        bytes += segment.length;
+        blocks += segmentBlocks;
+      }
+      if (!indices.isEmpty()) result.add(new CodecSubmission(bits, indices, bytes, blocks, chunk));
+    }
+    int planned = result.stream().mapToInt(call -> call.indices.length).sum();
+    if (planned != segments.length) throw new IllegalArgumentException("Submission plan coverage");
+    return result;
+  }
+
+  private static List<Map<String, Object>> describeCalls(List<CodecSubmission> submissions) {
+    List<Map<String, Object>> result = new ArrayList<>();
+    for (CodecSubmission call : submissions) result.add(call.describe());
+    return result;
+  }
+
+  /** CPU-only boundary checks: metadata plans do not allocate the synthetic payloads. */
+  private static void checkSubmissionPlans() {
+    long bound = PackedSegments.MAX_SUBMISSION_BYTES;
+    for (long chunk : new long[] {64L * 1024, 256L * 1024}) {
+      PackedSegments.Segment[] flat = PackedSegments.bounded(new PackedSegments.Segment[] {
+          new PackedSegments.Segment(0, 2 * bound + 8, 8)});
+      List<CodecSubmission> calls = submissions("lz4", chunk, flat);
+      if (flat.length != 3 || calls.size() != 3
+          || calls.get(0).inputBytes != bound || calls.get(0).blocks != bound / chunk
+          || calls.get(2).inputBytes != 8 || calls.get(2).blocks != 1) {
+        throw new AssertionError("Flat submission boundary/tail plan");
+      }
+      PackedSegments.Segment[] typed = PackedSegments.bounded(new PackedSegments.Segment[] {
+          new PackedSegments.Segment(0, bound + 8, 8),
+          new PackedSegments.Segment(bound + 8, bound + 8, 32),
+          new PackedSegments.Segment(2 * (bound + 8), bound + 8, 64)});
+      calls = submissions("cascaded-typed", chunk, typed);
+      if (typed.length != 6 || calls.size() != 6) {
+        throw new AssertionError("Typed split/group plan");
+      }
+      for (int i = 0; i < calls.size(); i++) {
+        CodecSubmission call = calls.get(i);
+        if (call.typeBits != new int[] {8, 32, 64}[i / 2]
+            || call.inputBytes != (i % 2 == 0 ? bound : 8)) {
+          throw new AssertionError("Typed submission width/byte bound");
+        }
+      }
+      PackedSegments.Segment[] small = new PackedSegments.Segment[4];
+      for (int i = 0; i < small.length; i++) {
+        small[i] = new PackedSegments.Segment(i * bound / 4, bound / 4, 64);
+      }
+      calls = submissions("cascaded-typed", chunk, small);
+      if (calls.size() != 1 || calls.get(0).indices.length != 4
+          || calls.get(0).inputBytes != bound || calls.get(0).blocks != bound / chunk) {
+        throw new AssertionError("Several segments must share one many-block call");
+      }
+    }
+    PackedSegments.Segment[] tiny = new PackedSegments.Segment[1025];
+    for (int i = 0; i < tiny.length; i++) {
+      tiny[i] = new PackedSegments.Segment(8L * i, 8, 8);
+    }
+    List<CodecSubmission> rounded = submissions("cascaded-typed", 256L * 1024, tiny);
+    if (rounded.size() != 2 || rounded.get(0).indices.length != 1024
+        || rounded.get(0).inputBytes != 8192
+        || rounded.get(0).workspaceInputUpperBoundBytes != bound
+        || rounded.get(1).workspaceInputUpperBoundBytes != 256L * 1024) {
+      throw new AssertionError("Tiny segments must obey rounded block workspace budget");
+    }
+  }
+
+  /** Execute the same bounded submission plan used by the report, preserving descriptor order. */
   private static DeviceMemoryBuffer[] compressSegments(String codec, long chunk,
-      DeviceMemoryBuffer input, PackedSegments.Segment[] segments, Cuda.Stream stream) {
+      DeviceMemoryBuffer input, PackedSegments.Segment[] segments,
+      List<CodecSubmission> plan, Cuda.Stream stream) {
     try (CloseableArray<DeviceMemoryBuffer> output =
              CloseableArray.wrap(new DeviceMemoryBuffer[segments.length])) {
       if (codec.equals("uncompressed")) {
-        if (segments.length != 1) throw new IllegalArgumentException("Uncompressed flat shape");
-        output.set(0, input.slice(0, input.getLength()));
+        for (int i = 0; i < segments.length; i++) {
+          output.set(i, input.slice(segments[i].offset, segments[i].length));
+        }
       } else {
-        int[] groups = codec.equals("cascaded-typed") ? new int[] {8, 32, 64} : new int[] {8};
-        for (int bits : groups) {
-          List<Integer> indices = new ArrayList<>();
-          for (int i = 0; i < segments.length; i++) {
-            if (segments[i].typeBits == bits) indices.add(i);
-          }
-          if (indices.isEmpty()) continue;
+        for (CodecSubmission call : plan) {
           BatchedCompressor encoder = codec.equals("cascaded-typed")
-              ? CascadedCodec.compressor(chunk, INTERMEDIATE_BYTES, bits) : compressor(codec, chunk);
+              ? CascadedCodec.compressor(chunk, INTERMEDIATE_BYTES, call.typeBits)
+              : compressor(codec, chunk);
           try (CloseableArray<BaseDeviceMemoryBuffer> inputs =
-                   CloseableArray.wrap(new BaseDeviceMemoryBuffer[indices.size()])) {
-            for (int i = 0; i < indices.size(); i++) {
-              PackedSegments.Segment segment = segments[indices.get(i)];
+                   CloseableArray.wrap(new BaseDeviceMemoryBuffer[call.indices.length])) {
+            for (int i = 0; i < call.indices.length; i++) {
+              PackedSegments.Segment segment = segments[call.indices[i]];
               inputs.set(i, input.slice(segment.offset, segment.length));
             }
             // The wrapper consumes the sliced input references on success and failure.
             try (CloseableArray<DeviceMemoryBuffer> compressed =
                      CloseableArray.wrap(encoder.compress(inputs.release(), stream))) {
-              if (compressed.size() != indices.size()) throw new IllegalStateException("Codec output count");
-              for (int i = 0; i < indices.size(); i++) {
+              if (compressed.size() != call.indices.length) {
+                throw new IllegalStateException("Codec output count");
+              }
+              for (int i = 0; i < call.indices.length; i++) {
                 compressed.get(i).incRefCount();
-                output.set(indices.get(i), compressed.get(i));
+                output.set(call.indices[i], compressed.get(i));
               }
             }
           }
@@ -382,41 +483,39 @@ public final class PackedCodecBench {
     }
   }
 
-  /** Batch each nonempty type group into aligned slices of one packed allocation. */
+  /** Bounded homogeneous submissions reconstruct slices of one full packed allocation. */
   private static DeviceMemoryBuffer decompressSegments(String codec, long chunk,
       DeviceMemoryBuffer[] compressed, PackedSegments.Segment[] segments,
-      long packedBytes, Cuda.Stream stream) {
+      List<CodecSubmission> plan, long packedBytes, Cuda.Stream stream) {
     if (compressed.length != segments.length) throw new IllegalArgumentException("Segment input count");
-    if (codec.equals("uncompressed")) {
-      if (compressed.length != 1 || compressed[0].getLength() != packedBytes) {
-        throw new IllegalArgumentException("Uncompressed payload shape");
-      }
-      return compressed[0].slice(0, packedBytes);
-    }
-    BatchedDecompressor decoder = decompressor(codec, chunk);
     try (CloseableArray<DeviceMemoryBuffer> output = CloseableArray.wrap(new DeviceMemoryBuffer[1])) {
       output.set(0, DeviceMemoryBuffer.allocate(packedBytes, stream));
-      int[] groups = codec.equals("cascaded-typed") ? new int[] {8, 32, 64} : new int[] {8};
-      for (int bits : groups) {
-        List<Integer> indices = new ArrayList<>();
+      if (codec.equals("uncompressed")) {
         for (int i = 0; i < segments.length; i++) {
-          if (segments[i].typeBits == bits) indices.add(i);
-        }
-        if (indices.isEmpty()) continue;
-        try (CloseableArray<BaseDeviceMemoryBuffer> inputRefs =
-                 CloseableArray.wrap(new BaseDeviceMemoryBuffer[indices.size()]);
-             CloseableArray<BaseDeviceMemoryBuffer> slices =
-                 CloseableArray.wrap(new BaseDeviceMemoryBuffer[indices.size()])) {
-          for (int i = 0; i < indices.size(); i++) {
-            int index = indices.get(i);
-            PackedSegments.Segment segment = segments[index];
-            slices.set(i, output.get(0).slice(segment.offset, segment.length));
-            compressed[index].incRefCount();
-            inputRefs.set(i, compressed[index]);
+          if (compressed[i].getLength() != segments[i].length) {
+            throw new IllegalArgumentException("Uncompressed payload shape");
           }
-          // Mixed-width batches failed the installed SDK probe; homogeneous batches passed.
-          // This is an observed restriction, not an assertion about the documented API.
-          decoder.decompressAsync(inputRefs.release(), slices.getArray(), stream);
+          output.get(0).copyFromDeviceBufferAsync(
+              segments[i].offset, compressed[i], 0, segments[i].length, stream);
+        }
+      } else {
+        BatchedDecompressor decoder = decompressor(codec, chunk);
+        for (CodecSubmission call : plan) {
+          try (CloseableArray<BaseDeviceMemoryBuffer> inputRefs =
+                   CloseableArray.wrap(new BaseDeviceMemoryBuffer[call.indices.length]);
+               CloseableArray<BaseDeviceMemoryBuffer> slices =
+                   CloseableArray.wrap(new BaseDeviceMemoryBuffer[call.indices.length])) {
+            for (int i = 0; i < call.indices.length; i++) {
+              int index = call.indices[i];
+              PackedSegments.Segment segment = segments[index];
+              slices.set(i, output.get(0).slice(segment.offset, segment.length));
+              compressed[index].incRefCount();
+              inputRefs.set(i, compressed[index]);
+            }
+            // Installed SDK mixed-width failure requires homogeneous batches; each also obeys
+            // the uncompressed-byte bound without falling back to per-block launches.
+            decoder.decompressAsync(inputRefs.release(), slices.getArray(), stream);
+          }
         }
       }
       return output.release()[0];
@@ -486,12 +585,13 @@ public final class PackedCodecBench {
         long descriptorStart = System.nanoTime();
         PackedSegments.Segment[] segments = PackedSegments.describe(
             table, codec.equals("cascaded-typed"));
-        List<Map<String, Object>> calls = compressionCalls(codec, chunkBytes, segments);
+        List<CodecSubmission> plan = submissions(codec, chunkBytes, segments);
+        List<Map<String, Object>> calls = describeCalls(plan);
         long descriptorNs = System.nanoTime() - descriptorStart;
         long packNs = finish(stream, packStart);
         long compressStart = System.nanoTime();
         try (CloseableArray<DeviceMemoryBuffer> encoded = CloseableArray.wrap(
-                 compressSegments(codec, chunkBytes, table.getBuffer(), segments, stream))) {
+                 compressSegments(codec, chunkBytes, table.getBuffer(), segments, plan, stream))) {
           long compressionNs = finish(stream, compressStart);
           long d2hStart = System.nanoTime();
           try (CloseableArray<HostMemoryBuffer> retained =
@@ -583,6 +683,7 @@ public final class PackedCodecBench {
     long decodeStart = System.nanoTime();
     long framingStart = System.nanoTime();
     PackedSegments.Segment[] segments = record.readDescriptors();
+    List<CodecSubmission> plan = submissions(record.codec, record.chunkBytes, segments);
     long framingNs = System.nanoTime() - framingStart;
     long h2dStart = System.nanoTime();
     try (CloseableArray<DeviceMemoryBuffer> compressed =
@@ -590,15 +691,14 @@ public final class PackedCodecBench {
       long h2dNs = System.nanoTime() - h2dStart;
       long decompressStart = System.nanoTime();
       try (DeviceMemoryBuffer decoded = decompressSegments(record.codec, record.chunkBytes,
-               compressed.getArray(), segments, record.packedBytes, stream)) {
+               compressed.getArray(), segments, plan, record.packedBytes, stream)) {
         long decompressNs = finish(stream, decompressStart);
         long unpackStart = System.nanoTime();
         try (CloseableArray<Table> actual = CloseableArray.wrap(new Table[1])) {
           actual.set(0, Table.fromPackedTable(ByteBuffer.wrap(record.metadata), decoded));
           long unpackNs = finish(stream, unpackStart);
           long totalNs = finish(stream, decodeStart);
-          List<Map<String, Object>> calls = compressionCalls(
-              record.codec, record.chunkBytes, segments);
+          List<Map<String, Object>> calls = describeCalls(plan);
           List<Object> blockCounts = new ArrayList<>();
           List<Object> typeBits = new ArrayList<>();
           List<Object> segmentCounts = new ArrayList<>();
@@ -613,6 +713,8 @@ public final class PackedCodecBench {
           result.put("framing_decode_ns_subset_of_total", framingNs);
           result.put("h2d_ns", h2dNs);
           result.put("decompress_ns", decompressNs);
+          result.put("uncompressed_segment_reassembly_bytes",
+              record.codec.equals("uncompressed") ? record.packedBytes : 0L);
           result.put("unpack_ns", unpackNs);
           result.put("decode_host_roundtrip_ns", totalNs);
           result.put("full_packed_bytes_checked", false);
@@ -654,14 +756,15 @@ public final class PackedCodecBench {
       ContiguousTable original = packed.get(0);
       PackedSegments.Segment[] segments = PackedSegments.describe(
           original, codec.equals("cascaded-typed"));
+      List<CodecSubmission> plan = submissions(codec, chunk, segments);
       try (CloseableArray<DeviceMemoryBuffer> encoded = CloseableArray.wrap(
-               compressSegments(codec, chunk, original.getBuffer(), segments, stream));
+               compressSegments(codec, chunk, original.getBuffer(), segments, plan, stream));
            CloseableArray<HostMemoryBuffer> host =
                CloseableArray.wrap(toHost(encoded.getArray(), stream));
            CloseableArray<DeviceMemoryBuffer> uploaded =
                CloseableArray.wrap(toDevice(host.getArray(), stream));
            DeviceMemoryBuffer decoded = decompressSegments(codec, chunk, uploaded.getArray(),
-               segments, original.getBuffer().getLength(), stream)) {
+               segments, plan, original.getBuffer().getLength(), stream)) {
         stream.sync();
         PackedFixtures.validatePacked(original.getBuffer(), decoded);
         try (Table restored = Table.fromPackedTable(original.getMetadataDirectBuffer(), decoded)) {
@@ -739,11 +842,17 @@ public final class PackedCodecBench {
     if (warmups < 0 || warmups > 2 || repeats < 1 || repeats > 5) {
       throw new IllegalArgumentException("Bounded warmups 0..2, repeats 1..5");
     }
+    checkSubmissionPlans();
     Map<String, Object> report = map();
+    report.put("submission_plan_cpu_boundary_checks_passed", true);
     report.put("resources", initialize());
     report.put("fixture", fixture);
     report.put("codecs", codecs);
     report.put("chunk_bytes", chunk);
+    report.put("max_codec_submission_uncompressed_bytes", PackedSegments.MAX_SUBMISSION_BYTES);
+    report.put("max_codec_submission_workspace_input_upper_bound_bytes",
+        PackedSegments.MAX_SUBMISSION_BYTES);
+    report.put("max_codec_submission_blocks", PackedSegments.MAX_SUBMISSION_BYTES / chunk);
     report.put("rows_per_work_item", rows);
     report.put("task_mib_target", options.containsKey("--rows") ? null : taskMiB);
     report.put("slots", SLOTS);
@@ -751,8 +860,9 @@ public final class PackedCodecBench {
     report.put("small_bit_exact_prerequisite_rows", 513);
     report.put("first_large_sample_is_cold", false);
     report.put("phase_timestamp_clock", "System.nanoTime monotonic process clock, not epoch time");
+    report.put("untimed_fixture_preparation_and_validation_execution", "serial within each two-item wave");
     report.put("wave_phase_barriers",
-        "Generate both inputs before encoding either; finish both timed decodes before any reference "
+        "Generate inputs serially before encoding either; finish both concurrent timed decodes before serial reference "
         + "generation/validation. Wall clocks include task dispatch/join and cleanup; per-item timers exclude cleanup.");
     report.put("compression_stage_scope",
         "Batched wrapper allocation, native compression, length fetch and output stitching; not pure kernel time");
@@ -760,6 +870,13 @@ public final class PackedCodecBench {
         + "Each worker synchronizes its per-thread default CUDA stream. Generation, validation and "
         + "final cleanup excluded from encode/decode timers but included in whole-job memory peaks. "
         + "A small codec prerequisite precedes every first large sample; it is not a cold-start measurement. "
+        + "Codec submissions bound both actual uncompressed input and rounded blocks*chunkBytes "
+        + "workspace input upper bound to 256 MiB; layout segments are at most 256 MiB. "
+        + "compressed payload may expand beyond that size. Uncompressed decode copies segment "
+        + "uploads into one packed allocation and includes that device-copy work in decompress_ns. "
+        + "Untimed preparation and reference validation are serialized to bound their temporary memory; "
+        + "timed encode/decode still use two concurrent task slots. This is not a Spark input pipeline benchmark. "
+        + "This submission/host-allocation cohort differs from earlier whole-table calls. "
         + "Compressed payload includes per-chunk codec framing. Ordered descriptors use 32 bytes "
         + "per segment including compressed lengths; metadata/header/descriptors are retained Java "
         + "arrays outside HostAlloc, counted explicitly; RSS requires an external early-stop sampler.");
@@ -779,14 +896,15 @@ public final class PackedCodecBench {
             for (int base = 0; base < WORK_ITEMS; base += SLOTS) {
               Rmm.resetScopedMaximumBytesAllocated(Rmm.getTotalBytesAllocated());
               long generateStart = System.nanoTime();
-              List<Future<PreparedInput>> prepareTasks = new ArrayList<>();
-              for (int slot = 0; slot < SLOTS; slot++) {
-                final long firstRow = (long) (base + slot) * rows;
-                prepareTasks.add(executor.submit(() -> prepareWorkItem(fixture, rows, firstRow)));
-              }
-              List<PreparedInput> inputs = collect(prepareTasks);
               try (CloseableArray<PreparedInput> wave =
-                       CloseableArray.wrap(inputs.toArray(new PreparedInput[0]))) {
+                       CloseableArray.wrap(new PreparedInput[SLOTS])) {
+                // Untimed fixture scratch is serialized; both complete before timed work starts.
+                for (int slot = 0; slot < SLOTS; slot++) {
+                  final long firstRow = (long) (base + slot) * rows;
+                  Future<PreparedInput> prepared = executor.submit(
+                      () -> prepareWorkItem(fixture, rows, firstRow));
+                  wave.set(slot, collect(List.of(prepared)).get(0));
+                }
                 long generateWallNs = System.nanoTime() - generateStart;
                 long generateGpuPeak = Rmm.getScopedMaximumBytesAllocated();
                 long encodeGpuBaseline = Rmm.getTotalBytesAllocated();
@@ -794,7 +912,7 @@ public final class PackedCodecBench {
                 // Both streams have completed generation before either timed encode is submitted.
                 long encodeStart = System.nanoTime();
                 List<Future<HostRecord>> encodeTasks = new ArrayList<>();
-                for (PreparedInput input : inputs) {
+                for (PreparedInput input : wave.getArray()) {
                   encodeTasks.add(executor.submit(() -> encodeWorkItem(input, codec, chunk)));
                 }
                 List<HostRecord> records = collect(encodeTasks);
@@ -838,14 +956,13 @@ public final class PackedCodecBench {
                 Rmm.resetScopedMaximumBytesAllocated(validationGpuBaseline);
                 // Neither reference generation nor validation starts until both timed decodes end.
                 long validateStart = System.nanoTime();
-                List<Future<Boolean>> validateTasks = new ArrayList<>();
                 for (DecodedResult decoded : outputs) {
-                  validateTasks.add(executor.submit(() -> {
+                  Future<Boolean> validation = executor.submit(() -> {
                     validateWorkItem(decoded);
                     return Boolean.TRUE;
-                  }));
+                  });
+                  collect(List.of(validation));
                 }
-                collect(validateTasks);
                 long validationWallNs = System.nanoTime() - validateStart;
                 for (int slot = 0; slot < SLOTS; slot++) {
                   DecodedResult decoded = outputs.get(slot);

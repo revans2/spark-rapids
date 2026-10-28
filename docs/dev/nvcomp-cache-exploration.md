@@ -1,6 +1,10 @@
 # GPU contiguous packing and nvCOMP exploration
 
-Status: IN PROGRESS. User approved GPU codec and compressed host round trips
+Status: IN PROGRESS — REAL SPARK PROTOTYPE. User explicitly moved from the
+codec/host round-trip microbenchmark to a real Spark cache serializer. CPU encode
+and decode fallback MUST THROW for the new prototype (explicit user instruction).
+The microbenchmark phase below is historical evidence, not Spark cache timings.
+The original first step was GPU codec and compressed host round trips
 before a full Spark cache serializer. No CPU encode/decode implementation or
 claim is required. GPU-only capabilities of current installed nvCOMP are the
 subject; the redesigned Cascaded / future CPU support is WIP and unmeasured.
@@ -250,3 +254,60 @@ Inspect failures before dependent work; no cap relaxation or host-OOM pressure
 experiments. Report final results inline with encode, decode, stored size/ratios,
 block-size tradeoffs and memory caveats. Full Spark serializer integration and
 matched PCBS timings remain outside this first experiment.
+
+## User-directed transition to real Spark — IN PROGRESS
+
+User: "If we think we have a proof that this is going to work, can we move to
+the more realistic work?" Then: "the CPU fallback should just be throw an
+exception. We are not going to try and support it right now."
+Remaining microbenchmark sweep STOPPED. Root terminated the orchestration and
+confirmed no matching benchmark processes / no GPU compute processes remained.
+Do not restart the full microbenchmark matrix without a new reason.
+
+Bounded repair source reviewed independently and lead-verified through all 12
+256/512 MiB fixture/block cases, all five codecs, original packed-byte small
+prerequisites, full table reference checks, actual submission byte/rounded-block
+limits, true two-task timer overlap, serial untimed phases, memory budgets,
+framing/retained bytes and final zero live allocations. Artifacts bounded-02,
+bounded-matrix-{fixed,low,wide}-{256,512}-{64k,256k}. These are COMPONENT timings,
+not Spark population/read timings. Large bounded 1/2 GiB component cases were
+not completed and remain unverified. Source READY FOR REVIEW; architect accepts.
+
+Realistic prototype scope:
+- Local Spark 3.5.5 / Scala 2.12, actual CachedBatchSerializer + real cache RDD,
+  GPU encode/read plans, Spark storage accounting and unpersist. Reuse the
+  existing Vortex experiment's concrete PCBS-wrapper subtype integration; do
+  not modify the released production scan gate or PCBS behavior.
+- New prototype CPU row encode, CPU row decode, CPU columnar decode, and CPU
+  input batches throw clear unsupported-operation exceptions. Unsupported schema
+  combinations fail explicitly. No CPU implementation/fallback is being built.
+- Ordinary Serializable heap-byte-array cache records let Spark own retention,
+  storage accounting, eviction and disk serialization, matching the existing
+  experiment/PCBS model. Native HostMemoryBuffers are temporary managed transfers,
+  not hidden retained cache allocations. Bound record sizes and incremental
+  production to avoid partition-sized heap buffers.
+- Small row packs (initial target about8 MiB) batched for GPU encode/decode to
+  <=256 MiB actual AND chunk-rounded input per native call; enough independent
+  blocks, homogeneous Cascaded widths. Preserve metadata/projection/row order.
+- Same user-approved heap16/managed host32 inclpin2/RSS64 GiB; verify actual
+  plugin initialization rather than inherit obsolete4GiB/32GiB runner defaults.
+  No more codec microbenchmark matrices. Small correctness prerequisites, then
+  matched real Spark population, full/projection cached reads, encoded payload,
+  resident/disk storage and memory against PCBS/default Spark as applicable.
+- GPU task semaphore, retry, resource ownership and cancellation cleanup follow
+  existing code. Lead reads decisive implementation and independently validates;
+  focused worker review and signed commits plus tracker updates required.
+
+Release classification: all new Spark prototype classes/records/build/benchmark
+interfaces are UNRELEASED, isolated tools, no compatibility aliases. Released
+PCBS wrapper, GPU scan gate, plugin memory configuration and Spark contracts are
+preserved. Existing Vortex integration is reused as a pattern, not replaced.
+The shim skill was read for this boundary; tools-only Spark3.5.5 prototype
+changes no production shared shim caller or source-selection/build matrix.
+Reclassify/invoke full preflight if production/shared shim sources must change.
+
+Current bounded handoffs, all MCP docker_exec ONLY:
+bridge_harness: new multi-table PackedTableCodec GPU core/shared bounded plan.
+vortex_native_build: new SparkNvcompSerializer.scala, every CPU path throws.
+bridge_review: read-only decisive Spark lifecycle/budget discovery and final review.
+Root: build/real Spark benchmark/guard, independent verification and tracker.
