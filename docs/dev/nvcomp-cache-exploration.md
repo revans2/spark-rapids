@@ -7,7 +7,8 @@ User-approved decoded batching and its impact reruns are READY FOR REVIEW below.
 Configured-target batching and the 32-case size matrix are READY FOR REVIEW:
 31 cases completed, uncompressed 2GiB/task failed in JVM heap population.
 Direct multi-boundary GPU packing and its host-CPU/kernel profiles are verified
-and READY FOR REVIEW below. CPU encode/decode remains deferred.
+and READY FOR REVIEW below. CPU codec prerequisites are READY FOR REVIEW;
+CPU table packing/integration awaits the layout decision below.
 Large-string performance and active GPU spill/retry validation remain pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
@@ -19,8 +20,8 @@ codec/host round-trip microbenchmark to a real Spark cache serializer. CPU encod
 and decode fallback MUST THROW for the new prototype (explicit user instruction).
 The microbenchmark phase below is historical evidence, not Spark cache timings.
 The original first step was GPU codec and compressed host round trips
-before a full Spark cache serializer. No CPU encode/decode implementation or
-claim is required. GPU-only capabilities of current installed nvCOMP are the
+before a full Spark cache serializer. The historical GPU-only scope below has
+now been extended by the user to CPU versions; implementation status is at the end. GPU-only capabilities of current installed nvCOMP are the
 subject; the redesigned Cascaded / future CPU support is WIP and unmeasured.
 Results must be presented inline to the user, not replaced by links to reports.
 
@@ -1387,3 +1388,100 @@ The full old32-case matrix was not rerun after packing; this bounded11-run
 comparison is the verified scope. Known uncompressed2GiB heap failure remains.
 CPU-only encode/decode is deferred pending the user's next scope decision.
 Implementation and profiling are READY FOR REVIEW, not architect-accepted DONE.
+
+## CPU versions authorized — reusable codecs READY FOR REVIEW, layout decision pending
+
+User now asks to start CPU versions and explicitly requires reuse of expensive
+compression/decompression codec instances, with Parquet lifecycle investigated.
+This supersedes historical GPU-only planning, not the existing explicit rejection
+behavior until a verified CPU table path is implemented. No production serializer
+or GPU implementation changes in this checkpoint.
+
+Release classification: CpuPackedCodec, its standalone checks and interop probe
+are new UNRELEASED tools absent from main/release artifacts/documented production
+configuration. No compatibility adapters needed. Released PCBS contracts remain
+unchanged. Same experimental int/long/string scope; no new user configuration,
+POM, shim/shared production shim caller or source-selection changes. Shim
+preflight remains NOT_APPLICABLE to these isolated Java tool additions.
+
+All project operations used MCP docker_exec; discovery used code-index first
+for covered files. Both worker handoffs and review checkpoints reconfirmed
+MCP-only use. Root read decisive source and matching-runtime bytecode rather
+than accepting summaries; root alone ran GPU prerequisites serially.
+
+Parquet evidence from runtime parquet-hadoop1.13.1 matching build33/35:
+CodecFactory retains wrappers in per-codec maps. HeapBytesCompressor and
+HeapBytesDecompressor borrow from Hadoop CodecPool, reset per operation and
+return instances on release. Important exception: Parquet ZstandardCodec's
+createCompressor/createDecompressor return null; its streams use recycling
+buffers, not that pooled compressor/decompressor-context mechanism. Matching
+classes were inspected with javap -c -p. CPU PCBS getRecordWriter selects
+CompressionCodecName.UNCOMPRESSED (ParquetCachedBatchSerializer.scala1508);
+the active CPU row writer calls it at1260. Future comparisons must label actual
+codec/size, not assume CPU PCBS Snappy from GPU defaults.
+
+CpuPackedCodec is a thread-confined AutoCloseable owner for one task iterator.
+It lazily creates at most one ZstdCompressCtx and one ZstdDecompressCtx and
+retains them across chunks/records. LZ4 uses the cached factory implementations;
+Snappy uses its static native implementation and caller-owned arrays. Reuses
+compression scratch and aggregate output capacity; decoder writes directly to
+the final output array. Task completion/error cleanup wiring remains part of
+future Spark integration; the helper currently requires caller ownership.
+Close is idempotent and frees contexts/references. ANS/Cascaded CPU requests
+throw explicitly; no installed CPU implementation was established.
+
+Exact matched runtime libraries: lz4-java1.8.0, snappy-java1.1.10.5,
+zstd-jni1.5.5-4. Framing follows cuDF BatchedCompressor/BatchedDecompressor:
+ceil(rawBytes/chunkBytes) little-endian64-bit encoded sizes at the front, then
+raw codec chunks concatenated. No Hadoop stream/LZ4 frame substituted. Decoder
+checks size-vector/payload coverage, bounds and exact per-chunk output lengths.
+
+Verification: build34 passed initial CPU and actual GPU/CPU interop prerequisites.
+Focused review identified a root-written probe factory-after-incRef exception
+leak: codec construction could throw before ownership transfer. Fixed by creating
+GPU codec wrappers once per codec before buffer allocation/ref increments.
+Added wrong nonzero decoded lengths and valid-envelope/corrupt-payload cases
+following review. Final full tools build35 PASS with original pinned production
+artifact/source proof; pre-existing broken classpath links and unused-resource
+warnings remain, no new compile errors. No production artifacts rebuilt.
+
+Root independently ran final CpuPackedCodecTest PASS: four CPU codecs,
+empty/one-byte/exact chunk/tails/multi-chunk, random/repeated bytes, nonzero array
+offsets, borrowed inputs unchanged, independent returned arrays, size corruption,
+truncated/extra payloads, wrong raw lengths, corrupt codec bytes, Zstd identity
+reuse, cross-thread rejection and use-after-close checks.
+
+Root independently ran CpuCodecInteropProbe from build35 PASS:42 fixtures,
+each checked both GPU encode->CPU decode and CPU encode->GPU decode (84 paths).
+Three codecs x7sizes (1,7,257,65535,65536,65537,196615) x2data patterns.
+GPU allocations returned to zero after each fixture; default RMM with only tiny
+prerequisite buffers, no pressure/performance test. Artifact:
+  /data/tmp/nvcomp-spark-probe/build-35/cpu-gpu-interop.json
+includes exact Java command, exit0, logs and provenance SHA. Final source build:
+  /data/tmp/nvcomp-spark-probe/build-35/spark-provenance.json
+No compression-ratio or Spark CPU-throughput claim from these byte tests.
+
+Pending architectural choice: GPU records carry opaque cuDF packed metadata.
+Existing Java host APIs inspected do not directly provide CPU packed-table
+encode/decode for that format; JCudfSerialization uses a different layout,
+and HostTable's constructors copy existing GPU tables. Silently substituting
+that format or copying a private ABI into Scala would change what is measured.
+Preferred approach proposed to user: small native host-layout bridge using
+cuDF's metadata APIs. Alternative explicitly offered: temporary version-pinned
+JVM layout for exploration. Await choice before implementing table layout.
+
+Matching-source prerequisite: pinned JNI artifact revision
+6740b5ee74cd1c0d35c42422fb4cf0d8cfa322eb, cuDF revision
+b9539f2b7cf98d0d6229a3fb46cec7f800331158, from jar version properties.
+Mounted JNI HEAD0084b98500efa59ba809d5ae5eadc685df84082d and vendored cuDF
+HEADaf84a550cbc9592581ced8ffe9fa5b03a8c4c818 differ; git cat-file cannot find
+the pinned commits in mounted JNI, vendored cuDF or standalone cuDF. Metadata
+format demonstrably differs between mounted cuDF trees (stub column versus
+serialized_table_header), reinforcing need for exact-source/API verification.
+User asked asynchronously for matching writable JNI worktree/source or explicit
+temporary-layout preference; independent codec work completed meanwhile.
+
+CPU row-major->column-major packing, row decoding, cross CPU/GPU table roundtrips,
+task-lifetime integration and CPU/default/PCBS timing+size matrix remain
+UNIMPLEMENTED/UNVERIFIED. Existing Spark prototype still throws on CPU fallback.
+Only codec prerequisite is READY FOR REVIEW. No claim of completed CPU serializer.
