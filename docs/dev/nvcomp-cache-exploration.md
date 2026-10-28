@@ -311,3 +311,72 @@ bridge_harness: new multi-table PackedTableCodec GPU core/shared bounded plan.
 vortex_native_build: new SparkNvcompSerializer.scala, every CPU path throws.
 bridge_review: read-only decisive Spark lifecycle/budget discovery and final review.
 Root: build/real Spark benchmark/guard, independent verification and tracker.
+
+## Real Spark implementation checkpoint
+
+Implementation READY FOR REVIEW; benchmark matrix IN PROGRESS. Architect alone
+accepts. All operations and worker reviews continue through MCP docker_exec only.
+Root independently read the multi-table codec, serializer, probe and launcher;
+workers reviewed substantive sources and root's timing/accounting/build changes.
+Production sources, configuration, POMs and shims remain untouched.
+
+The isolated tools implement GPU packing, bounded multi-table codec submissions,
+heap-byte-array CachedBatch records, temporary managed host transfers, retry/task
+cleanup and real Spark cache reads. CPU row encode, row decode, columnar decode
+and CPU input batches explicitly throw in this new UNRELEASED serializer.
+Released PCBS/default behavior is preserved. Prototype schema is int/long/string;
+zero-column input and a row exceeding the 8 MiB pack bound are unsupported.
+Projection currently decompresses the full packed table before selecting columns.
+
+Lead verification:
+- build-07 compiled Java/JNI and Spark3.5.5/Scala2.12 sources. Root ran real Spark
+  probes for typed Cascaded, LZ4, Zstd and uncompressed: exact edge values/nulls,
+  projected/reordered/duplicate fields, count-only empty selection, DISK_ONLY
+  cached-record byte serialization, CPU row encode/decode and CPU columnar
+  decode rejection, actual GPU-off cached-read rejection, early-stop TaskEnd
+  cleanup. GPU/managed host allocations returned to the existing 128 MiB
+  plugin bounce-buffer baselines, not global zero.
+- Direct CPU columnar INPUT rejection has been inspected in source but its
+  runtime test remains unverified. Cascaded byte-only Spark runtime is pending.
+- Peer review found stale-build verification missed added Scala files. Root
+  fixed exact Scala source inventory checking; reviewer inspected the fix.
+  Fresh build-08 passed; root reproduced provenance acceptance and rejection
+  of an unrecorded Scala source, compiled the shared-planner microbenchmark
+  caller (CPU-only), and ran PackedTableCodec CPU submission-plan checks.
+  No benchmark source additions occurred during build-07 runs; those artifacts
+  remain valid. No microbenchmark performance sweep was restarted.
+
+Matched actual Spark fixed-wide fixture: 4 x 256 MiB logical partitions,
+local[2], two waves, 1 GiB total. Whole-job seconds, one cold population,
+one warmup then median of two read samples. Full aggregate touches every column;
+projection reads id only. No write+read total substituted for cached-read time.
+
+| Format | Population s | Full cached read s | Id-only read s | Encoded MiB | Resident MiB | Peak tree RSS GiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Default Spark | 20.464 | 0.795 | 0.129 | 415.697 | 417.421 | 5.834 |
+| PCBS | 1.050 | 0.263 | 0.160 | 487.518 | 487.518 | 3.920 |
+| Contiguous uncompressed | 1.519 | 0.632 | 0.278 | 1024.319 | 1024.329 | 4.975 |
+| Contiguous LZ4 | 1.540 | 0.537 | 0.202 | 509.380 | 509.391 | 3.996 |
+| Contiguous Zstd | 1.694 | 0.450 | 0.213 | 385.422 | 385.433 | 4.101 |
+| Contiguous typed Cascaded | 1.807 | 0.729 | 0.414 | 390.614 | 390.625 | 4.224 |
+
+Artifacts: /data/tmp/nvcomp-spark-probe/{default,pcbs,uncompressed,lz4,zstd,cascaded}-fixed-256.
+Root reproduced JSON summaries and checked actual reader labels/plans: default
+CPU cache decode -> HostColumnarToGpu; others GpuInMemoryTableScan. Default's
+producer converts GPU source data to rows for its CPU serializer. Thus default
+is a GPU-enabled-job baseline, not a GPU codec. All four partitions resident,
+zero disk bytes, no guard stop. nvCOMP encoded-group counters unchanged through
+reads (no population recomputation). Payload audit ran AFTER timing and storage
+snapshots; default payload excludes its separate statistics objects, while
+nvCOMP includes layout/metadata/framing. Resident bytes include Spark object
+accounting. RSS covers the process tree and reference/validation work, not codec
+scratch alone. This is preliminary, one fixture/scale and limited repetitions.
+
+Approved configured heap16/host32 inclpin2/RSS64 GiB retained, GPU pool24 GiB.
+Actual managed HostAlloc data limit is 32 GiB minus default two-task30 MiB
+overhead, pinned pool2 GiB included. No caps relaxed, no host OOM stress tests.
+
+Remaining: runtime CPU columnar-input rejection, byte-Cascaded if retained,
+512/1024/2048 MiB per-task real Spark cases, representative string workloads,
+and repeatability/profiling of material differences. No production-readiness,
+Cascaded V2, CPU codec performance, or full multi-profile compatibility claim.

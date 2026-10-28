@@ -219,15 +219,31 @@ def plugin_memory(spark):
                 'rmm_tracked_high_water_bytes': rmm.getMaximumTotalBytesAllocated() if tracked else None,
                 'managed_host_usage_ratio': spark.sparkContext._jvm.com.nvidia.spark.rapids
                 .HostAlloc.getUsageRatio(),
+                'managed_host_data_limit_bytes': spark.sparkContext._jvm.ai.rapids.cudf
+                .DefaultHostMemoryAllocator.get().getTotalLimit(),
+                'pinned_pool_bytes': spark.sparkContext._jvm.ai.rapids.cudf
+                .PinnedMemoryPool.getTotalPoolSizeBytes(),
+                'gpu_pool_bytes': rmm.getPoolSize(),
                 'scope': 'RMM high water is cumulative for this JVM, not a per-action peak. '
                          'Unused pool reservation and allocations outside these allocators are excluded.'}
     except Exception as error:
         return {'unavailable': repr(error)}
 
 
+def prototype_counters(spark, cache_format):
+    if cache_format != 'nvcomp':
+        return None
+    values = spark.sparkContext._jvm.org.apache.spark.sql.cacheexploration \
+        .SparkNvcompSerializer.snapshot()
+    return dict(zip(['encoded_groups', 'decoded_groups', 'successful_group_encode_calls',
+                     'successful_group_decode_calls'], list(values)))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--format', choices=['default', 'pcbs', 'vortex'], required=True)
+    parser.add_argument('--format', choices=['default', 'pcbs', 'vortex', 'nvcomp'], required=True)
+    parser.add_argument('--serializer-class',
+                        default='org.apache.spark.sql.cacheexploration.SparkNvcompCascadedSerializer')
     parser.add_argument('--vortex-class', default='org.apache.spark.sql.cacheexploration.SparkVortexSerializer')
     parser.add_argument('--write-mode', choices=['cpu', 'gpu'], default='cpu')
     parser.add_argument('--read-modes', default='cpu,gpu')
@@ -253,7 +269,7 @@ def main():
         parser.error('output file already exists')
     serializers = {'default': 'org.apache.spark.sql.execution.columnar.DefaultCachedBatchSerializer',
                    'pcbs': 'com.nvidia.spark.ParquetCachedBatchSerializer',
-                   'vortex': args.vortex_class}
+                   'vortex': args.vortex_class, 'nvcomp': args.serializer_class}
     spark = (SparkSession.builder.appName('Cache format exploration')
              .config('spark.sql.cache.serializer', serializers[args.format])
              .config('spark.sql.session.timeZone', 'UTC').getOrCreate())
@@ -337,6 +353,7 @@ def main():
         result['storage_after_population'] = storage_info(spark, rdd_id, partition_sizes)
         result['driver_heap_after_population'] = heap(spark)
         result['plugin_memory_after_population'] = plugin_memory(spark)
+        result['prototype_after_population'] = prototype_counters(spark, args.format)
         print(json.dumps({'phase': 'population', 'elapsed_ns': result['population_ns'],
                           'rows': observed_rows}), flush=True)
         for mode in read_modes:
@@ -361,7 +378,8 @@ def main():
                                             'plan': plan, 'aggregate': observed,
                                             'storage': storage_info(spark, rdd_id, partition_sizes),
                                             'driver_heap_after_read': heap(spark),
-                                            'plugin_memory_after_read': plugin_memory(spark)})
+                                            'plugin_memory_after_read': plugin_memory(spark),
+                                            'prototype_counters': prototype_counters(spark, args.format)})
                     print(json.dumps({'phase': 'read', 'requested_mode': mode,
                                       'narrow': narrow, 'warmup': iteration < 0,
                                       'iteration': iteration, 'elapsed_ns': elapsed,
@@ -371,6 +389,7 @@ def main():
                 if validation_frame(frame).orderBy('id').collect() != expected_rows:
                     raise AssertionError('full row comparison failed for ' + mode)
         result['storage_after_reads'] = storage_info(spark, rdd_id, partition_sizes)
+        result['prototype_after_reads'] = prototype_counters(spark, args.format)
         result['serializer_reported_size_bytes_after_reads'] = cache.sizeInBytesStats().value()
         result['serializer_reported_rows_after_reads'] = cache.rowCountStats().value()
         result['size_statistic_caveat'] = ('Serializer-defined, not comparable encoded bytes: default '

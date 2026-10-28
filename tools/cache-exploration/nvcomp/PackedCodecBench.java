@@ -318,79 +318,9 @@ public final class PackedCodecBench {
     return System.nanoTime() - started;
   }
 
-  /** One actual native submission: homogeneous integer width and bounded input bytes. */
-  private static final class CodecSubmission {
-    final int typeBits;
-    final int[] indices;
-    final long inputBytes;
-    final long blocks;
-    final long blockBudget;
-    final long workspaceInputUpperBoundBytes;
-    CodecSubmission(int bits, List<Integer> indices, long bytes, long blocks, long chunk) {
-      this.typeBits = bits;
-      this.indices = indices.stream().mapToInt(Integer::intValue).toArray();
-      this.inputBytes = bytes;
-      this.blocks = blocks;
-      this.blockBudget = PackedSegments.MAX_SUBMISSION_BYTES / chunk;
-      this.workspaceInputUpperBoundBytes = Math.multiplyExact(blocks, chunk);
-      if (bytes > PackedSegments.MAX_SUBMISSION_BYTES || blocks > blockBudget
-          || workspaceInputUpperBoundBytes > PackedSegments.MAX_SUBMISSION_BYTES) {
-        throw new IllegalArgumentException("Submission workspace input bound exceeded");
-      }
-    }
-    Map<String, Object> describe() {
-      Map<String, Object> result = map();
-      result.put("type_bits", typeBits);
-      result.put("segments", indices.length);
-      result.put("uncompressed_bytes", inputBytes);
-      result.put("blocks", blocks);
-      result.put("block_budget", blockBudget);
-      result.put("workspace_input_upper_bound_bytes", workspaceInputUpperBoundBytes);
-      return result;
-    }
-  }
-
-  private static List<CodecSubmission> submissions(
-      String codec, long chunk, PackedSegments.Segment[] segments) {
-    List<CodecSubmission> result = new ArrayList<>();
-    if (chunk <= 0 || PackedSegments.MAX_SUBMISSION_BYTES % chunk != 0) {
-      throw new IllegalArgumentException("Codec chunk must divide the submission byte bound");
-    }
-    long blockBudget = PackedSegments.MAX_SUBMISSION_BYTES / chunk;
-    if (codec.equals("uncompressed")) return result;
-    int[] groups = codec.equals("cascaded-typed") ? new int[] {8, 32, 64} : new int[] {8};
-    for (int bits : groups) {
-      List<Integer> indices = new ArrayList<>();
-      long bytes = 0;
-      long blocks = 0;
-      for (int i = 0; i < segments.length; i++) {
-        PackedSegments.Segment segment = segments[i];
-        if (segment.length <= 0 || segment.length > PackedSegments.MAX_SUBMISSION_BYTES) {
-          throw new IllegalArgumentException("Segment exceeds uncompressed submission bound");
-        }
-        if (segment.typeBits != bits) continue;
-        long segmentBlocks = (segment.length + chunk - 1) / chunk;
-        if (!indices.isEmpty() && (bytes + segment.length > PackedSegments.MAX_SUBMISSION_BYTES
-            || blocks + segmentBlocks > blockBudget)) {
-          result.add(new CodecSubmission(bits, indices, bytes, blocks, chunk));
-          indices = new ArrayList<>();
-          bytes = 0;
-          blocks = 0;
-        }
-        indices.add(i);
-        bytes += segment.length;
-        blocks += segmentBlocks;
-      }
-      if (!indices.isEmpty()) result.add(new CodecSubmission(bits, indices, bytes, blocks, chunk));
-    }
-    int planned = result.stream().mapToInt(call -> call.indices.length).sum();
-    if (planned != segments.length) throw new IllegalArgumentException("Submission plan coverage");
-    return result;
-  }
-
-  private static List<Map<String, Object>> describeCalls(List<CodecSubmission> submissions) {
+  private static List<Map<String, Object>> describeCalls(List<PackedTableCodec.Call> submissions) {
     List<Map<String, Object>> result = new ArrayList<>();
-    for (CodecSubmission call : submissions) result.add(call.describe());
+    for (PackedTableCodec.Call call : submissions) result.add(call.describe());
     return result;
   }
 
@@ -400,7 +330,7 @@ public final class PackedCodecBench {
     for (long chunk : new long[] {64L * 1024, 256L * 1024}) {
       PackedSegments.Segment[] flat = PackedSegments.bounded(new PackedSegments.Segment[] {
           new PackedSegments.Segment(0, 2 * bound + 8, 8)});
-      List<CodecSubmission> calls = submissions("lz4", chunk, flat);
+      List<PackedTableCodec.Call> calls = PackedTableCodec.plan("lz4", chunk, flat);
       if (flat.length != 3 || calls.size() != 3
           || calls.get(0).inputBytes != bound || calls.get(0).blocks != bound / chunk
           || calls.get(2).inputBytes != 8 || calls.get(2).blocks != 1) {
@@ -410,12 +340,12 @@ public final class PackedCodecBench {
           new PackedSegments.Segment(0, bound + 8, 8),
           new PackedSegments.Segment(bound + 8, bound + 8, 32),
           new PackedSegments.Segment(2 * (bound + 8), bound + 8, 64)});
-      calls = submissions("cascaded-typed", chunk, typed);
+      calls = PackedTableCodec.plan("cascaded-typed", chunk, typed);
       if (typed.length != 6 || calls.size() != 6) {
         throw new AssertionError("Typed split/group plan");
       }
       for (int i = 0; i < calls.size(); i++) {
-        CodecSubmission call = calls.get(i);
+        PackedTableCodec.Call call = calls.get(i);
         if (call.typeBits != new int[] {8, 32, 64}[i / 2]
             || call.inputBytes != (i % 2 == 0 ? bound : 8)) {
           throw new AssertionError("Typed submission width/byte bound");
@@ -425,7 +355,7 @@ public final class PackedCodecBench {
       for (int i = 0; i < small.length; i++) {
         small[i] = new PackedSegments.Segment(i * bound / 4, bound / 4, 64);
       }
-      calls = submissions("cascaded-typed", chunk, small);
+      calls = PackedTableCodec.plan("cascaded-typed", chunk, small);
       if (calls.size() != 1 || calls.get(0).indices.length != 4
           || calls.get(0).inputBytes != bound || calls.get(0).blocks != bound / chunk) {
         throw new AssertionError("Several segments must share one many-block call");
@@ -435,7 +365,7 @@ public final class PackedCodecBench {
     for (int i = 0; i < tiny.length; i++) {
       tiny[i] = new PackedSegments.Segment(8L * i, 8, 8);
     }
-    List<CodecSubmission> rounded = submissions("cascaded-typed", 256L * 1024, tiny);
+    List<PackedTableCodec.Call> rounded = PackedTableCodec.plan("cascaded-typed", 256L * 1024, tiny);
     if (rounded.size() != 2 || rounded.get(0).indices.length != 1024
         || rounded.get(0).inputBytes != 8192
         || rounded.get(0).workspaceInputUpperBoundBytes != bound
@@ -447,7 +377,7 @@ public final class PackedCodecBench {
   /** Execute the same bounded submission plan used by the report, preserving descriptor order. */
   private static DeviceMemoryBuffer[] compressSegments(String codec, long chunk,
       DeviceMemoryBuffer input, PackedSegments.Segment[] segments,
-      List<CodecSubmission> plan, Cuda.Stream stream) {
+      List<PackedTableCodec.Call> plan, Cuda.Stream stream) {
     try (CloseableArray<DeviceMemoryBuffer> output =
              CloseableArray.wrap(new DeviceMemoryBuffer[segments.length])) {
       if (codec.equals("uncompressed")) {
@@ -455,7 +385,7 @@ public final class PackedCodecBench {
           output.set(i, input.slice(segments[i].offset, segments[i].length));
         }
       } else {
-        for (CodecSubmission call : plan) {
+        for (PackedTableCodec.Call call : plan) {
           BatchedCompressor encoder = codec.equals("cascaded-typed")
               ? CascadedCodec.compressor(chunk, INTERMEDIATE_BYTES, call.typeBits)
               : compressor(codec, chunk);
@@ -486,7 +416,7 @@ public final class PackedCodecBench {
   /** Bounded homogeneous submissions reconstruct slices of one full packed allocation. */
   private static DeviceMemoryBuffer decompressSegments(String codec, long chunk,
       DeviceMemoryBuffer[] compressed, PackedSegments.Segment[] segments,
-      List<CodecSubmission> plan, long packedBytes, Cuda.Stream stream) {
+      List<PackedTableCodec.Call> plan, long packedBytes, Cuda.Stream stream) {
     if (compressed.length != segments.length) throw new IllegalArgumentException("Segment input count");
     try (CloseableArray<DeviceMemoryBuffer> output = CloseableArray.wrap(new DeviceMemoryBuffer[1])) {
       output.set(0, DeviceMemoryBuffer.allocate(packedBytes, stream));
@@ -500,7 +430,7 @@ public final class PackedCodecBench {
         }
       } else {
         BatchedDecompressor decoder = decompressor(codec, chunk);
-        for (CodecSubmission call : plan) {
+        for (PackedTableCodec.Call call : plan) {
           try (CloseableArray<BaseDeviceMemoryBuffer> inputRefs =
                    CloseableArray.wrap(new BaseDeviceMemoryBuffer[call.indices.length]);
                CloseableArray<BaseDeviceMemoryBuffer> slices =
@@ -585,7 +515,7 @@ public final class PackedCodecBench {
         long descriptorStart = System.nanoTime();
         PackedSegments.Segment[] segments = PackedSegments.describe(
             table, codec.equals("cascaded-typed"));
-        List<CodecSubmission> plan = submissions(codec, chunkBytes, segments);
+        List<PackedTableCodec.Call> plan = PackedTableCodec.plan(codec, chunkBytes, segments);
         List<Map<String, Object>> calls = describeCalls(plan);
         long descriptorNs = System.nanoTime() - descriptorStart;
         long packNs = finish(stream, packStart);
@@ -683,7 +613,7 @@ public final class PackedCodecBench {
     long decodeStart = System.nanoTime();
     long framingStart = System.nanoTime();
     PackedSegments.Segment[] segments = record.readDescriptors();
-    List<CodecSubmission> plan = submissions(record.codec, record.chunkBytes, segments);
+    List<PackedTableCodec.Call> plan = PackedTableCodec.plan(record.codec, record.chunkBytes, segments);
     long framingNs = System.nanoTime() - framingStart;
     long h2dStart = System.nanoTime();
     try (CloseableArray<DeviceMemoryBuffer> compressed =
@@ -756,7 +686,7 @@ public final class PackedCodecBench {
       ContiguousTable original = packed.get(0);
       PackedSegments.Segment[] segments = PackedSegments.describe(
           original, codec.equals("cascaded-typed"));
-      List<CodecSubmission> plan = submissions(codec, chunk, segments);
+      List<PackedTableCodec.Call> plan = PackedTableCodec.plan(codec, chunk, segments);
       try (CloseableArray<DeviceMemoryBuffer> encoded = CloseableArray.wrap(
                compressSegments(codec, chunk, original.getBuffer(), segments, plan, stream));
            CloseableArray<HostMemoryBuffer> host =
