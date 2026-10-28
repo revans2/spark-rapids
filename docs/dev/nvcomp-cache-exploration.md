@@ -192,7 +192,7 @@ not claimed. Edge checks independently passed all-null, sliced and empty strings
 through all five codecs and both block sizes, including host round trips, exact
 original packed bytes, table values and zero final RMM bytes.
 
-FINAL cohort artifacts: staged-typed-05. Six 256 MiB/task fixture/block cases
+First deterministic cohort artifacts: staged-typed-05 (superseded below). Six 256 MiB/task fixture/block cases
 (matrix-{fixed,low,wide}-256-{64k,256k}) all PASS, each with one recorded warmup
 and two measured repeats, four work items and two slots. Independent raw JSON
 checks reproduce framing/retained-byte sums, actual pinning, all values, zero final
@@ -211,7 +211,41 @@ Some records now use pageable memory; report actual pinned fractions, not just
 pool size. Whole-run RSS includes every codec and validation and cannot be
 attributed to one codec. GPU phase peaks are separately attributable.
 
-Next run 2048 MiB/task in increasing risk order under the same caps.
+## Large-case park and bounded repair — IN PROGRESS
+
+The first 2048 MiB fixed-wide/64 KiB case stopped at the lead-selected 24 GiB
+GPU pool cap. A 3.632184 GiB BatchedCompressor workspace allocation failed;
+the partial stdout contains completed earlier codec samples but the overall case
+did not PASS. Whole-process RSS peaked at 8.47 GiB, below the 64 GiB guard;
+32 GiB managed host did not exhaust. Pinned-pool 2 GiB allocation failures in
+the same log are caught pageable fallbacks, distinct from fatal GPU workspace.
+The GPU process exited and nvidia-smi confirmed idle. All remaining large cases
+were stopped immediately; no cap was relaxed.
+
+The original single whole-task native submission was insufficiently bounded.
+Adapt the unreleased harness, preserving the agreed architecture and ALL caps:
+split packed byte/type regions into <=256 MiB uncompressed segments and group
+native submissions by width AND total uncompressed bytes <=256 MiB. Keep many
+blocks per full call (4096 at 64 KiB,1024 at 256 KiB), never per-block calls.
+Codec expansion is allowed and measured; do not invent a hard compressed-size
+256 MiB rejection. Layout metadata still reconstructs one packed GPU allocation.
+Flat codecs now also retain smaller segment payloads, making pinned allocation
+granularity explicit. Untimed fixture/reference generation is serialized within
+waves to avoid diagnostic temporaries themselves exhausting the GPU; timed
+encode/decode remain two concurrent tasks/four work items/two waves.
+
+This changes submission/payload granularity and the untimed workload. Rerun ALL
+24 cases as a new consistently labeled cohort; do not mix timings/pinning from
+staged-typed-05 with the bounded cohort. Worker owns PackedCodecBench.java and
+PackedSegments.java during repair, MCP-only, no worker GPU jobs. Root independently
+reviews/builds/smokes and verifies all new outputs before accepting the repair.
+Native library, production serializers/configs and the approved memory settings
+are unchanged. Source/header compatibility remains as classified above.
+
+A focused 256 MiB Nsight run of the earlier immutable cohort completed:
+profile-fixed-256-64k.nsys-rep / .sqlite. It is diagnostic only; profiler timings
+are not primary benchmark samples. Lead is inspecting CUDA API/kernel/NVTX data.
+
 Inspect failures before dependent work; no cap relaxation or host-OOM pressure
 experiments. Report final results inline with encode, decode, stored size/ratios,
 block-size tradeoffs and memory caveats. Full Spark serializer integration and
