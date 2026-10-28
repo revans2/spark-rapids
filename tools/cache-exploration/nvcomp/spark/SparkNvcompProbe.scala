@@ -58,6 +58,8 @@ object SparkNvcompProbe {
       case "uncompressed" => new SparkNvcompUncompressedSerializer
       case "lz4" => new SparkNvcompLz4Serializer
       case "zstd" => new SparkNvcompZstdSerializer
+      case "snappy" => new SparkNvcompSnappySerializer
+      case "ans" => new SparkNvcompAnsSerializer
       case "cascaded8" => new SparkNvcompCascadedByteSerializer
       case "cascaded-typed" => new SparkNvcompCascadedSerializer
       case _ => throw new IllegalArgumentException("Unknown nvCOMP probe codec")

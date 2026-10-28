@@ -15,6 +15,7 @@
 
 """Spark cache population/reuse and storage accounting; launch with spark-submit."""
 import argparse
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import re
@@ -239,6 +240,20 @@ def prototype_counters(spark, cache_format):
                      'successful_group_decode_calls'], list(values)))
 
 
+@contextmanager
+def profile_phase(spark, enabled, name):
+    """Process-wide start/end ranges tolerate Py4J calls from different JVM threads."""
+    marker = None
+    if enabled:
+        marker = spark.sparkContext._jvm.ai.rapids.cudf.NvtxUniqueRange(
+            'cache-exploration/' + name, 0xFF00AAFF - 2**32)  # signed Java ARGB int
+    try:
+        yield
+    finally:
+        if marker is not None:
+            marker.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--format', choices=['default', 'pcbs', 'vortex', 'nvcomp'], required=True)
@@ -259,6 +274,8 @@ def main():
     parser.add_argument('--warmups', type=int, default=2)
     parser.add_argument('--payload-audit-class',
                         help='Optional tools helper with summarize(DataFrame); runs after all measurements')
+    parser.add_argument('--nvtx-phases', action='store_true',
+                        help='Mark timed actions for a separate Nsight profiling run')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     read_modes = args.read_modes.split(',')
@@ -285,6 +302,11 @@ def main():
         if spark.sparkContext.master != 'local' and not spark.sparkContext.master.startswith('local['):
             raise ValueError('This initial storage/heap runner supports local Spark execution only')
         result['master'] = spark.sparkContext.master
+        result['effective_cache_compression_enabled'] = spark.conf.get(
+            'spark.sql.inMemoryColumnarStorage.compressed')
+        if args.nvtx_phases and spark.sparkContext._jvm.java.lang.System.getProperty(
+                'ai.rapids.cudf.nvtx.enabled') != 'true':
+            raise ValueError('NVTX phase tracing requires JVM ai.rapids.cudf.nvtx.enabled=true')
         if args.task_size_mib is not None:
             match = re.fullmatch(r'local\[(\d+)(?:,\d+)?\]', spark.sparkContext.master)
             if match is None:
@@ -336,9 +358,10 @@ def main():
         result['driver_heap_before_population'] = heap(spark)
         result['plugin_memory_before_population'] = plugin_memory(spark)
         population = frame.agg(F.count('*').alias('rows'))
-        started = time.perf_counter_ns()
-        observed_rows = population.collect()[0]['rows']
-        result['population_ns'] = time.perf_counter_ns() - started
+        with profile_phase(spark, args.nvtx_phases, 'population'):
+            started = time.perf_counter_ns()
+            observed_rows = population.collect()[0]['rows']
+            result['population_ns'] = time.perf_counter_ns() - started
         result['population_action_final_plan'] = population._jdf.queryExecution().executedPlan().toString()
         result['cached_plan_metrics_after_population'] = cached_plan_metrics(cache.cachedPlan())
         if observed_rows != args.rows:
@@ -361,9 +384,12 @@ def main():
             for narrow in [False, True]:
                 for iteration in range(-args.warmups, args.repeats):
                     query = aggregate(frame, narrow)
-                    started = time.perf_counter_ns()
-                    observed = query.collect()[0].asDict()
-                    elapsed = time.perf_counter_ns() - started
+                    phase = 'read/{}/{}/{}'.format(
+                        mode, 'id-only' if narrow else 'full', iteration)
+                    with profile_phase(spark, args.nvtx_phases, phase):
+                        started = time.perf_counter_ns()
+                        observed = query.collect()[0].asDict()
+                        elapsed = time.perf_counter_ns() - started
                     if observed != expected[str(narrow)]:
                         raise AssertionError('cache aggregate mismatch: ' + repr(observed))
                     plan = query._jdf.queryExecution().executedPlan().toString()

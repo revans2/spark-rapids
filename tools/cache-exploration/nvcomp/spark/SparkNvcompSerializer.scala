@@ -107,6 +107,12 @@ class SparkNvcompLz4Serializer extends SparkNvcompSerializer {
 class SparkNvcompZstdSerializer extends SparkNvcompSerializer {
   override protected def codec: String = "zstd"
 }
+class SparkNvcompSnappySerializer extends SparkNvcompSerializer {
+  override protected def codec: String = "snappy"
+}
+class SparkNvcompAnsSerializer extends SparkNvcompSerializer {
+  override protected def codec: String = "ans"
+}
 class SparkNvcompCascadedSerializer extends SparkNvcompSerializer {
   override protected def codec: String = "cascaded-typed"
 }
@@ -148,6 +154,8 @@ object SparkNvcompSerializer {
     case "zstd" => 2
     case "cascaded8" => 3
     case "cascaded-typed" => 4
+    case "snappy" => 5
+    case "ans" => 6
     case _ => throw new IllegalArgumentException("Unknown experimental nvCOMP codec")
   }
 

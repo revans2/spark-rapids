@@ -36,14 +36,16 @@ commands = [
      '-I' + str(java_home / 'include'), '-I' + str(java_home / 'include/linux'),
      '-I' + str(args.cuda / 'include'), '-I' + str(args.sdk / 'include'),
      '-DCASCADED_SDK_LIBRARY="' + str(sdk_library) + '"',
-     str(source / 'cascaded_jni.cpp'), '-L' + str(args.cuda / 'lib64'),
+     str(source / 'cascaded_jni.cpp'), str(source / 'byte_codec_jni.cpp'), '-L' + str(args.cuda / 'lib64'),
      '-Wl,-rpath,' + str(args.cuda / 'lib64'), '-lcudart', '-ldl', '-o', str(library)],
     ['javac', '-Xlint:all', '-cp', str(args.cudf_jar), '-d', str(classes),
-     str(source.parent / 'CascadedCodec.java'), str(source / 'CascadedSmoke.java')]
+     str(source.parent / 'CascadedCodec.java'), str(source.parent / 'ByteCodec.java'),
+     str(source / 'CascadedSmoke.java'), str(source / 'ByteCodecSmoke.java')]
 ]
 for command in commands:
     subprocess.run(command, check=True)
-files = [sdk_library, args.cudf_jar, source / 'cascaded_jni.cpp', source / 'CascadedSmoke.java',
+files = [sdk_library, args.cudf_jar, source / 'cascaded_jni.cpp', source / 'byte_codec_jni.cpp',
+         source.parent / 'ByteCodec.java', source / 'CascadedSmoke.java', source / 'ByteCodecSmoke.java',
          source.parent / 'CascadedCodec.java', source / 'build.py', library]
 files += sorted((args.sdk / 'include/nvcomp').glob('*.h'))
 provenance = {'commands': commands, 'sdk_library': str(sdk_library),

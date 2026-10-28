@@ -46,7 +46,7 @@ public final class PackedTableCodec {
   private static Map<String, Object> map() { return new LinkedHashMap<>(); }
 
   private static void checkCodec(String codec) {
-    if (!List.of("uncompressed", "lz4", "zstd", "cascaded8", "cascaded-typed").contains(codec)) {
+    if (!List.of("uncompressed", "lz4", "zstd", "snappy", "ans", "cascaded8", "cascaded-typed").contains(codec)) {
       throw new IllegalArgumentException("Unsupported GPU packed codec: " + codec);
     }
   }
@@ -206,6 +206,8 @@ public final class PackedTableCodec {
     switch (codec) {
       case "lz4": return new BatchedLZ4Compressor(chunk, INTERMEDIATE_BYTES);
       case "zstd": return new BatchedZstdCompressor(chunk, INTERMEDIATE_BYTES);
+      case "snappy":
+      case "ans": return ByteCodec.compressor(codec, chunk, INTERMEDIATE_BYTES);
       case "cascaded8":
       case "cascaded-typed": return CascadedCodec.compressor(chunk, INTERMEDIATE_BYTES, bits);
       default: throw new IllegalArgumentException("No compressed codec for " + codec);
@@ -216,6 +218,8 @@ public final class PackedTableCodec {
     switch (codec) {
       case "lz4": return new BatchedLZ4Decompressor(chunk);
       case "zstd": return new BatchedZstdDecompressor(chunk);
+      case "snappy":
+      case "ans": return ByteCodec.decompressor(codec, chunk);
       case "cascaded8":
       case "cascaded-typed": return CascadedCodec.decompressor(chunk);
       default: throw new IllegalArgumentException("No compressed codec for " + codec);
@@ -393,11 +397,13 @@ public final class PackedTableCodec {
         // Independent table-relative offsets deliberately repeat at zero.
         tables[i] = new PackedSegments.Segment(0, 8L * 1024 * 1024, 8);
       }
-      List<Call> calls = plan("lz4", chunk, tables);
-      if (calls.size() != 1 || calls.get(0).indices.length != 32
-          || calls.get(0).inputBytes != PackedSegments.MAX_SUBMISSION_BYTES
-          || calls.get(0).blocks != PackedSegments.MAX_SUBMISSION_BYTES / chunk) {
-        throw new AssertionError("Many small tables must share one many-block native submission");
+      for (String codec : new String[] {"lz4", "zstd", "snappy", "ans"}) {
+        List<Call> calls = plan(codec, chunk, tables);
+        if (calls.size() != 1 || calls.get(0).indices.length != 32
+            || calls.get(0).inputBytes != PackedSegments.MAX_SUBMISSION_BYTES
+            || calls.get(0).blocks != PackedSegments.MAX_SUBMISSION_BYTES / chunk) {
+          throw new AssertionError("Many small tables must share one many-block native submission");
+        }
       }
     }
     PackedSegments.Segment[] tiny = new PackedSegments.Segment[1025];

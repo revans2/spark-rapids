@@ -380,3 +380,111 @@ Remaining: runtime CPU columnar-input rejection, byte-Cascaded if retained,
 512/1024/2048 MiB per-task real Spark cases, representative string workloads,
 and repeatability/profiling of material differences. No production-readiness,
 Cascaded V2, CPU codec performance, or full multi-profile compatibility claim.
+
+## Snappy, ANS and actual Spark GPU activity breakdown
+
+User explicitly authorized adding Snappy and ANS and measuring movement versus
+kernel runtime. Implementation and this bounded 256 MiB/task measurement batch
+READY FOR REVIEW; larger fixture/size matrix remains IN PROGRESS. All work and
+worker checkpoints used MCP docker_exec only; root exclusively ran GPU jobs,
+sequentially. New adapters/flags/analyzer remain UNRELEASED tools-only; no
+production behavior/config/shims changed and prototype CPU paths still throw.
+
+PCBS GPU writer getParquetWriterOptions selects SNAPPY when useCompression is
+true (ParquetCachedBatchSerializer.scala). Spark SQLConf COMPRESS_CACHED maps to
+spark.sql.inMemoryColumnarStorage.compressed, default true; the new benchmark
+records its effective value, true in every run. This is independent of the
+ordinary Parquet file compression configuration.
+
+Changes: ByteCodec + native adapter use installed nvCOMP5.0.0.6 Snappy and default
+generic-byte rANS, shared cuDF chunk framing, status/length/alignment validation,
+RMM-owned scratch and bounded submissions. Spark classes/wire IDs and isolated
+build/provenance extended. Optional --profile captures CUDA/NVTX; start/end
+NvtxUniqueRange markers encompass population and every full/id-only collect,
+excluding reference generation and post-run audit. Timers exclude marker calls.
+profile.py filters phase timestamps to the marker JVM across all worker threads,
+clips intervals, and reports bytes, sum/union times, overlap, runtime API calls
+and top kernel names. It does not use thread-based NVTX GPU launch projection.
+
+Independent verification:
+- Root read complete Java/native adapter and integration diffs. Peer review
+  matched SDK ABI/options and found a host descriptor vector exception lifetime
+  issue. Fixed drain-guard ordering, reread and peer-reviewed; no fault injection
+  claim. Root GPU byte tests passed both codecs across ten odd-tail/random/
+  compressible/multi-block cases, plus forced offset1 frame decode; final RMM0.
+- Root real Spark Snappy/ANS probes passed exact values/nulls, projection,
+  reorder/duplicate fields, empty selected schema, DISK_ONLY byte records,
+  CPU row encode/decode/columnar decode and actual GPU-off read rejection,
+  early-stop TaskEnd cleanup back to existing plugin allocation baselines.
+  First Snappy probe dispatch lacked the new codec cases; fixed two-case probe
+  routing and rebuilt before accepting results (failed artifact probe-snappy
+  preserved). CPU columnar INPUT runtime rejection remains unverified.
+- Fresh build-11 produced all accepted Spark runs. Native compile -Werror,
+  Java/Scala compile and CPU planner passed. Synthetic analyzer fixture passed
+  concurrent kernel overlap, clipped copies, boundary-byte caveat, JVM/thread
+  filtering. Reviewer independently reproduced PCBS raw SQLite sums/unions,
+  copy bytes and phase PID; marker windows differed from collect by0.1-0.2ms.
+- Root reproduced every result/analysis and checked PASS, rows/aggregates,
+  actual GPU readers, resident4partitions/no disk, unchanged encode counters
+  through reads, actual memory limits and zero boundary-crossing GPU events.
+- Final log review found four duplicate jar registration errors before timing.
+  Raw and dist/deps copies had identical SHA256. Build now deduplicates identical
+  basenames preserving raw priority and rejects conflicting bytes. Peer-reviewed;
+  build-12 provenance passed, every application class byte-identical to build-11,
+  dependency hashes unchanged, CPU planner passed, final1024row ANS Spark smoke
+  passed with no duplicate registration errors. Existing measurements remain
+  valid. No production build artifacts modified.
+
+Unprofiled matched additions, same workload/settings as prior table (seconds):
+| Format | Population | Full read | Id-only read | Encoded MiB | Resident MiB | Peak RSS GiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Packed Snappy | 1.456 | 0.517 | 0.216 | 520.304 | 520.315 | 4.058 |
+| Packed generic-byte ANS | 1.329 | 0.454 | 0.200 | 572.975 | 572.986 | 4.346 |
+
+Artifacts /data/tmp/nvcomp-spark-probe/{snappy,ans}-fixed-256 and
+probe-{snappy,ans}-11. Cold population1sample; warm read median2 after1warmup.
+No CPU codec measurements: unsupported by explicit scope.
+
+Separate diagnostic profiles: /data/tmp/nvcomp-spark-probe/profile-{pcbs,
+uncompressed,lz4,zstd,cascaded,snappy,ans}-256/{profile.nsys-rep,profile.sqlite,
+analysis.json,result.json}. The tables below use GPU interval UNION milliseconds;
+reads average the two measured samples after1warmup. Overlap means columns MUST
+NOT be added as a wall-time decomposition. All kernels include source generation
+during population and query aggregation during reads, not codec-only time.
+Profile wall time is perturbed and never replaces the unprofiled performance
+table. Physical payload sizes vary slightly across these separate runs.
+
+| Format | Population wall ms | Kernels ms | H2D ms | D2H ms | D2D ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| PCBS | 1129.640 | 150.566 | 2.112 | 22.798 | 0.006 |
+| Uncompressed | 1974.109 | 82.967 | 7.231 | 58.856 | 14.767 |
+| LZ4 | 1869.289 | 266.534 | 7.043 | 35.600 | 44.688 |
+| Zstd | 1999.632 | 400.798 | 7.305 | 31.948 | 45.957 |
+| Typed Cascaded | 2131.960 | 94.705 | 7.343 | 49.700 | 78.214 |
+| Snappy | 1977.637 | 210.678 | 7.139 | 36.583 | 38.446 |
+| ANS | 1708.827 | 88.994 | 7.760 | 40.966 | 39.796 |
+
+| Format | Full-read wall ms | Kernels ms | H2D ms | D2H ms | D2D ms | GPU-active union ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| PCBS | 291.099 | 26.402 | 21.335 | 0.681 | 0.037 | 48.064 |
+| Uncompressed | 753.063 | 95.205 | 61.321 | 8.827 | 4.309 | 165.270 |
+| LZ4 | 708.715 | 120.338 | 32.719 | 8.646 | 0.709 | 158.834 |
+| Zstd | 711.275 | 140.536 | 26.178 | 8.761 | 0.702 | 173.129 |
+| Typed Cascaded | 984.342 | 100.697 | 36.895 | 9.005 | 21.789 | 165.126 |
+| Snappy | 690.861 | 106.331 | 33.448 | 8.730 | 0.718 | 146.784 |
+| ANS | 780.407 | 98.540 | 36.833 | 8.796 | 18.824 | 159.959 |
+
+Interpretation/limits: unprofiled rankings remain primary; tracing adds material
+overhead, especially in paths with many small API calls. GPU-inactive remainder
+is CPU work/scheduling/GC/waits/profiler overhead, NOT measured CPU execution.
+CPU sampling unavailable in container (perf paranoid4); ordinary CPU heap memcpy
+is not measured by CUDA DMA activity. No inference of an exact unprofiled CPU
+fraction. PCBS id-only H2D16.404MiB versus packed Snappy521.793MiB /
+ANS572.806MiB / Zstd384.485MiB: prototype decompresses full table before selecting.
+ANS fullread0 adds12,337 non-PTDS cudaMemcpyAsync D2D calls/444258370B/19.005ms
+summed GPU time, consistent with bridge alignment bounce; no call stacks prove
+exclusive attribution versus SDK internals. No speculative optimization applied.
+
+Memory approval unchanged heap16/host32 includingpin2/RSS64/GPU24GiB.
+Profiles peak5.25-6.01GiB process-tree RSS; no guard stops, OOM, cap relaxation
+or disk spill. Matrix512/1024/2048MiB/task and broader strings still pending.

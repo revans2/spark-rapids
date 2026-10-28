@@ -54,6 +54,14 @@ def main():
         REPO / "udf-compiler/target/spark355/rapids-4-spark-udf_2.12-26.12.0-SNAPSHOT-spark355.jar",
         REPO / "delta-lake/delta-33x/target/spark355/rapids-4-spark-delta-33x_2.12-26.12.0-SNAPSHOT-spark355.jar"]
     plugin = list(dict.fromkeys(p.resolve(strict=True) for p in plugin))
+    by_name = {}
+    for path in plugin:
+        if path.name in by_name:
+            if digest(path) != digest(by_name[path.name]):
+                raise RuntimeError("Conflicting plugin artifacts: " + path.name)
+        else:
+            by_name[path.name] = path
+    plugin = list(by_name.values())
     dependencies = [CUDF, PRIVATE] + plugin
     spark_jars = sorted(p for p in (SPARK / "jars").glob("*.jar") if p.is_file())
     if not spark_jars or not plugin:
@@ -61,7 +69,7 @@ def main():
     classes = output / "classes"
     classpath = os.pathsep.join(map(str, [classes] + dependencies + spark_jars))
     java_sources = [HERE.parent / name for name in [
-        "CascadedCodec.java", "PackedSegments.java", "PackedTableCodec.java"]]
+        "CascadedCodec.java", "ByteCodec.java", "PackedSegments.java", "PackedTableCodec.java"]]
     subprocess.run(["javac", "-Xlint:all", "-cp", classpath, "-d", str(classes)]
                    + list(map(str, java_sources)), check=True)
     compiler = os.pathsep.join(str(p) for p in spark_jars
@@ -75,7 +83,7 @@ def main():
     sources = java_sources + scala_sources + [Path(__file__),
         REPO / "tools/cache-exploration/spark_cache_bench.py",
         REPO / "tools/cache-exploration/measure_process.py", HERE.parent / "run.py"]
-    for name in ["benchmark.py", "run.py"]:
+    for name in ["benchmark.py", "run.py", "profile.py"]:
         path = HERE / name
         if path.exists():
             sources.append(path)

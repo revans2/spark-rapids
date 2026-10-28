@@ -31,6 +31,7 @@ GIB = 1024**3
 SERIALIZERS = {
     "uncompressed": "SparkNvcompUncompressedSerializer",
     "lz4": "SparkNvcompLz4Serializer", "zstd": "SparkNvcompZstdSerializer",
+    "snappy": "SparkNvcompSnappySerializer", "ans": "SparkNvcompAnsSerializer",
     "cascaded": "SparkNvcompCascadedSerializer", "cascaded-byte": "SparkNvcompCascadedByteSerializer"}
 
 def verify(manifest, build):
@@ -70,6 +71,8 @@ def main():
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--probe", action="store_true", help="Run bounded Scala correctness/CPU-rejection probe")
+    parser.add_argument("--profile", action="store_true",
+                        help="Separate diagnostic run with Nsight CUDA/NVTX tracing; timings are perturbed")
     args = parser.parse_args()
     if args.task_mib and args.fixture != "fixed-wide":
         parser.error("Initial exact task-size model is fixed-wide; use explicit rows for strings")
@@ -91,6 +94,10 @@ def main():
     jars = ",".join([entry["path"] for entry in manifest["plugin_dependencies"]]
                     + [manifest["application"]["path"]])
     native_option = "-Dcacheexploration.cascaded.library=" + manifest["native_library"]
+    if args.profile:
+        if args.probe:
+            parser.error("Profile measured cache actions rather than the correctness probe")
+        native_option += " -Dai.rapids.cudf.nvtx.enabled=true"
     command = [str(Path(manifest["spark_home"]) / "bin/spark-submit"),
                "--master", "local[2]", "--driver-memory", "16g",
                "--driver-java-options", "--add-opens=java.base/java.nio=ALL-UNNAMED " + native_option,
@@ -110,6 +117,8 @@ def main():
                "--warmups", str(args.warmups), "--repeats", str(args.repeats),
                "--storage", "dataframe-default", "--output", str(output / "result.json"),
                "--payload-audit-class", "org.apache.spark.sql.cacheexploration.NvcompPayloadAudit"]
+    if args.profile:
+        command += ["--nvtx-phases"]
     if args.format in SERIALIZERS:
         command += ["--serializer-class", "org.apache.spark.sql.cacheexploration." + SERIALIZERS[args.format]]
     if args.task_mib:
@@ -121,10 +130,16 @@ def main():
         command = command[:command.index(str(snapshot))] + [
             "--class", "org.apache.spark.sql.cacheexploration.SparkNvcompProbe",
             manifest["application"]["path"], code]
+    if args.profile:
+        command = ["nsys", "profile", "--trace=cuda,nvtx", "--sample=none",
+                   "--cpuctxsw=none", "--wait=all",
+                   "--output=" + str(output / "profile")] + command
     environment = os.environ.copy()
     environment.update(SPARK_HOME=manifest["spark_home"], SPARK_LOCAL_IP="127.0.0.1",
                        PYSPARK_PYTHON=sys.executable, PYSPARK_DRIVER_PYTHON=sys.executable)
     launch = {"command": command, "build": str(build), "format": args.format,
+              "profiled": args.profile,
+              "timing_scope": "Nsight diagnostic; perturbed" if args.profile else "Unprofiled benchmark",
               "rows": rows, "task_slots": 2, "partitions": 4,
               "rss_stop_bytes": 64*GIB, "heap_bytes": 16*GIB,
               "configured_host_budget_bytes": 32*GIB, "pinned_bytes": 2*GIB,
