@@ -29,7 +29,7 @@ import org.mockito.Mockito.{never, spy, verify}
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.{
-  Add, Alias, Ascending, AttributeReference, Descending, Expression, Literal, NamedExpression,
+  Add, Alias, Ascending, AttributeReference, Descending, Literal, NamedExpression,
   NullsFirst, NullsLast, SortOrder}
 import org.apache.spark.sql.catalyst.plans.physical.{
   HashPartitioning, PartitioningCollection, RangePartitioning}
