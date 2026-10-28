@@ -811,6 +811,9 @@ case class GpuProjectExec(
    projectList: List[NamedExpression],
    child: SparkPlan,
    enablePreSplit: Boolean = true)(
+   // CPU forms of projectList entries, in the same order and with the same output exprIds,
+   // used by Spark's partitioning and ordering logic. None uses conservative alias conversion.
+   // Change projectList through withProjectList so these metadata expressions stay in sync.
    val cpuProjectList: Option[List[NamedExpression]] = None) extends GpuProjectExecLike {
 
   override def otherCopyArgs: Seq[AnyRef] = cpuProjectList :: Nil
@@ -818,6 +821,8 @@ case class GpuProjectExec(
   override protected def cpuOutputExpressions: Seq[NamedExpression] =
     cpuProjectList.getOrElse(GpuAliasAwareOutputExpressions.toCpuAliases(projectList))
 
+  // Preserve original CPU expressions for unchanged entries, including when reordered or pruned.
+  // New or changed GPU expressions use conservative alias conversion for metadata matching.
   def withProjectList(
       expressions: List[NamedExpression],
       newChild: SparkPlan = child,
