@@ -4,8 +4,9 @@ Status: IN PROGRESS — user returned repo; current-source baseline rebuilt and 
 Source/provenance repairs and the corrected 256MiB/task cohort are READY FOR REVIEW.
 Current-source CPU/GPU profiling is verified and READY FOR REVIEW below.
 User-approved decoded batching and its impact reruns are READY FOR REVIEW below.
-Configured-target batching is implemented; final 256/512/1024/2048 MiB/task
-matrix is IN PROGRESS with spill observations. Large-string matrix remains pending.
+Configured-target batching and the 32-case size matrix are READY FOR REVIEW:
+31 cases completed, uncompressed 2GiB/task failed in JVM heap population.
+Large-string and active GPU spill/retry validation remain pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
 cohort section describe the older hash-pinned prebuilt jar, not this branch's
@@ -969,7 +970,7 @@ Larger 512/1024/2048 MiB/task and representative string matrix remain pending.
 No further optimization was implemented at that checkpoint. Architect acceptance
 remains pending. Subsequent user authorization and target-size work follow.
 
-## Configured target and large-task spill observations — IN PROGRESS
+## Configured target and large-task spill observations — READY FOR REVIEW
 
 User clarified: algorithms must honor configured targets across hardware,
 using spilling/retry, with roughly 4x target working memory per task as a goal.
@@ -1067,8 +1068,148 @@ Completed and independently verified so far:
 - PCBS output counts are not directly instrumented by the prototype counter.
   Historical four-count came from kernel fingerprints, not this larger sweep.
 
-Remaining final cohort: ANS, Zstd, LZ4, typed Cascaded, uncompressed and default
-at all4sizes (24runs). Do not restart completed final runs after resumption.
-Re-read this tracker and use MCP tools only. Benchmark conditions remain fixed.
-Architect acceptance remains pending; implementation checkpoint READY FOR REVIEW,
-complete matrix not yet delivered.
+The remaining24runs subsequently completed or failed as recorded below.
+Re-read this tracker and use MCP tools only after any resumption. Do not restart
+completed final runs. Benchmark conditions remained fixed. Architect acceptance
+remains pending; implementation and measured outcomes are READY FOR REVIEW.
+
+### Completed final size matrix
+
+Root resumed after capacity messages from signed source checkpoint2dcc305537,
+read the committed tracker and confirmed tracked checkout clean/GPU idle.
+Continued using MCP docker_exec only; no source/settings changes or repeated
+completed final runs. Final build30 remains source-bound to the same production
+artifact cohort. All32cases attempted,31PASS and1FAIL during population.
+Independent verifier final-target-matrix.py reran all successful per-run checks,
+compared expected aggregates across formats at each size, verified complete
+metadata/cap/metric coverage and reproduced all medians/audited byte counts.
+Totals:403observed phases (population+warmups+measuredreads),2139successful task
+attempts. Every observed spill/retry metric is an explicit zero with coverage,
+not a missing/default value. All successful cases retain all4partitions,
+all logical rows and zero disk-cache bytes across population/read snapshots.
+No successful-case encoding counter increases during reads; no guard stops.
+
+Fixed conditions: target1GiB, four tasks/two slots/two waves; task sizes below
+are canonical logical bytes per task, total volume4x. Cold population1sample;
+read medians5samples after1warmup per full/id query. These are whole Spark action
+times. GPU-enabled jobs throughout; default Spark uses CPU cache encode/decode
+feeding GPU query operators, not a GPU cache serializer. Population code is
+unchanged; do not attribute population differences to output-target changes.
+Audited encoded payload includes nvCOMP/PCBS framing; default Spark excludes its
+separate statistics row. Encoded sizes are actual observations, not guaranteed
+bit-identical between runs. Stored Spark resident sizes are estimates and can
+differ from audited payload bytes.
+
+| Task MiB | Format | Population s | Full read s | Id read s | Encoded MiB |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 256 | PCBS | 1.476 | 0.278 | 0.160 | 489.7 |
+| 256 | Snappy | 1.675 | 0.242 | 0.160 | 520.3 |
+| 256 | ANS | 1.480 | 0.263 | 0.180 | 572.1 |
+| 256 | Zstd | 1.710 | 0.213 | 0.149 | 385.8 |
+| 256 | LZ4 | 1.534 | 0.208 | 0.145 | 505.8 |
+| 256 | Typed Cascaded | 1.831 | 0.400 | 0.324 | 392.4 |
+| 256 | Uncompressed | 1.868 | 0.259 | 0.195 | 1024.3 |
+| 256 | Default Spark | 19.893 | 0.847 | 0.214 | 415.7 |
+| 512 | PCBS | 1.947 | 0.379 | 0.188 | 979.3 |
+| 512 | Snappy | 2.294 | 0.298 | 0.189 | 1041.0 |
+| 512 | ANS | 2.286 | 0.330 | 0.238 | 1156.9 |
+| 512 | Zstd | 2.421 | 0.341 | 0.199 | 763.3 |
+| 512 | LZ4 | 2.378 | 0.264 | 0.186 | 1016.5 |
+| 512 | Typed Cascaded | 2.761 | 0.711 | 0.565 | 791.6 |
+| 512 | Uncompressed | 2.286 | 0.381 | 0.290 | 2048.6 |
+| 512 | Default Spark | 41.332 | 1.427 | 0.260 | 831.4 |
+| 1024 | PCBS | 2.868 | 0.622 | 0.309 | 1958.6 |
+| 1024 | Snappy | 3.994 | 0.477 | 0.271 | 2082.2 |
+| 1024 | ANS | 3.693 | 0.577 | 0.422 | 2314.1 |
+| 1024 | Zstd | 4.415 | 0.483 | 0.349 | 1526.8 |
+| 1024 | LZ4 | 3.840 | 0.448 | 0.271 | 2033.5 |
+| 1024 | Typed Cascaded | 4.480 | 1.219 | 1.060 | 1559.3 |
+| 1024 | Uncompressed | 4.775 | 0.578 | 0.467 | 4097.3 |
+| 1024 | Default Spark | 80.520 | 2.687 | 0.342 | 1662.8 |
+| 2048 | PCBS | 4.381 | 1.089 | 0.516 | 3917.4 |
+| 2048 | Snappy | 6.636 | 0.808 | 0.533 | 4158.0 |
+| 2048 | ANS | 6.476 | 0.917 | 0.697 | 4639.1 |
+| 2048 | Zstd | 7.586 | 0.841 | 0.568 | 3067.5 |
+| 2048 | LZ4 | 6.791 | 0.747 | 0.559 | 4048.2 |
+| 2048 | Typed Cascaded | 7.947 | 2.308 | 2.017 | 3122.1 |
+| 2048 | Uncompressed | HEAP OOM | — | — | — |
+| 2048 | Default Spark | 170.260 | 4.893 | 0.446 | 3325.6 |
+
+At2GiB/task all six successful GPU serializers and default Spark report actual
+task-attributed GPU->host spill0, GPU->disk spill0, Spark execution spill0 and
+retry/split-retry0; Spark cache disk bytes0. This is a common-case throughput
+measurement on the fixed setup, not validation of active spill/retry behavior.
+Raising input per task does not force a GPU working set of that entire size.
+Maximum observed GPU concurrency reaches2, but default Spark reads sometimes
+reach only1 (e.g.all measured1GiB fullreads and2GiB idreads); configured slots
+are not proof of sustained overlap. No best-case full-concurrency claim.
+
+| 2GiB/task format | Peak sampled process-tree RSS GiB | Whole-job RMM tracked high water GiB |
+| --- | ---: | ---: |
+| PCBS | 9.065 | 12.051 |
+| Snappy | 9.901 | 5.639 |
+| ANS | 9.341 | 6.103 |
+| Zstd | 6.837 | 9.080 |
+| LZ4 | 8.596 | 5.639 |
+| Typed Cascaded | 8.197 | 5.639 |
+| Default Spark | 19.338 | 8.186 |
+| Uncompressed FAILED | 11.757 | unavailable |
+
+RMM high water excludes unused pool reservation and allocations outside its
+tracking; includes population and query work, not a codec-only/per-read peak.
+RSS is sampled, not allocator accounting. Failed-run RSS is not comparable to
+a completed cached dataset and does not establish lower memory requirements.
+Prototype output counters:4/4/4/12outputs per query at256/512/1024/2048MiB per
+task for every successful packed codec. The last case has near-target outputs
+and small tails; source groups exact full-schema packed sizes. PCBS/default
+output counts are not directly instrumented here.
+
+### Uncompressed heap failure and bounded diagnosis
+
+Uncompressed2GiB/task failed in population (exit52), not decompression or GPU
+allocation. Result FAIL/readsempty/no population_spill; do not report zero spill
+for this failed case. Actual recorded JVM heap maximum16GiB. No RSS guard stop;
+GPU was idle after process cleanup. Stack: java.lang.OutOfMemoryError:
+Java heap space at ByteBuffer.wrap -> wire line233, following newbytearray
+allocation at232. The wrapper is small, so this proves heap exhaustion, not
+that the particular failing allocation itself was the large array.
+
+Root preserved artifacts and continued independent default controls without
+raising caps, changing inputs, rerunning the OOM or attempting a heap repair.
+Read-only reviewer independently verified failure artifacts and all6successful
+2GiB GPU-format spill coverages (9population/5eachread taskattempts, all explicit0).
+
+Likely mechanism: successful1GiB uncompressed audit gives4195609bytes/record
+(4MiB+1305). The same Java17 -Xmx16g defaults report G1 with8388608byte regions.
+G1 humongous allocation uses whole regions for arrays above half-region size;
+see https://docs.oracle.com/en/java/javase/17/gctuning/garbage-first-g1-garbage-collector1.html.
+The expected2048records at2GiB/task carry8.0025GiBpayload but can occupy16GiB of
+G1 region capacity before ordinary objects and temporary allocations.
+This is consistent with the failure; failed-process GC telemetry/heap dump
+was not captured, so do not claim a complete live-object census or sole cause.
+
+Root ran a safe, tiny standalone allocation check after GPU jobs ended:
+HeapArrayFootprint.java under /data/tmp/nvcomp-pcbs-rebuild-01, sameJava17,
+-Xmx16g,10retainedarrays only, no pressure/OOM search:
+- array4195609bytes: heap-used delta83885672bytes (~80MiB for~40MiBpayload).
+- controlarray4193280bytes (below4MiB): delta41939080bytes (~40MiB).
+Both reported G1region8388608 andheapMax17179869184. This reproduces the
+representation's heap amplification on the same JVM defaults without exhausting
+memory; it is not GC tracing of the failed process. Initial standalone javac
+from the main cwd hit an unrelated Unicode filename/locale issue; compiling
+from the ASCII scratch directory fixed it, and the generated main-cwd javac
+arguments file was removed. No unrelated repository files changed.
+
+Final verification: final-target-matrix.py PASS31+recognizedFAIL1 with403phases/
+2139taskattempts; verify-target-run.py emits every successful verified-summary;
+13source-proof tests PASS; CPU spill lifecycle/zero/unavailable/failure test PASS;
+planner1GiB/odd/tiny target checks PASS; bounded GPU edge/cleanup probe PASS.
+Independent review covered target planning, ownership/retries and spill semantics,
+including root's metadata/error fixes. All GPU jobs ended and GPU idle. No
+production source/POM/shim/profile changes, no published PR, no changed budgets.
+
+Remaining limits: active GPU spill/retry behavior and large-string performance
+not exercised; CPU fallback remains intentionally unsupported. Uncompressed
+heap representation needs investigation before calling it robust for this size.
+No repair, GC tuning or larger heap was silently applied. Architect alone may
+accept/mark DONE.
