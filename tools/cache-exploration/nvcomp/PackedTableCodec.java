@@ -17,7 +17,6 @@ package cacheexploration.nvcomp;
 
 import ai.rapids.cudf.BaseDeviceMemoryBuffer;
 import ai.rapids.cudf.CloseableArray;
-import ai.rapids.cudf.ContiguousTable;
 import ai.rapids.cudf.Cuda;
 import ai.rapids.cudf.DeviceMemoryBuffer;
 import ai.rapids.cudf.nvcomp.BatchedCompressor;
@@ -26,7 +25,6 @@ import ai.rapids.cudf.nvcomp.BatchedLZ4Compressor;
 import ai.rapids.cudf.nvcomp.BatchedLZ4Decompressor;
 import ai.rapids.cudf.nvcomp.BatchedZstdCompressor;
 import ai.rapids.cudf.nvcomp.BatchedZstdDecompressor;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -268,25 +266,20 @@ public final class PackedTableCodec {
     return result;
   }
 
-  public static EncodedBatch compress(ContiguousTable[] borrowedTables, String codec,
-      long chunkBytes, Cuda.Stream borrowedStream) {
-    int tables = borrowedTables.length;
-    long[] bytes = new long[tables];
-    byte[][] metadata = new byte[tables][];
-    PackedSegments.Segment[][] layouts = new PackedSegments.Segment[tables][];
-    for (int t = 0; t < tables; t++) {
-      bytes[t] = borrowedTables[t].getBuffer().getLength();
-      ByteBuffer source = borrowedTables[t].getMetadataDirectBuffer().duplicate();
-      metadata[t] = new byte[source.remaining()];
-      source.get(metadata[t]);
-      layouts[t] = PackedSegments.describe(borrowedTables[t], codec.equals("cascaded-typed"));
+  public static EncodedBatch compress(DeviceMemoryBuffer[] borrowedBuffers, byte[][] metadata,
+      PackedSegments.Segment[][] layouts, String codec, long chunkBytes, Cuda.Stream borrowedStream) {
+    int tables = borrowedBuffers.length;
+    if (metadata.length != tables || layouts.length != tables) {
+      throw new IllegalArgumentException("Packed buffer/metadata/layout count");
     }
+    long[] bytes = new long[tables];
+    for (int t = 0; t < tables; t++) bytes[t] = borrowedBuffers[t].getLength();
     int[] starts = starts(layouts, bytes);
     PackedSegments.Segment[] flat = flatten(layouts, starts[tables]);
     List<Call> calls = plan(codec, chunkBytes, flat);
     DeviceMemoryBuffer[] sources = new DeviceMemoryBuffer[flat.length];
     for (int t = 0; t < tables; t++) {
-      Arrays.fill(sources, starts[t], starts[t + 1], borrowedTables[t].getBuffer());
+      Arrays.fill(sources, starts[t], starts[t + 1], borrowedBuffers[t]);
     }
     try (CloseableArray<EncodedTable> result = CloseableArray.wrap(new EncodedTable[tables]);
          CloseableArray<DeviceMemoryBuffer> outputs =

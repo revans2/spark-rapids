@@ -170,11 +170,41 @@ object SparkNvcompProbe {
         cached.unpersist(blocking = true)
       }
 
+      // Cluster large strings so average-size row estimates require boundary refinement.
+      val skewed = spark.range(0, 2000, 1, 1).selectExpr("id",
+        "cast(case when id % 13 = 0 then null else id * 7 end as int) as key",
+        "case when id % 17 = 0 then cast(null as string) when id % 19 = 0 then '' " +
+          "when id < 128 then repeat('Y', 65536) else repeat('x', 2048) end as payload").persist()
+      try {
+        val expected = Array.tabulate[Row](2000) { i =>
+          val key: java.lang.Integer = if (i % 13 == 0) null else Int.box(i * 7)
+          val text = if (i % 17 == 0) null else if (i % 19 == 0) "" else
+            if (i < 128) "Y" * 65536 else "x" * 2048
+          Row(i.toLong, key, text)
+        }
+        gpuRows(skewed, expected, "multi-split skewed strings/nulls/order")
+        val relation = spark.sharedState.cacheManager.lookupCachedData(skewed).get.cachedRepresentation
+        val records = relation.cacheBuilder.cachedColumnBuffers.collect()
+          .map(_.asInstanceOf[NvcompCacheRecord])
+        require(records.length > 1 && records.map(_.numRows).sum == 2000,
+          "Skewed data did not produce multiple complete records")
+        require(records.forall(record => java.nio.ByteBuffer.wrap(record.bytes)
+          .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(24) <= 8L * 1024 * 1024),
+          "Refined packed record exceeded 8MiB")
+      } finally {
+        skewed.unpersist(blocking = true)
+      }
+
       // About 80 MiB total: several 8 MiB packed records per partition, without pressure testing.
       val partial = spark.range(0, 20000, 1, 4)
         .selectExpr("id", "repeat('x', 4096) as payload").persist()
       try {
         require(partial.count() == 20000, "Partial-consumption cache population")
+        gpuRows(partial.selectExpr("sum(id)", "sum(length(payload))"),
+          Array(Row(199990000L, 81920000L)), "multi-split variable-width aggregates")
+        val ids = partial.selectExpr("id").collect().map(_.getLong(0))
+        require(ids.length == 20000 && ids.indices.forall(i => ids(i) == i.toLong),
+          "Multi-split first/last row order")
         val relation = spark.sharedState.cacheManager.lookupCachedData(partial).get.cachedRepresentation
         val buffers = relation.cacheBuilder.cachedColumnBuffers
         val perPartition = buffers.mapPartitions(it => Iterator.single(it.size)).collect()

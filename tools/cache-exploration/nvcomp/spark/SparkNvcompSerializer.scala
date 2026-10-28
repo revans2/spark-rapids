@@ -21,12 +21,12 @@ import java.util.concurrent.atomic.AtomicLong
 
 import scala.collection.mutable.ArrayBuffer
 
-import ai.rapids.cudf.{CloseableArray, ColumnVector => CudfColumn, ContiguousTable,
-  Cuda, DefaultHostMemoryAllocator, DeviceMemoryBuffer, NvtxColor, NvtxRange, Table}
+import ai.rapids.cudf.{CloseableArray, Cuda, DefaultHostMemoryAllocator, DeviceMemoryBuffer,
+  NvtxColor, NvtxRange, Table}
 import cacheexploration.nvcomp.{PackedSegments, PackedTableCodec}
 import com.nvidia.spark.ParquetCachedBatchSerializer
 import com.nvidia.spark.rapids.{ConcatAndConsumeAll, GpuColumnVector, GpuSemaphore, RapidsConf,
-  SpillableColumnarBatch, SpillPriorities}
+  SpillableBuffer, SpillableColumnarBatch, SpillPriorities}
 import com.nvidia.spark.rapids.RapidsPluginImplicits._
 import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
 import com.nvidia.spark.rapids.RmmRapidsRetryIterator.withRetryNoSplit
@@ -251,10 +251,15 @@ object SparkNvcompSerializer {
     NvcompCacheRecord(rows, result)
   }
 
+  private final case class PackedRecord(rows: Int, metadata: Array[Byte],
+      layout: Array[PackedSegments.Segment], buffer: SpillableBuffer) extends AutoCloseable {
+    override def close(): Unit = withResource(buffer) { _ => () }
+  }
+
   private final class Encoder(input: Iterator[ColumnarBatch], codec: String)
       extends Iterator[CachedBatch] with AutoCloseable {
     private var parent: SpillableColumnarBatch = null
-    private var offset = 0
+    private val packedRecords = new ArrayDeque[PackedRecord]()
     private var rowTarget = 1
     private var closed = false
     private val pending = new ArrayDeque[NvcompCacheRecord]()
@@ -273,7 +278,6 @@ object SparkNvcompSerializer {
         parent = closeOnExcept(batch) { owned =>
           SpillableColumnarBatch(owned, SpillPriorities.ACTIVE_ON_DECK_PRIORITY)
         }
-        offset = 0
         rowTarget = math.max(1, math.min(Int.MaxValue.toLong,
           RecordBytes * math.max(1, parent.numRows()) / math.max(1L, parent.sizeInBytes)).toInt)
         if (parent.numRows() == 0) { withResource(parent) { _ => () }; parent = null }
@@ -281,60 +285,90 @@ object SparkNvcompSerializer {
       parent != null
     }
 
-    private def pack(): ContiguousTable = {
-      var take = math.min(rowTarget, parent.numRows() - offset)
-      while (true) {
-        val candidate = withRetryNoSplit[ContiguousTable] {
+    private def packParent(): Unit = {
+      var finished = false
+      while (!finished) {
+        val result = withRetryNoSplit[Option[Array[PackedRecord]]] {
           withResource(parent.getColumnarBatch()) { batch =>
-            withResource(new ArrayBuffer[CudfColumn]()) { columns =>
-              (0 until batch.numCols()).foreach { i =>
-                columns += batch.column(i).asInstanceOf[GpuColumnVector].getBase
-                  .subVector(offset, offset + take)
-              }
-              withResource(new Table(columns.toArray: _*)) { table =>
-                withResource(CloseableArray.wrap(table.contiguousSplit())) { packed =>
-                  require(packed.size() == 1, "Expected one packed cache table")
-                  packed.release()(0)
+            withResource(GpuColumnVector.from(batch)) { table =>
+              val indices = Iterator.iterate(rowTarget.toLong)(_ + rowTarget)
+                .takeWhile(_ < batch.numRows()).map(_.toInt).toArray
+              withResource(new NvtxRange("nvcomp-cache-pack-splits", NvtxColor.CYAN)) { _ =>
+                withResource(CloseableArray.wrap(table.contiguousSplit(indices: _*))) { packed =>
+                  if ((0 until packed.size()).exists(i =>
+                      packed.get(i).getBuffer.getLength > RecordBytes)) {
+                    None
+                  } else {
+                    closeOnExcept(new ArrayBuffer[PackedRecord]()) { records =>
+                      (0 until packed.size()).foreach { i =>
+                        val part = packed.get(i)
+                        val source = part.getMetadataDirectBuffer.duplicate()
+                        val metadata = new Array[Byte](source.remaining())
+                        source.get(metadata)
+                        val layout = PackedSegments.describe(part, codec == "cascaded-typed")
+                        val buffer = part.getBuffer
+                        buffer.incRefCount()
+                        val spillable = closeOnExcept(buffer) { owned =>
+                          SpillableBuffer(owned, SpillPriorities.ACTIVE_BATCHING_PRIORITY)
+                        }
+                        closeOnExcept(spillable) { owned =>
+                          records += PackedRecord(part.getRowCount.toInt, metadata, layout, owned)
+                        }
+                      }
+                      Some(records.toArray)
+                    }
+                  }
                 }
               }
             }
           }
         }
-        if (candidate.getBuffer.getLength <= RecordBytes) {
-          offset += take
-          rowTarget = take
-          if (offset == parent.numRows()) { withResource(parent) { _ => () }; parent = null }
-          return candidate
+        result match {
+          case Some(records) =>
+            records.foreach(packedRecords.addLast)
+            val owned = parent
+            parent = null
+            withResource(owned) { _ => () }
+            finished = true
+          case None =>
+            require(rowTarget > 1,
+              "One input row exceeds the experimental 8MiB packed cache-record bound")
+            rowTarget = math.max(1, rowTarget / 2)
         }
-        withResource(candidate) { _ => () }
-        require(take > 1, "One input row exceeds the experimental 8MiB packed cache-record bound")
-        take = math.max(1, take / 2)
       }
-      throw new IllegalStateException("Unreachable packed-row loop")
+    }
+
+    private def nextPacked(): Boolean = {
+      if (packedRecords.isEmpty && nextParent()) packParent()
+      !packedRecords.isEmpty
     }
 
     private def fill(): Unit = {
       GpuSemaphore.acquireIfNecessary(TaskContext.get())
-      withResource(new ArrayBuffer[ContiguousTable]()) { tables =>
+      withResource(new ArrayBuffer[PackedRecord]()) { tables =>
         var bytes = 0L
-        while (bytes + RecordBytes <= RawGroupBytes && nextParent()) {
-          val table = pack()
+        while (bytes + RecordBytes <= RawGroupBytes && nextPacked()) {
+          val table = packedRecords.removeFirst()
           tables += table
-          bytes += table.getBuffer.getLength
+          bytes += table.buffer.sizeInBytes
         }
         if (tables.nonEmpty) {
           val records = withRetryNoSplit {
-            withResource(PackedTableCodec.compress(tables.toArray, codec, ChunkBytes,
-                Cuda.DEFAULT_STREAM)) { compressed =>
-              require(compressed.tables.length == tables.length, "nvCOMP encoded table count")
-              require(compressed.tables.map(wireSize).sum <= GroupBytes,
-                "Encoded nvCOMP group exceeds the 256MiB heap bound")
-              val result = compressed.tables.zip(tables).map { case (encoded, table) =>
-                wire(Math.toIntExact(table.getRowCount), encoded, codec, Cuda.DEFAULT_STREAM)
+            withResource(new ArrayBuffer[DeviceMemoryBuffer]()) { inputs =>
+              tables.foreach(table => inputs += table.buffer.getDeviceBuffer())
+              withResource(PackedTableCodec.compress(inputs.toArray,
+                  tables.map(_.metadata).toArray, tables.map(_.layout).toArray,
+                  codec, ChunkBytes, Cuda.DEFAULT_STREAM)) { compressed =>
+                require(compressed.tables.length == tables.length, "nvCOMP encoded table count")
+                require(compressed.tables.map(wireSize).sum <= GroupBytes,
+                  "Encoded nvCOMP group exceeds the 256MiB heap bound")
+                val result = compressed.tables.zip(tables).map { case (encoded, table) =>
+                  wire(table.rows, encoded, codec, Cuda.DEFAULT_STREAM)
+                }
+                encodedGroups.incrementAndGet()
+                nativeEncodeCalls.addAndGet(compressed.calls.length)
+                result
               }
-              encodedGroups.incrementAndGet()
-              nativeEncodeCalls.addAndGet(compressed.calls.length)
-              result
             }
           }
           records.foreach(pending.addLast)
@@ -356,6 +390,9 @@ object SparkNvcompSerializer {
     override def close(): Unit = if (!closed) {
       closed = true
       pending.clear()
+      withResource(new ArrayBuffer[PackedRecord]()) { owned =>
+        while (!packedRecords.isEmpty) owned += packedRecords.removeFirst()
+      }
       val owned = parent
       parent = null
       if (owned != null) withResource(owned) { _ => () }

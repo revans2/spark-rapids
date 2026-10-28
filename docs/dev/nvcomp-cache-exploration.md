@@ -6,7 +6,9 @@ Current-source CPU/GPU profiling is verified and READY FOR REVIEW below.
 User-approved decoded batching and its impact reruns are READY FOR REVIEW below.
 Configured-target batching and the 32-case size matrix are READY FOR REVIEW:
 31 cases completed, uncompressed 2GiB/task failed in JVM heap population.
-Large-string and active GPU spill/retry validation remain pending.
+Direct multi-boundary GPU packing is implemented and verified; host-CPU/kernel
+profiles for it are IN PROGRESS below. CPU encode/decode remains deferred.
+Large-string performance and active GPU spill/retry validation remain pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
 cohort section describe the older hash-pinned prebuilt jar, not this branch's
@@ -1213,3 +1215,101 @@ not exercised; CPU fallback remains intentionally unsupported. Uncompressed
 heap representation needs investigation before calling it robust for this size.
 No repair, GC tuning or larger heap was silently applied. Architect alone may
 accept/mark DONE.
+
+## Direct multi-boundary GPU packing — implementation READY FOR REVIEW
+
+Latest user priority: optimize GPU first, assess whether CPU support is worth
+building, then compare CPU-only row-major->column-major encode/decode. Root
+briefly misread the CPU clarification as changing the immediate order; user
+corrected it before any CPU-path code was written. No CPU implementation/wire
+change was made. CPU fallback still throws. Host CPU profiles of GPU jobs below
+must not be presented as CPU-only cache encode/decode throughput.
+
+Root re-read tracker/decisive code and maintained MCP docker_exec-only project
+operations. Read-only worker confirmed MCP-only use at handoff/resumption/
+checkpoints; no worker GPU/build jobs. Production code, memory budgets and
+released contracts unchanged. Tools are UNRELEASED, so changed the codec input
+signature and sole caller directly without compatibility adapters. No shim,
+profile, POM or production operator change; Spark3.5.5-local validation only.
+
+Why minimal repair: the previous writer called ColumnVector.subVector for every
+column/record (owned copies), then contiguousSplit() on that already sliced table.
+cuDF exposes contiguousSplit(allRowBoundaries), packing directly from the original
+table. This adapts working APIs and retains existing codec/wire rather than
+replacing the cache design. Pinned JNI javap confirmed multi-boundary API.
+Existing PCBS large-table/row-group path and archived population profiles showed
+the mismatch:1330PCBS versus36858packed-Snappy kernels, including31992validity
+slicing/counting kernels on the packed path. Both already used batched compression.
+
+Encoder now packs the parent with one multi-boundary call per attempt. Average
+row-size estimates initialize boundaries; if any packed output exceeds8MiB,
+all trial outputs close and row interval halves before retrying. This deliberately
+preserves the existing record bound rather than silently accepting oversize.
+For fixed-wide data, layout overhead causes a rejected initial attempt; profiles
+must include it rather than claiming one successful pack with zero trials.
+Variable-width skew may require several whole-parent passes.
+
+Each accepted piece retains copied metadata, typed layout, rowcount and a
+SpillableBuffer. Raw ContiguousTable owners close, leaving independent buffers
+spillable; parent closes before compression. The codec now borrows restored
+device buffers plus retained metadata/layout, avoiding a second pack after
+spill restoration. Existing248MiB compression grouping/chunks/wire and1GiB
+decoded target stay fixed to isolate this GPU packing change. Source-parent+
+all packed outputs/scratch coexist during a native pack call; this can raise
+transient memory before outputs become spillable. No hardware-portability or
+strict4xT memory guarantee is established by the fixed24GiB tests.
+
+Worker found/fixed handle-append exception safety: closeOnExcept(spillable)
+guards PackedRecord allocation/collection insertion. Root inspected all code
+and independently built/reran. Cleanup closes both queued spillable packed
+pieces and remaining parent on early completion/failure. Worker reviewed the
+final diff and found no remaining substantive issue; git diff --check passed.
+
+Strengthened probe covers exact ordered2000rows with clustered64KiB strings,
+smaller strings, nulls and empty values, forcing multiple packed pieces and
+oversize refinement; every emitted header is<=8MiB and totalrows exact.
+Existing20k-row/~80MiB fixture now checks all id order plus sum(id)/stringlength,
+in addition to prefetched-output TaskEnd GPU/managed-host cleanup. Previous
+edge/projection/duplicate/diskbytes/CPU-rejection checks retained.
+Build31 initial probePASS; build32 caught Scala array/range inference in a new
+assertion (no successful artifact), fixed to an indexed value check. Final
+build33 + multisplit-snappy-probe-strengthened PASS. No test requirements were
+weakened; skewed boundary coverage was added following review.
+
+Bounded comparison: same fixed-wide fixture,4tasks/local2/two waves,16GiBheap,
+32GiBhost incl2GiBpinned,24GiBGPU and64GiBRSS guard. One cold population,
+one warmup+5measured reads. All11new unprofiled runs PASS with verify-target-run.py
+after each, complete explicit spill/retry counters0, allrows resident/disk0,
+same expected aggregates and source origins. Old target-final cohort is before;
+PCBS is freshly rerun unchanged control.
+
+| Task MiB | Format | Population before s | Population after s | Full after s | Id after s | Encoded after MiB |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 256 | PCBS control | 1.476 | 1.471 | 0.260 | 0.147 | 489.7 |
+| 256 | Snappy | 1.675 | 1.229 | 0.204 | 0.129 | 521.2 |
+| 256 | LZ4 | 1.534 | 1.170 | 0.208 | 0.151 | 508.7 |
+| 256 | Zstd | 1.710 | 1.382 | 0.232 | 0.150 | 382.9 |
+| 256 | ANS | 1.480 | 1.100 | 0.237 | 0.168 | 575.5 |
+| 256 | Typed Cascaded | 1.831 | 1.319 | 0.409 | 0.342 | 395.3 |
+| 256 | Uncompressed | 1.868 | 1.382 | 0.287 | 0.188 | 1024.3 |
+| 2048 | PCBS control | 4.381 | 4.162 | 1.086 | 0.499 | 3917.4 |
+| 2048 | Snappy | 6.636 | 3.727 | 0.823 | 0.531 | 4164.7 |
+| 2048 | LZ4 | 6.791 | 3.884 | 0.775 | 0.498 | 4051.8 |
+| 2048 | Zstd | 7.586 | 5.078 | 0.920 | 0.658 | 3028.6 |
+
+Do not overstate cold single-sample rankings or claim reads improved: reader
+code is unchanged; some timings vary/regress (Zstd2GiB0.841->0.920s). Dataset
+aggregates/recordcounts stay consistent; payload bits/sizes need not match
+because encode layouts/padding may differ. No CPU-only speed conclusion.
+
+At2GiB Snappy/LZ4 tracked whole-run GPU high water is8.133GiB versus5.639GiB
+before; source batching optimization trades higher transient memory for speed.
+Zstd9.068GiB; fresh PCBS12.049GiB. Still no spill/retries under fixed settings.
+RSS Snappy9.087/LZ48.193/Zstd8.049/PCBS9.061GiB. Pressure behavior remains
+unverified, and known uncompressed2GiB heap failure was not rerun/repaired.
+Artifacts /data/tmp/nvcomp-spark-probe/multisplit-{codec}-fixed-{256,2048},
+build33. Missing larger sizes/codecs were not silently claimed as retested.
+
+Next already authorized verification: separate GPU population trace and host
+CPU profiles for optimized Snappy versus fresh PCBS control. No CPU encode/
+decode implementation, layout redesign, projection or predicate-pushdown work.
