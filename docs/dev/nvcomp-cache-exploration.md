@@ -161,3 +161,49 @@ hashes are checked. Independent final launcher review found no remaining materia
 finding after those fixes. Guarded runner: READY FOR REVIEW. Type-aware staged
 harness and final performance matrix remain IN PROGRESS. Native/fixtures
 prerequisite commit: 56450b834d.
+
+## Staged harness — READY FOR REVIEW; larger matrix IN PROGRESS
+
+Lead read and built the completed harness/descriptor code; independent reviews
+covered ownership, serialized descriptor decoding, homogeneous grouped batching,
+DMA exception synchronization, phase barriers and scoped RMM peak accounting.
+All five codec variants passed 513-row original-packed-byte prerequisites for
+three fixtures at both block sizes. Full-table reference validation is separate
+and regenerated packed padding is deliberately not used as an equality oracle.
+
+Initial mixed-width Cascaded batch decoding failed status12 even with independent
+output allocations, although every segment decoded individually. A separate tiny
+SDK probe passed homogeneous batches; mixed batches failed and a later permutation
+triggered GPU illegal-address status, ending that diagnostic process. No OOM.
+The diagnostic should have stopped after its first negative case. Headers do not
+document a uniform-width restriction; record this as observed SDK5.0.0.6 behavior,
+not a published contract. Minimal repair batches decode by width like encode,
+with many blocks per call. Fresh-JVM grouped round trips pass. No further mixed
+probes are planned. Layout/metadata and approved resource budgets are unchanged.
+
+Lead fixed a fixture fairness issue: fixed-width ifElse null slots had unspecified
+physical bytes that affected compressed size through allocator history. The new
+view copies deterministic original data with the generated validity mask. Strings
+keep ifElse's required empty-null layout; an initial generic view failed cuDF's
+non-empty-null assertion and was corrected. A 65536-row independent GPU byte
+comparison after perturbing allocator history passed data (including null slots),
+offsets and live validity bits for all three fixtures. Packed padding identity is
+not claimed. Edge checks independently passed all-null, sliced and empty strings
+through all five codecs and both block sizes, including host round trips, exact
+original packed bytes, table values and zero final RMM bytes.
+
+FINAL cohort artifacts: staged-typed-05. Six 256 MiB/task fixture/block cases
+(matrix-{fixed,low,wide}-256-{64k,256k}) all PASS, each with one recorded warmup
+and two measured repeats, four work items and two slots. Independent raw JSON
+checks reproduce framing/retained-byte sums, actual pinning, all values, zero final
+allocations, budget limits, and timestamp inequalities proving phase barriers.
+The uncompressed baseline repeats across block sizes as a consistency control.
+Do not mix earlier pilot/staged-typed-03 results with this deterministic cohort.
+Source generation and validation peaks are distinguished from encode/decode GPU
+live peaks using scoped RMM counters reset only at completed phase barriers.
+
+Next run 512/1024/2048 MiB/task in increasing risk order under the same caps.
+Inspect failures before dependent work; no cap relaxation or host-OOM pressure
+experiments. Report final results inline with encode, decode, stored size/ratios,
+block-size tradeoffs and memory caveats. Full Spark serializer integration and
+matched PCBS timings remain outside this first experiment.

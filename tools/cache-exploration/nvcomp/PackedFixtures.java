@@ -65,8 +65,19 @@ public final class PackedFixtures {
          ColumnVector remainder = op(shifted, BinaryOp.MOD, modulus);
          Scalar zero = Scalar.fromLong(0);
          ColumnVector isNull = remainder.binaryOp(BinaryOp.EQUAL, zero, DType.BOOL8);
-         Scalar missing = Scalar.fromNull(values.getType())) {
-      return isNull.ifElse(missing, values);
+         Scalar missing = Scalar.fromNull(values.getType());
+         ColumnVector masked = isNull.ifElse(missing, values)) {
+      if (values.getType().equals(DType.STRING)) {
+        // cuDF requires empty string payloads under nulls; ifElse already provides that layout.
+        masked.incRefCount();
+        return masked;
+      }
+      try (ColumnView deterministic = new ColumnView(values.getType(), values.getRowCount(),
+               Optional.of(masked.getNullCount()), values.getData(), masked.getValid())) {
+        // Keep deterministic fixed-width payloads under nulls. Otherwise allocator history
+        // changes compression results despite equal values. Validity still marks the nulls.
+        return deterministic.copyToColumnVector();
+      }
     }
   }
 
