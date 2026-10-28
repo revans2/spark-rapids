@@ -238,7 +238,8 @@ def prototype_counters(spark, cache_format):
     values = spark.sparkContext._jvm.org.apache.spark.sql.cacheexploration \
         .SparkNvcompSerializer.snapshot()
     return dict(zip(['encoded_groups', 'decoded_groups', 'successful_group_encode_calls',
-                     'successful_group_decode_calls'], list(values)))
+                     'successful_group_decode_calls', 'concatenations', 'output_batches',
+                     'output_rows', 'output_device_bytes', 'max_output_device_bytes'], list(values)))
 
 
 @contextmanager

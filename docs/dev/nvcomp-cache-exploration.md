@@ -3,7 +3,8 @@
 Status: IN PROGRESS — user returned repo; current-source baseline rebuilt and verified.
 Source/provenance repairs and the corrected 256MiB/task cohort are READY FOR REVIEW.
 Current-source CPU/GPU profiling is verified and READY FOR REVIEW below.
-Larger task/string matrix and proposed batching changes remain pending.
+User-approved decoded batching and its impact reruns are READY FOR REVIEW below.
+Larger task/string matrix remains pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
 cohort section describe the older hash-pinned prebuilt jar, not this branch's
@@ -815,4 +816,153 @@ Remaining: larger512/1024/2048MiB/task and representative string matrix.
 Recommended next controlled change for discussion: coalesce decoded GPU batches
 while retaining small compressed cache records, then measure launch/CPU/transfer
 effects. Reducing packing JNI calls is another candidate. Neither optimization
-is accepted or implemented; no architecture/acceptance criteria were changed.
+is accepted or implemented at that checkpoint; no architecture/acceptance
+criteria were changed then. The user subsequently approved concatenation below.
+
+## Bounded decoded batching and impact reruns — READY FOR REVIEW
+
+User authorized the proposed bounded concatenation and rerunning impact tests.
+Scope: combine decoded projected tables within each existing decode group,
+retaining 64 KiB codec chunks, at-most-8 MiB cache records, 248 MiB raw group
+bound, 256 MiB wire bound and all approved memory settings. No projection,
+predicate pushdown, population packing, CPU fallback or production PCBS changes.
+Release classification remains UNRELEASED experimental tools; no compatibility
+scaffold needed. Released production contracts are preserved. This tools-only
+Spark 3.5.5 harness change does not modify shims/shared shim callers/profiles;
+shim preflight is not applicable, and no multiversion validation is claimed.
+
+Decoder now constructs projected table views for a group and concatenates them
+before publishing one spillable output batch. Single-table groups bypass the
+copy. Long row accounting stops groups before Int.MaxValue; all GPU allocations
+remain within the existing retry and resource scopes. Existing heap records
+are replayable on retry. Counters publish successful native calls/concatenations
+after the retry succeeds; output counters track batches actually returned.
+Counters exclude the unchanged empty-selected-column/count-only path.
+Output byte totals/maxima describe materialized outputs, not allocation peaks;
+maxima and RMM high water are process-cumulative.
+
+Root read Table.concatenate usage in GpuCoalesceBatches, prototype ownership,
+retry code and all changed source. Reused cuDF concatenation with the surrounding
+ARM pattern rather than replacing codec/storage code. Added an NVTX range for
+concatenation plus spill-wrapper construction, and output batch/row/byte counters.
+No user-facing configuration was introduced.
+
+Every operation and worker handoff/resumption/checkpoint used MCP docker_exec
+only. Reviewer confirmed MCP-only read-only work, with root owning serial GPU
+runs and builds. Review identified that consuming the new first combined output
+would leave only heap input in the old cleanup probe: fixed it to prefetch the
+second decode group before early task completion. Reviewer independently
+inspected the fixed source and actual passing probe artifacts; no substantive
+review finding remains. Root independently ran decisive checks below.
+
+Build-21 initially caught Scala overload inference for withRetryNoSplit; explicit
+SpillableColumnarBatch result type fixed it. Build-22 compiled and passed the first
+probe/benchmark. Build-23 includes the strengthened pending-GPU cleanup probe;
+all final results use it. Both builds use the same verified current-production
+source proof/JNI/private artifacts as build-20. No Maven/native production
+rebuild, POM or dependency change was needed.
+
+Probe concat-snappy-probe-verified passed exact ordered multi-record values with
+strings, nulls, reordered and duplicate columns; full small-row collection,
+single-record path, empty-selected count, serialized DISK_ONLY byte equality,
+explicit CPU rejection and actual GPU-off rejection. Early stop left the second
+GPU group pending; consumed 253208 of 320000 repeated-input rows. TaskEnd restored
+GPU live allocation 134217728 bytes and managed-host ratio to their exact prior
+values. Fixture repeats existing cached heap records through an iterator to
+exercise multiple groups without growing cache residency. CPU columnar input
+rejection remains a previously recorded runtime coverage gap; no new support.
+
+Impact cohort uses the same fixed-wide 4x256 MiB tasks (1 GiB total), local[2],
+two task waves, one cold population, one warmup and five measured reads. Read
+values are medians; population is one cold sample. Previous source-correct
+cohort is the before column; fresh controls use the unchanged production code.
+
+| Format | Population after s | Full before s | Full after s | Id before s | Id after s | Encoded after MiB | Peak RSS GiB | Whole-job RMM high water GiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| PCBS control | 1.514 | 0.304 | 0.305 | 0.162 | 0.136 | 489.667 | 4.652 | 1.597 |
+| Packed Snappy | 1.322 | 0.476 | 0.231 | 0.180 | 0.165 | 520.509 | 4.512 | 1.887 |
+| Packed ANS | 1.257 | 0.551 | 0.270 | 0.218 | 0.180 | 571.399 | 4.566 | 2.436 |
+| Packed Zstd | 1.817 | 0.483 | 0.272 | 0.201 | 0.166 | 382.769 | 4.562 | 3.107 |
+| Packed LZ4 | 1.498 | 0.466 | 0.248 | 0.210 | 0.151 | 509.767 | 4.294 | 1.810 |
+| Packed typed Cascaded | 1.614 | 0.678 | 0.419 | 0.371 | 0.340 | 390.957 | 4.489 | 1.727 |
+| Packed uncompressed | 1.757 | 0.513 | 0.276 | 0.241 | 0.186 | 1024.319 | 4.496 | 1.555 |
+| Default Spark control | 21.172 | 0.697 | 0.740 | 0.171 | 0.159 | 415.697 | 7.049 | 1.133 |
+
+Population/encoding code did not change; population and compressed-size
+differences across runs are not evidence of an encoding improvement.
+All aggregates match the same deterministic reference. All four partitions
+remain resident with zero disk bytes; no repopulation or guard stop. Packed
+cache record count stays 256; PCBS 140/default 420. Every packed full/id action
+returns exactly eight output batches and 4194304 rows. Full output totals
+1023.508 MiB, id-only totals 32 MiB, maximum full batch 244 MiB. Eight decode
+groups/calls for byte codecs are unchanged; uncompressed calls zero. Typed
+Cascaded retains its 28 native calls/action (width groups plus rounded workspace
+block-budget splitting), matching its encoder submission count for this data.
+
+Fresh before-control: detached tools worktree /data/tmp/nvcomp-concat-before
+at bc04d26c4c, build-before-concat using the same pinned source proof/dependencies.
+Its unchanged Snappy full median 0.479907s reproduces the prior 0.475968s;
+id-only 0.191389s, population 1.492955s. This supports the roughly 2.1x Snappy
+full-read improvement being attributable to batching rather than baseline drift.
+PCBS full control remains about 0.305s. No statistical confidence interval or
+general workload ranking is claimed from this bounded experiment.
+
+Separate Nsight run concat-profile-snappy-256 (one warmup/two measured reads),
+compared with source-correct profile-current-snappy-256:
+
+| Full read 0 diagnostic | Before | After |
+| --- | ---: | ---: |
+| Elapsed wall ms | 698.699 | 278.208 |
+| Total kernel launches | 28804 | 1256 |
+| Snappy decompression launches | 8 | 8 |
+| Null-check launches | 7936 | 248 |
+| Boolean-to-long cast launches | 7936 | 248 |
+| Null-count addition launches | 7680 | 240 |
+| Row-hash launches | 256 | 8 |
+| Kernel duration sum ms | 112.214 | 30.907 |
+| Kernel activity union ms | 105.432 | 28.235 |
+| Any GPU activity union ms | 146.249 | 57.011 |
+
+Root independently grouped all raw SQLite kernel events by demangled name and
+phase JVM, reproducing 1256 and the exact expression multiples. CPU launch-API
+correlation IDs within the eight concatenation NVTX ranges attribute 252 kernels
+and 4.747317ms summed GPU duration to concatenation. Their summed host range
+duration is 42.227248ms across concurrent task threads, includes spill wrapping/
+synchronization and must not be treated as an additive wall-time cost.
+Snappy decompression summed kernel time 10.868ms before versus 11.383ms after.
+Id-only total kernels 1602 -> 110. Population kernels unchanged at 36858.
+No traced event crossed the seven phase boundaries. Compression/decompression
+already batch small chunks; the fix reduces downstream work per output batch.
+The validation query's unfused 31 null checks/casts and 30 additions per input
+batch explain most original launches; its overhead is query-dependent.
+
+Separate concat-cpu-snappy-256 run confirms task-thread CPU mean per full read
+706.584ms -> 219.619ms, driver mean 102.594ms -> 90.793ms. Id-only task CPU
+256.245ms -> 156.179ms. CPU sums both concurrent workers and is not elapsed
+time. CPU/GPU profiles are separate perturbed runs, not headline medians or
+an exact wall-time decomposition. Root analyzed the JFRs and independently
+checked counter arithmetic; focused reviewer checked fresh result/profile data.
+
+Verification: final Java/Scala experimental build passed; all 13 source-proof
+tests passed; git diff --check passed. Root reproduction scripts
+/data/tmp/nvcomp-pcbs-rebuild-01/verify-concat-cohort.py,
+/data/tmp/nvcomp-pcbs-rebuild-01/concat-profile-summary.py and
+/data/tmp/nvcomp-pcbs-rebuild-01/concat-range-cost.py reproduce the cohort
+checks and raw kernel attribution. First verifier assumed three Cascaded width
+calls/group; observed 28/action prompted inspection of the bounded planner's
+extra splitting, and the check now uses the unchanged actual submission count
+rather than the false width-only assumption.
+
+Artifacts: /data/tmp/nvcomp-spark-probe/concat-{codec}-fixed-256 (Snappy final
+suffix -final), concat-profile-snappy-256, concat-cpu-snappy-256 and the probe
+directory above. Build-22's preliminary Snappy run is retained separately and
+excluded from final tables. Original artifacts are preserved.
+
+Limits: the extra concatenated output coexists temporarily with compressed
+uploads and original decoded allocations. The 248 MiB bound limits raw grouped
+input, not total GPU memory. Whole-job RMM peaks above include population and
+can hide a smaller read-only transient peak; a precise before/after read-only
+allocation peak was not measured. RSS is sampled, not a hard process limit.
+No pressure/OOM search, larger-size or large-string performance claim is made.
+Larger 512/1024/2048 MiB/task and representative string matrix remain pending.
+No further optimization is implemented. Architect acceptance remains pending.

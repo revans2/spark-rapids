@@ -15,7 +15,8 @@
  */
 package org.apache.spark.sql.cacheexploration
 
-import ai.rapids.cudf.Rmm
+import ai.rapids.cudf.{HostColumnVector, Rmm}
+import com.nvidia.spark.rapids.GpuColumnVector
 import com.nvidia.spark.rapids.HostAlloc
 import com.nvidia.spark.rapids.Arm.withResource
 
@@ -98,6 +99,41 @@ object SparkNvcompProbe {
         require(relation.cacheBuilder.serializer.getClass == serializer.getClass,
           "Spark loaded a different cache serializer")
         val buffers = relation.cacheBuilder.cachedColumnBuffers
+        // Repeating the small records exercises concatenation with exact ordered edge values.
+        val repeated = buffers.flatMap(record => Iterator(record, record))
+        val selected = Seq(5, 1, 0, 0, 3).map(relation.output)
+        val merged = serializer.gpuConvertCachedBatchToColumnarBatch(repeated,
+          relation.output, selected, SQLConf.get)
+        val checked = merged.mapPartitionsWithIndex { (partition, batches) =>
+          val start = partition * 1025 / 4
+          val end = (partition + 1) * 1025 / 4
+          val count = end - start
+          require(batches.hasNext, "Missing concatenated edge batch")
+          val rows = withResource(batches.next()) { batch =>
+            require(batch.numRows() == count * 2, "Records were not concatenated")
+            withResource(new scala.collection.mutable.ArrayBuffer[HostColumnVector]()) { hosts =>
+              (0 until batch.numCols()).foreach { i =>
+                hosts += batch.column(i).asInstanceOf[GpuColumnVector].getBase.copyToHost()
+              }
+              (0 until batch.numRows()).foreach { row =>
+                val i = start + row % count
+                val text = if (i % 17 == 0) null else if (i % 19 == 0) "" else "µ-雪-" + i
+                require(hosts(0).isNull(row) == (text == null), "Concatenated string validity")
+                if (text != null) require(hosts(0).getJavaString(row) == text, "String order")
+                require(hosts(1).isNull(row) == (i % 13 == 0), "Concatenated key validity")
+                if (i % 13 != 0) require(hosts(1).getInt(row) == (i * 37) % 1009, "Key order")
+                require(hosts(2).getLong(row) == i * 17L - 991L &&
+                  hosts(3).getLong(row) == i * 17L - 991L, "Duplicate/reordered id values")
+                require(hosts(4).isNull(row), "Concatenated all-null column")
+              }
+            }
+            batch.numRows().toLong
+          }
+          require(!batches.hasNext, "Expected one combined edge batch per partition")
+          Iterator.single(rows)
+        }.collect().sum
+        require(checked == 2050, "Concatenated edge row count")
+        println("PASS multi-record concatenation: ordered strings/nulls/reordered/duplicate fields")
         val original = buffers.collect().map(_.asInstanceOf[NvcompCacheRecord])
         val disk = buffers.map(batch => batch).persist(StorageLevel.DISK_ONLY)
         try {
@@ -144,14 +180,19 @@ object SparkNvcompProbe {
           "Partial-consumption probe requires multiple cached records in every partition")
         val beforeGpu = Rmm.getTotalBytesAllocated
         val beforeHost = HostAlloc.getUsageRatio
-        val decoded = serializer.gpuConvertCachedBatchToColumnarBatch(buffers,
+        // Repeat existing heap records without enlarging the cached fixture. Each partition now
+        // spans multiple bounded decode groups, so early consumption still leaves unread input.
+        val repeated = buffers.mapPartitions(records => records.flatMap(record =>
+          Iterator.fill(16)(record)))
+        val decoded = serializer.gpuConvertCachedBatchToColumnarBatch(repeated,
           relation.output, relation.output, SQLConf.get)
         val consumed = decoded.mapPartitions { batches =>
           require(batches.hasNext, "Expected a first GPU cached batch")
           val rows = withResource(batches.next())(_.numRows().toLong)
+          require(batches.hasNext, "Expected a second prefetched group for TaskEnd cleanup")
           Iterator.single(rows) // Task completion must release every pending prefetched batch.
         }.collect().sum
-        require(consumed > 0 && consumed < 20000, "Probe did not leave unread cached batches")
+        require(consumed > 0 && consumed < 20000L * 16, "Probe did not leave unread cached batches")
         val afterGpu = Rmm.getTotalBytesAllocated
         val afterHost = HostAlloc.getUsageRatio
         require(afterGpu <= beforeGpu && afterHost <= beforeHost + 1e-12,
