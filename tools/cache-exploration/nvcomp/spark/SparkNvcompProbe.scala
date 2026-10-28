@@ -67,7 +67,9 @@ object SparkNvcompProbe {
     }
     val spark = SparkSession.builder().appName("nvCOMP real-cache correctness probe")
       .config("spark.sql.cache.serializer", serializer.getClass.getName)
-      .config("spark.sql.adaptive.enabled", "false").getOrCreate()
+      .config("spark.sql.adaptive.enabled", "false")
+      .config("spark.rapids.sql.batchSizeBytes", (32L * 1024 * 1024 + 1234).toString)
+      .getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
     spark.conf.set("spark.rapids.sql.enabled", true)
     try {
@@ -188,7 +190,12 @@ object SparkNvcompProbe {
           relation.output, relation.output, SQLConf.get)
         val consumed = decoded.mapPartitions { batches =>
           require(batches.hasNext, "Expected a first GPU cached batch")
-          val rows = withResource(batches.next())(_.numRows().toLong)
+          val rows = withResource(batches.next()) { batch =>
+            val bytes = GpuColumnVector.getTotalDeviceMemoryUsed(batch)
+            require(bytes > 24L * 1024 * 1024 && bytes <= 32L * 1024 * 1024 + 1234,
+              "Combined batch did not approach the configured target")
+            batch.numRows().toLong
+          }
           require(batches.hasNext, "Expected a second prefetched group for TaskEnd cleanup")
           Iterator.single(rows) // Task completion must release every pending prefetched batch.
         }.collect().sum

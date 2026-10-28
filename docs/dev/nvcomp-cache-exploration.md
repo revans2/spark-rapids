@@ -4,7 +4,8 @@ Status: IN PROGRESS — user returned repo; current-source baseline rebuilt and 
 Source/provenance repairs and the corrected 256MiB/task cohort are READY FOR REVIEW.
 Current-source CPU/GPU profiling is verified and READY FOR REVIEW below.
 User-approved decoded batching and its impact reruns are READY FOR REVIEW below.
-Larger task/string matrix remains pending.
+Configured-target batching is implemented; final 256/512/1024/2048 MiB/task
+matrix is IN PROGRESS with spill observations. Large-string matrix remains pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
 cohort section describe the older hash-pinned prebuilt jar, not this branch's
@@ -965,4 +966,109 @@ can hide a smaller read-only transient peak; a precise before/after read-only
 allocation peak was not measured. RSS is sampled, not a hard process limit.
 No pressure/OOM search, larger-size or large-string performance claim is made.
 Larger 512/1024/2048 MiB/task and representative string matrix remain pending.
-No further optimization is implemented. Architect acceptance remains pending.
+No further optimization was implemented at that checkpoint. Architect acceptance
+remains pending. Subsequent user authorization and target-size work follow.
+
+## Configured target and large-task spill observations — IN PROGRESS
+
+User clarified: algorithms must honor configured targets across hardware,
+using spilling/retry, with roughly 4x target working memory per task as a goal.
+The 24 GiB GPU pool is acceptable as a fixed benchmark condition, not an
+algorithm requirement; do not rerun old results solely because of that setting.
+Root's earlier choice of 24 GiB and derived 256/248 MiB bounds was not
+hardware-derived. A workspace failure under that pool does not establish a
+hardware limit. Hardware audit: RTX A6000 about48GiB, host about188.5GiB;
+availability is a point-in-time observation, not a new experimental budget.
+
+User explicitly authorized raising decoded output grouping to the configured
+GPU target, releasing temporaries promptly, and running through2GiB/task while
+measuring spill. No forced pressure test or additional algorithm optimization.
+Same heap16GiB, managedhost32GiB including pinned2GiB, sampledRSSstop64GiB,
+GPU24GiB benchmark settings. Root keeps GPU jobs serial; each uses local[2],
+four partitions and two waves. MCP docker_exec only remains mandatory for all
+project operations, delegations, resumes and checkpoints; both workers confirmed
+continued MCP-only use and performed no GPU/build jobs.
+
+Release classification unchanged: experimental tools are UNRELEASED, so their
+method signatures/callers change directly with no compatibility adapters.
+Production PCBS and released contracts are untouched. No production operator,
+shim, POM, profile or configuration declaration changed. Tools-only Spark3.5.5
+scope; no new multiversion readiness claim or shim source-selection change.
+
+Reader takes RapidsConf.gpuTargetBatchSizeBytes (default1GiB), groups by exact
+stored packed-buffer lengths and Int.MaxValue rows, and no longer stops on the
+old248MiB raw/256MiB encoded group constants. Grouping remains conservative for
+projections, using the full cached schema as agreed while projection is deferred.
+Native decompression planning uses that target as its chunk-rounded submission
+budget, allowing non-chunk-aligned targets and at least one indivisible segment.
+Removed the aggregate256MiB rejection; per-record layout/coverage validation
+remains. Population packing/compression and small stored records are unchanged.
+
+Decoded records become spillable pieces. Raw decoder owner wrappers, compressed
+uploads and scratch close before concatenation; decoded data itself remains
+owned by those pieces. Concatenation reuses ConcatAndConsumeAll and
+withRetryNoSplit(Seq[SpillableColumnarBatch]), so inputs are spillable between
+attempts and consumed safely. Native decode/concat/output counters publish only
+successful results. This does not claim full algorithmic memory=4xT or guarantee
+arbitrary targets fit; actual allocation peaks and spill are measured.
+
+Root read decisive PCBS target path, retry sequence ownership and existing
+concatenation helper. Read-only reviewer inspected these changes independently,
+found/fixed misleading owner-lifetime comment, and confirmed ownership/target
+behavior. CPU planner tests cover1GiB, odd and tiny targets; default compression
+planner checks remain. Bounded GPU probe explicitly sets odd32MiB+1234byte
+target, checks actual combined output approaches it, verifies ordered
+multi-record strings/nulls/duplicate/reordered fields, disk-byte equality,
+CPU rejection and second-prefetched-output TaskEnd cleanup. Build25 probe PASS;
+subsequent changes affect only spill observation, not that algorithm.
+
+New SparkSpillMonitor records task-attributed RAPIDS spill-to-host/disk bytes/
+times, retries and maximum concurrency, plus separate Spark spill metrics.
+They overlap and must not be added. Per-task raw values and coverage distinguish
+zero from unavailable. Counts of positive tasks are not event counts.
+Listener drain/serialization occur outside query/profile timers. Effective
+target is recorded. No allocation callbacks or forced spills are introduced.
+
+Material instrumentation repair: initial builds25-29 captured no observations.
+Root investigated actual task events and found TaskMetrics.accumulators()
+contains unregistered internal accumulators: reading their name throws due to
+null metadata. Worker also used errors.toSeq, aliasing a mutable buffer cleared
+before JSON serialization; root fixed errors.toVector and filters metadata!=null
+before name access. Prior phase-tag propagation hypothesis was not established
+and is retracted. Final helper uses the serial local action window with queue
+drains before/after, records total job/task event deltas and verifies coverage.
+This is not concurrent-job attribution. Build30 smoke has9population and5/read
+events/observations with complete coverage of all18RAPIDSmetrics, explicit zero
+spill/retries, maximumGPUconcurrency2. Reviewer independently reproduced this
+from source and runtime JSON. No remaining substantive focused findings.
+Preliminary runs target-snappy-fixed-{256,512} have unavailable spill and are
+excluded from the final cohort; retained with honest unavailable fields.
+
+Final source-bound build30 uses the same production397812926b proof and pinned
+JNI/private artifacts as previous cohorts; no production rebuild. Final dirs:
+target-final-{codec}-fixed-{256,512,1024,2048} under
+/data/tmp/nvcomp-spark-probe. One cold population, one warmup plus five measured
+full/id reads. Root verify-target-run.py checks exact aggregates/rows/source
+origins, actual caps, every spill-metric coverage/raw aggregation, unchanged
+encoding counters, cache audit and actual returned batch counts; emits
+verified-summary.json beside results. Never infer zero from missing values.
+
+Completed and independently verified so far:
+- Snappy all4sizes: population1.675/2.294/3.994/6.636s,
+  full0.242/0.298/0.477/0.808s, id0.160/0.189/0.271/0.533s.
+- PCBS all4sizes: population1.476/1.947/2.868/4.381s,
+  full0.278/0.379/0.622/1.089s, id0.160/0.188/0.309/0.516s.
+- All these population/read phases: task-attributed GPU->host/disk spill0,
+  retries0; observed maximum GPU concurrency2. No guard stops or disk cache.
+- Snappy returned4/4/4/12outputs per query; maximum full outputs
+  255.875/511.750/1023.500/1020.000MiB. At2GiB/task the exact packed-size
+  boundary and record granularity leave small final tails; do not assume
+  nominal task bytes divide into an exact output count.
+- PCBS output counts are not directly instrumented by the prototype counter.
+  Historical four-count came from kernel fingerprints, not this larger sweep.
+
+Remaining final cohort: ANS, Zstd, LZ4, typed Cascaded, uncompressed and default
+at all4sizes (24runs). Do not restart completed final runs after resumption.
+Re-read this tracker and use MCP tools only. Benchmark conditions remain fixed.
+Architect acceptance remains pending; implementation checkpoint READY FOR REVIEW,
+complete matrix not yet delivered.

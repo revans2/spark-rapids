@@ -242,6 +242,30 @@ def prototype_counters(spark, cache_format):
                      'output_rows', 'output_device_bytes', 'max_output_device_bytes'], list(values)))
 
 
+def create_spill_monitor(spark):
+    try:
+        helper = spark.sparkContext._jvm.org.apache.spark.sql.cacheexploration.SparkSpillMonitor
+        return helper.create(spark._jsparkSession), None
+    except Exception as error:
+        return None, repr(error)
+
+
+@contextmanager
+def spill_phase(monitor, name, unavailable_reason):
+    observation = {'available': False, 'phase': name, 'reason': unavailable_reason}
+    if monitor is not None:
+        monitor.begin(name)
+    try:
+        yield observation
+    finally:
+        if monitor is not None:
+            try:
+                observation.clear()
+                observation.update(json.loads(monitor.end(name)))
+            except Exception as error:
+                observation.update(available=False, phase=name, error=repr(error))
+
+
 @contextmanager
 def profile_phase(spark, enabled, name, cpu_directory=None, cpu_phases=None):
     """Action-scoped diagnostics; setup/teardown are outside the collect timer."""
@@ -346,6 +370,7 @@ def main():
                        'Large-data correctness uses deterministic aggregates; small data checks '
                        'also compare every row. No automatic execution-mode claim from config.'}
     frame = None
+    spill_monitor = None
     try:
         if spark.sparkContext.master != 'local' and not spark.sparkContext.master.startswith('local['):
             raise ValueError('This initial storage/heap runner supports local Spark execution only')
@@ -411,11 +436,18 @@ def main():
         result['driver_heap_before_population'] = heap(spark)
         result['plugin_memory_before_population'] = plugin_memory(spark)
         population = frame.agg(F.count('*').alias('rows'))
-        with profile_phase(spark, args.nvtx_phases, 'population',
-                           args.cpu_profile_dir, result['cpu_phases']):
+        spill_monitor, spill_unavailable = create_spill_monitor(spark)
+        result['spill_monitor'] = {'available': spill_monitor is not None,
+                                   'unavailable_reason': spill_unavailable}
+        if spill_monitor is not None:
+            result['effective_gpu_target_batch_bytes'] = spill_monitor.targetBatchBytes()
+        with spill_phase(spill_monitor, 'population', spill_unavailable) as population_spill, \
+                profile_phase(spark, args.nvtx_phases, 'population',
+                              args.cpu_profile_dir, result['cpu_phases']):
             started = time.perf_counter_ns()
             observed_rows = population.collect()[0]['rows']
             result['population_ns'] = time.perf_counter_ns() - started
+        result['population_spill'] = population_spill
         result['population_action_final_plan'] = population._jdf.queryExecution().executedPlan().toString()
         result['cached_plan_metrics_after_population'] = cached_plan_metrics(cache.cachedPlan())
         if observed_rows != args.rows:
@@ -440,8 +472,9 @@ def main():
                     query = aggregate(frame, narrow)
                     phase = 'read/{}/{}/{}'.format(
                         mode, 'id-only' if narrow else 'full', iteration)
-                    with profile_phase(spark, args.nvtx_phases, phase,
-                                       args.cpu_profile_dir, result['cpu_phases']):
+                    with spill_phase(spill_monitor, phase, spill_unavailable) as read_spill, \
+                            profile_phase(spark, args.nvtx_phases, phase,
+                                          args.cpu_profile_dir, result['cpu_phases']):
                         started = time.perf_counter_ns()
                         observed = query.collect()[0].asDict()
                         elapsed = time.perf_counter_ns() - started
@@ -457,6 +490,7 @@ def main():
                                             'warmup': iteration < 0,
                                             'iteration': iteration, 'elapsed_ns': elapsed,
                                             'plan': plan, 'aggregate': observed,
+                                            'spill': read_spill,
                                             'storage': storage_info(spark, rdd_id, partition_sizes),
                                             'driver_heap_after_read': heap(spark),
                                             'plugin_memory_after_read': plugin_memory(spark),
@@ -498,7 +532,11 @@ def main():
             if frame is not None:
                 frame.unpersist(blocking=True)
         finally:
-            spark.stop()
+            try:
+                if spill_monitor is not None:
+                    spill_monitor.close()
+            finally:
+                spark.stop()
 
 
 if __name__ == '__main__':

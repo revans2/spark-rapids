@@ -59,15 +59,14 @@ public final class PackedTableCodec {
     public final long blocks;
     public final long blockBudget;
     public final long workspaceInputUpperBoundBytes;
-    Call(int bits, List<Integer> indices, long bytes, long blocks, long chunk) {
+    Call(int bits, List<Integer> indices, long bytes, long blocks, long chunk, long limit) {
       this.typeBits = bits;
       this.indices = indices.stream().mapToInt(Integer::intValue).toArray();
       this.inputBytes = bytes;
       this.blocks = blocks;
-      this.blockBudget = PackedSegments.MAX_SUBMISSION_BYTES / chunk;
+      this.blockBudget = limit / chunk;
       this.workspaceInputUpperBoundBytes = Math.multiplyExact(blocks, chunk);
-      if (bytes > PackedSegments.MAX_SUBMISSION_BYTES || blocks > blockBudget
-          || workspaceInputUpperBoundBytes > PackedSegments.MAX_SUBMISSION_BYTES) {
+      if (bytes > limit || blocks > blockBudget || workspaceInputUpperBoundBytes > limit) {
         throw new IllegalArgumentException("Submission workspace input bound exceeded");
       }
     }
@@ -85,13 +84,24 @@ public final class PackedTableCodec {
 
   public static List<Call> plan(
       String codec, long chunk, PackedSegments.Segment[] segments) {
+    return plan(codec, chunk, segments, PackedSegments.MAX_SUBMISSION_BYTES);
+  }
+
+  private static List<Call> plan(
+      String codec, long chunk, PackedSegments.Segment[] segments, long targetBytes) {
     checkCodec(codec);
     List<Call> result = new ArrayList<>();
-    if (chunk <= 0 || chunk > (1L << 24) || chunk % 8 != 0
-        || PackedSegments.MAX_SUBMISSION_BYTES % chunk != 0) {
-      throw new IllegalArgumentException("Codec chunk must divide the submission byte bound");
+    if (chunk <= 0 || chunk > (1L << 24) || chunk % 8 != 0 || targetBytes <= 0) {
+      throw new IllegalArgumentException("Invalid codec chunk or submission target");
     }
-    long blockBudget = PackedSegments.MAX_SUBMISSION_BYTES / chunk;
+    // A user target may be smaller than one stored record or not divisible by the codec chunk.
+    long largestSegment = 0;
+    for (PackedSegments.Segment segment : segments) {
+      largestSegment = Math.max(largestSegment, segment.length);
+    }
+    long requested = Math.max(targetBytes, largestSegment);
+    long blockBudget = Math.addExact((requested - 1) / chunk, 1);
+    long limit = Math.multiplyExact(blockBudget, chunk);
     if (codec.equals("uncompressed")) return result;
     int[] groups = codec.equals("cascaded-typed") ? new int[] {8, 32, 64} : new int[] {8};
     for (int bits : groups) {
@@ -105,9 +115,9 @@ public final class PackedTableCodec {
         }
         if (segment.typeBits != bits) continue;
         long segmentBlocks = (segment.length + chunk - 1) / chunk;
-        if (!indices.isEmpty() && (bytes + segment.length > PackedSegments.MAX_SUBMISSION_BYTES
+        if (!indices.isEmpty() && (bytes + segment.length > limit
             || blocks + segmentBlocks > blockBudget)) {
-          result.add(new Call(bits, indices, bytes, blocks, chunk));
+          result.add(new Call(bits, indices, bytes, blocks, chunk, limit));
           indices = new ArrayList<>();
           bytes = 0;
           blocks = 0;
@@ -116,7 +126,7 @@ public final class PackedTableCodec {
         bytes += segment.length;
         blocks += segmentBlocks;
       }
-      if (!indices.isEmpty()) result.add(new Call(bits, indices, bytes, blocks, chunk));
+      if (!indices.isEmpty()) result.add(new Call(bits, indices, bytes, blocks, chunk, limit));
     }
     int planned = result.stream().mapToInt(call -> call.indices.length).sum();
     if (planned != segments.length) throw new IllegalArgumentException("Submission plan coverage");
@@ -229,7 +239,6 @@ public final class PackedTableCodec {
   private static int[] starts(PackedSegments.Segment[][] layouts, long[] bytes) {
     if (layouts.length != bytes.length) throw new IllegalArgumentException("Table layout count");
     int[] starts = new int[layouts.length + 1];
-    long total = 0;
     for (int t = 0; t < layouts.length; t++) {
       long covered = 0;
       for (PackedSegments.Segment segment : layouts[t]) {
@@ -244,11 +253,7 @@ public final class PackedTableCodec {
       if (covered != bytes[t] || bytes[t] <= 0) {
         throw new IllegalArgumentException("Layout does not cover nonempty packed table");
       }
-      total = Math.addExact(total, covered);
       starts[t + 1] = Math.addExact(starts[t], layouts[t].length);
-    }
-    if (total > PackedSegments.MAX_SUBMISSION_BYTES) {
-      throw new IllegalArgumentException("Packed table batch exceeds 256 MiB");
     }
     return starts;
   }
@@ -335,12 +340,12 @@ public final class PackedTableCodec {
 
   public static DecodedBatch decompress(DeviceMemoryBuffer[][] borrowedInputs,
       PackedSegments.Segment[][] layouts, long[] packedBytes, String codec,
-      long chunkBytes, Cuda.Stream borrowedStream) {
+      long chunkBytes, long targetBytes, Cuda.Stream borrowedStream) {
     if (borrowedInputs.length != layouts.length) throw new IllegalArgumentException("Input table count");
     int tables = layouts.length;
     int[] starts = starts(layouts, packedBytes);
     PackedSegments.Segment[] flat = flatten(layouts, starts[tables]);
-    List<Call> calls = plan(codec, chunkBytes, flat);
+    List<Call> calls = plan(codec, chunkBytes, flat, targetBytes);
     DeviceMemoryBuffer[] inputs = new DeviceMemoryBuffer[flat.length];
     int[] owners = new int[flat.length];
     for (int t = 0; t < tables; t++) {
@@ -405,6 +410,20 @@ public final class PackedTableCodec {
           throw new AssertionError("Many small tables must share one many-block native submission");
         }
       }
+    }
+    PackedSegments.Segment[] large = new PackedSegments.Segment[128];
+    Arrays.fill(large, new PackedSegments.Segment(0, 8L * 1024 * 1024, 8));
+    List<Call> targeted = plan("snappy", 65536, large, 1024L * 1024 * 1024);
+    if (targeted.size() != 1 || targeted.get(0).inputBytes != 1024L * 1024 * 1024) {
+      throw new AssertionError("Configured target must replace fixed aggregate submission bound");
+    }
+    targeted = plan("snappy", 65536, large, 32L * 1024 * 1024 + 1234);
+    if (targeted.size() != 32 || targeted.get(0).indices.length != 4) {
+      throw new AssertionError("Non-chunk-aligned user target");
+    }
+    targeted = plan("snappy", 65536, large, 1);
+    if (targeted.size() != 128 || targeted.get(0).indices.length != 1) {
+      throw new AssertionError("Indivisible stored segment may exceed a small target");
     }
     PackedSegments.Segment[] tiny = new PackedSegments.Segment[1025];
     for (int i = 0; i < tiny.length; i++) tiny[i] = new PackedSegments.Segment(0, 8, 8);

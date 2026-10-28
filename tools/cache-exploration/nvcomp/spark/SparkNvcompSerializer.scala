@@ -25,8 +25,9 @@ import ai.rapids.cudf.{CloseableArray, ColumnVector => CudfColumn, ContiguousTab
   Cuda, DefaultHostMemoryAllocator, DeviceMemoryBuffer, NvtxColor, NvtxRange, Table}
 import cacheexploration.nvcomp.{PackedSegments, PackedTableCodec}
 import com.nvidia.spark.ParquetCachedBatchSerializer
-import com.nvidia.spark.rapids.{GpuColumnVector, GpuSemaphore, SpillableColumnarBatch,
-  SpillPriorities}
+import com.nvidia.spark.rapids.{ConcatAndConsumeAll, GpuColumnVector, GpuSemaphore, RapidsConf,
+  SpillableColumnarBatch, SpillPriorities}
+import com.nvidia.spark.rapids.RapidsPluginImplicits._
 import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
 import com.nvidia.spark.rapids.RmmRapidsRetryIterator.withRetryNoSplit
 
@@ -85,6 +86,7 @@ abstract class SparkNvcompSerializer extends ParquetCachedBatchSerializer {
     }.toArray
     val types = selected.map(_.dataType).toArray
     val selectedCodec = codec
+    val targetBytes = new RapidsConf(conf).gpuTargetBatchSizeBytes
     input.mapPartitions { records =>
       if (indices.isEmpty) {
         records.map { raw =>
@@ -92,7 +94,7 @@ abstract class SparkNvcompSerializer extends ParquetCachedBatchSerializer {
           new ColumnarBatch(Array.empty[ColumnVector], record.rows)
         }
       } else {
-        new SparkNvcompSerializer.Decoder(records, selectedCodec, indices, types)
+        new SparkNvcompSerializer.Decoder(records, selectedCodec, indices, types, targetBytes)
       }
     }
   }
@@ -361,7 +363,7 @@ object SparkNvcompSerializer {
   }
 
   private final class Decoder(input: Iterator[CachedBatch], codec: String,
-      indices: Array[Int], types: Array[DataType])
+      indices: Array[Int], types: Array[DataType], targetBytes: Long)
       extends Iterator[ColumnarBatch] with AutoCloseable {
     private val records = input.buffered
     private val pending = new ArrayDeque[SpillableColumnarBatch]()
@@ -371,69 +373,70 @@ object SparkNvcompSerializer {
     private def fill(): Unit = {
       val group = new ArrayBuffer[Parsed]()
       var bytes = 0L
-      var wireBytes = 0L
       var rows = 0L
       var accepting = true
       while (accepting && records.hasNext) {
         val record = parse(records.head, codec)
         require(record.packedBytes > 0, "Nonempty GPU selection requires packed cache payload")
-        if (group.nonEmpty && (bytes + record.packedBytes > RawGroupBytes ||
-            wireBytes + record.bytes.length > GroupBytes || rows + record.rows > Int.MaxValue)) {
+        if (group.nonEmpty && (bytes > targetBytes - record.packedBytes ||
+            rows + record.rows > Int.MaxValue)) {
           accepting = false
         } else {
           records.next()
           group += record
           bytes += record.packedBytes
-          wireBytes += record.bytes.length
           rows += record.rows
         }
       }
       if (group.nonEmpty) {
         GpuSemaphore.acquireIfNecessary(TaskContext.get())
         var successfulCalls = 0
-        val decoded = withRetryNoSplit[SpillableColumnarBatch] {
-          withResource(new ArrayBuffer[DeviceMemoryBuffer]()) { uploads =>
-            val inputBuffers = group.map { record =>
-              record.payloadLengths.indices.map { i =>
-                val length = record.payloadLengths(i)
-                val buffer = closeOnExcept(DeviceMemoryBuffer.allocate(length, Cuda.DEFAULT_STREAM)) {
-                    device =>
-                  withResource(DefaultHostMemoryAllocator.get().allocate(length, true)) { host =>
-                    host.setBytes(0, record.bytes, record.payloadOffsets(i), length)
-                    device.copyFromHostBuffer(host, Cuda.DEFAULT_STREAM)
+        val pieces = withRetryNoSplit[Array[SpillableColumnarBatch]] {
+          closeOnExcept(new ArrayBuffer[SpillableColumnarBatch]()) { output =>
+            withResource(new ArrayBuffer[DeviceMemoryBuffer]()) { uploads =>
+              val inputBuffers = group.map { record =>
+                record.payloadLengths.indices.map { i =>
+                  val length = record.payloadLengths(i)
+                  val buffer = closeOnExcept(DeviceMemoryBuffer.allocate(length, Cuda.DEFAULT_STREAM)) {
+                      device =>
+                    withResource(DefaultHostMemoryAllocator.get().allocate(length, true)) { host =>
+                      host.setBytes(0, record.bytes, record.payloadOffsets(i), length)
+                      device.copyFromHostBuffer(host, Cuda.DEFAULT_STREAM)
+                    }
+                    device
                   }
-                  device
-                }
-                uploads += buffer
-                buffer
+                  uploads += buffer
+                  buffer
+                }.toArray
               }.toArray
-            }.toArray
-            withResource(PackedTableCodec.decompress(inputBuffers, group.map(_.layout).toArray,
-                group.map(_.packedBytes).toArray, codec, ChunkBytes, Cuda.DEFAULT_STREAM)) { batch =>
-              successfulCalls = batch.calls.length
-              withResource(new ArrayBuffer[Table]()) { tables =>
+              withResource(PackedTableCodec.decompress(inputBuffers, group.map(_.layout).toArray,
+                  group.map(_.packedBytes).toArray, codec, ChunkBytes, targetBytes,
+                  Cuda.DEFAULT_STREAM)) { batch =>
+                successfulCalls = batch.calls.length
                 group.indices.foreach { i =>
                   withResource(Table.fromPackedTable(ByteBuffer.wrap(group(i).metadata),
                       batch.packedOutputs(i))) { table =>
                     require(table.getRowCount == group(i).rows, "nvCOMP decoded row count mismatch")
-                    tables += new Table(indices.map(table.getColumn): _*)
-                  }
-                }
-                def spill(table: Table): SpillableColumnarBatch = {
-                  val result = GpuColumnVector.from(table, types)
-                  closeOnExcept(result) { owned =>
-                    SpillableColumnarBatch(owned, SpillPriorities.ACTIVE_ON_DECK_PRIORITY)
-                  }
-                }
-                // Storage records and codec chunks stay small; Spark receives one execution batch.
-                if (tables.length == 1) {
-                  spill(tables.head)
-                } else {
-                  withResource(new NvtxRange("nvcomp-cache-concatenate", NvtxColor.CYAN)) { _ =>
-                    withResource(Table.concatenate(tables.toArray: _*))(spill)
+                    withResource(new Table(indices.map(table.getColumn): _*)) { projected =>
+                      val result = GpuColumnVector.from(projected, types)
+                      output += closeOnExcept(result) { owned =>
+                        SpillableColumnarBatch(owned, SpillPriorities.ACTIVE_BATCHING_PRIORITY)
+                      }
+                    }
                   }
                 }
               }
+            }
+            output.toArray
+          }
+        }
+        // Decoder owners, compressed uploads and scratch are released; pieces remain spillable.
+        val decoded = withRetryNoSplit(pieces.toSeq) { attempt =>
+          withResource(new NvtxRange("nvcomp-cache-concatenate", NvtxColor.CYAN)) { _ =>
+            val batches = attempt.safeMap(_.getColumnarBatch()).toArray
+            val result = ConcatAndConsumeAll.buildNonEmptyBatchFromTypes(batches, types)
+            closeOnExcept(result) { owned =>
+              SpillableColumnarBatch(owned, SpillPriorities.ACTIVE_ON_DECK_PRIORITY)
             }
           }
         }
