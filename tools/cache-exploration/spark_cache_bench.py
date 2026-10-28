@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 import re
 import time
+from urllib.parse import unquote, urlparse
 
 from pyspark import StorageLevel
 from pyspark.sql import SparkSession, functions as F
@@ -270,6 +271,29 @@ def profile_phase(spark, enabled, name, cpu_directory=None, cpu_phases=None):
                 sampler.stop()
 
 
+def check_runtime_origins(spark, plugin_jar, jni_jar):
+    """Verify class loading, rather than infer it from submitted jar arguments."""
+    loader = spark.sparkContext._jvm.java.lang.Thread.currentThread().getContextClassLoader()
+    expected = {
+        'com.nvidia.spark.ParquetCachedBatchSerializer': plugin_jar,
+        'com.nvidia.spark.rapids.parquet.ParquetCachedBatchSerializer': plugin_jar,
+        'com.nvidia.spark.rapids.parquet.ParquetCachedBatchReader': plugin_jar,
+        'com.nvidia.spark.GpuCachedBatchSerializer': plugin_jar,
+        'ai.rapids.cudf.Table': jni_jar,
+        'ai.rapids.cudf.ParquetChunkedReader': jni_jar}
+    observed = {}
+    for name, path in expected.items():
+        source = loader.loadClass(name).getProtectionDomain().getCodeSource()
+        if source is None:
+            raise AssertionError('Class has no verifiable origin: ' + name)
+        location = str(source.getLocation().toExternalForm())
+        url = urlparse(location)
+        if url.scheme != 'file' or Path(unquote(url.path)).resolve() != path.resolve():
+            raise AssertionError('Unexpected runtime origin for ' + name + ': ' + location)
+        observed[name] = location
+    return observed
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--format', choices=['default', 'pcbs', 'vortex', 'nvcomp'], required=True)
@@ -290,6 +314,8 @@ def main():
     parser.add_argument('--warmups', type=int, default=2)
     parser.add_argument('--payload-audit-class',
                         help='Optional tools helper with summarize(DataFrame); runs after all measurements')
+    parser.add_argument('--expected-plugin-jar', type=Path)
+    parser.add_argument('--expected-jni-jar', type=Path)
     parser.add_argument('--cpu-profile-dir', type=Path,
                         help='Separate action-scoped async-profiler CPU/wall recordings')
     parser.add_argument('--nvtx-phases', action='store_true',
@@ -323,6 +349,11 @@ def main():
         if spark.sparkContext.master != 'local' and not spark.sparkContext.master.startswith('local['):
             raise ValueError('This initial storage/heap runner supports local Spark execution only')
         result['master'] = spark.sparkContext.master
+        if (args.expected_plugin_jar is None) != (args.expected_jni_jar is None):
+            raise ValueError('Runtime origin checks require both plugin and JNI jars')
+        if args.expected_plugin_jar is not None:
+            result['runtime_class_origins'] = check_runtime_origins(
+                spark, args.expected_plugin_jar, args.expected_jni_jar)
         result['effective_cache_compression_enabled'] = spark.conf.get(
             'spark.sql.inMemoryColumnarStorage.compressed')
         if args.nvtx_phases and spark.sparkContext._jvm.java.lang.System.getProperty(

@@ -1,11 +1,12 @@
 # GPU contiguous packing and nvCOMP exploration
 
-Status: PARKED AT USER REQUEST — repo/GPU handed back after CPU profiling checkpoint.
-Do not resume builds, benchmarks or edits until the user returns the repo.
+Status: IN PROGRESS — user returned repo; current-source baseline rebuilt and verified.
+Source/provenance repairs and the corrected 256MiB/task cohort are READY FOR REVIEW.
+Current-source CPU profiling is next; larger task/string matrix remains pending.
 
-IMPORTANT BASELINE CORRECTION: all PCBS numbers below describe the hash-pinned
-prebuilt jar, whose reader predates the current branch's ParquetCachedBatchReader.
-They do NOT establish performance of the current branch source. See CPU checkpoint.
+IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
+cohort section describe the older hash-pinned prebuilt jar, not this branch's
+ParquetCachedBatchReader. The new cohort below explicitly fixes that mismatch.
 
 Previous scope: REAL SPARK PROTOTYPE. User explicitly moved from the
 codec/host round-trip microbenchmark to a real Spark cache serializer. CPU encode
@@ -609,3 +610,104 @@ MCP-only tools with every worker. First resolve current-source PCBS artifact
 baseline. Potential prototype improvements to discuss are fewer packing JNI
 calls and coalescing decoded GPU outputs while retaining small cache records;
 neither change is implemented/accepted. Larger task/string matrix still pending.
+
+## Resumed current-source cohort — READY FOR REVIEW
+
+User returned repo and authorized resumption/branch restoration. Root switched
+clean tracked checkout from fix-gpu-output-metadata to pcbs-rowgroup-production;
+preserved unrelated untracked work. GPU was idle. Every project operation and
+worker handoff/checkpoint used MCP docker_exec only; workers confirmed this and
+did not run GPU/Maven jobs. Root owns serial GPU jobs.
+
+Release classification unchanged: prototype tools/interfaces are UNRELEASED,
+no compatibility fallback/alias needed; released production contracts and
+current branch PCBS implementation are untouched. No POM/profile/shim source
+changes. This is bounded local Spark3.5.5 validation, not a multi-profile
+compatibility or production-readiness claim.
+
+Current sources built in detached worktree
+/data/tmp/nvcomp-pcbs-current-397812926b at397812926b0af807f1b30622f4ba65d1c4b71a43.
+This excludes unrelated untracked Scala sources in the main checkout and
+preserves its previous target outputs. Current SNAPSHOT aliases had changed,
+but exact historical JNI/private jars were recovered by SHA256 from Oct23
+timestamped Maven artifacts and copied to /data/tmp/nvcomp-pcbs-rebuild-01/dependencies:
+JNI972b04a70d3a2719fd7fbebe8e76a14b95197fb102de668937a7a06e3b60357d,
+private223f492cea205fb85ae0bea502d219e9918dd148a51b3173578562f592999d83.
+Both match the historical cohort; required chunked-reader varargs API and
+batched-codec callback signatures verified with javap before building.
+
+Maven wrapper command (normal checks retained, tests explicitly skipped):
+rapids-plugin-mvn -o -nsu -Dbuildver=355
+-Dcudf-spark-jni.version=26.12.0-20261023.150441-28
+-Dcudf-spark-private.version=26.12.0-20261023.142435-23
+-DsecondaryCacheDir=/data/tmp/nvcomp-pcbs-rebuild-01/zinc
+-pl aggregator -am verify -DskipTests
+All15reactor modules passed, including duplicate-class enforcement/license
+checks;7m38s. Initial clean build stopped at unwritable default ~/.sbt cache;
+redirected the supported secondaryCacheDir and resumed without disabling checks.
+Compiler code-heap/deprecation warnings were build-JVM diagnostics, not measured
+benchmark-JVM options. No native rebuild or mutable SNAPSHOT overwrite.
+
+Fresh aggregator SHA256
+122466bc6c9eaf3126b74d8ad24659c079a8d35e0334b3baa10134ab3cfaf6fa.
+Root inspected actual bytecode: serializer constructs ParquetCachedBatchReader,
+rather than direct Table.readParquet(byte[]) calls. Detached tracked sources
+remain clean. Maven log and source proof are persisted at
+/data/tmp/nvcomp-pcbs-rebuild-01/{maven-verify.log,source-build.json}.
+
+Builder now requires --source-build and --source-head. Implicit globbing could
+mix stale raw/aggregate jars and could not establish source alignment, so that
+selection was replaced by the explicit source-built aggregator + pinned JNI.
+Validation binds success/clean source/expected commit/exact worktree output,
+log/artifact hashes, reader bytecode reference, every private class and version
+metadata, and exclusion of JNI payload in aggregator. Actual private bytes all
+matched (no shading exception used). Launcher revalidates proof/dependency
+inventory. Experimental manifest keeps checkout head separate from source-build
+revision. Runtime origins of public/internal PCBS, reader, cache trait, cuDF
+Table and ParquetChunkedReader must match the submitted jars before any action.
+No legacy implicit-artifact fallback is retained.
+
+Root read decisive reader/serializer/POM and all delegated implementation/test
+changes, independently reran13 proof-rejection tests (now committed as
+tools/cache-exploration/nvcomp/spark/test_source_build.py), rebuilt experimental
+JNI/Java/Scala sources, and verified actual output hashes/class origins.
+Peer review found/fixed missing expected-head/path binding and private input
+verification, and added the configured public PCBS wrapper to runtime checks.
+No remaining focused review finding.
+
+Runtime prerequisites: current-pcbs-smoke/current-pcbs-origin-smoke checked every
+one of1024rows; current-snappy-probe passed edge/null/projection/CPU-rejection/
+early-stop cleanup cases on fresh cohort. Large deterministic aggregate checks
+and all runtime source origins passed in every measured run. Full production
+unit/integration suite was not run; untouched production implementation is
+being used as a measured baseline, not delivered as a new production change.
+
+Corrected cohort: build-20, 4x256MiB logical partitions, local[2],1GiB total.
+One cold population,1warmup +5measured full/id reads; read medians. Whole-job
+seconds, payload MiB includes each format's audit-defined framing/metadata.
+| Format | Population s | Full read s | Id-only read s | Encoded MiB | Resident MiB | Peak RSS GiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Current-source PCBS | 1.443 | 0.304 | 0.162 | 489.668 | 489.674 | 4.447 |
+| Packed Snappy | 1.631 | 0.476 | 0.180 | 520.510 | 520.522 | 4.304 |
+| Packed ANS | 1.517 | 0.551 | 0.218 | 573.347 | 573.358 | 4.650 |
+| Packed Zstd | 1.743 | 0.483 | 0.201 | 386.431 | 386.442 | 3.903 |
+| Packed LZ4 | 1.536 | 0.466 | 0.210 | 514.034 | 514.046 | 4.465 |
+| Packed typed Cascaded | 1.831 | 0.678 | 0.371 | 390.111 | 390.123 | 3.903 |
+| Packed uncompressed | 1.674 | 0.513 | 0.241 | 1024.319 | 1024.329 | 4.554 |
+| Default Spark | 20.863 | 0.697 | 0.171 | 415.697 | 417.421 | 7.695 |
+
+Default is CPU cache conversion inside GPU-enabled job, confirmed by plan.
+All other cache readers actualGPU, aggregate checks exact. All4partitions
+resident/no disk across population and12read actions, no repopulation (nvCOMP
+encode counters unchanged), no guard stops. Caps unchanged heap16GiB/host32inc
+pin2/RSS64/GPU24; actual managed host32GiB minus30MiB per-task overhead.
+Current PCBS has140cachedrecords (35/partition), versus4 in the historical
+artifact; all packed formats256. Do not attribute old PCBS CPU stacks to the
+current reader. Current-source CPU profiling still needed.
+
+Artifacts /data/tmp/nvcomp-spark-probe/current-{pcbs,snappy,ans,zstd,lz4,cascaded,
+uncompressed,default}-fixed-256; source-bound build-20. Root repro script
+/data/tmp/nvcomp-pcbs-rebuild-01/verify-current-cohort.py passed all8runs including
+six runtime class origins, rows, storage, caps, counters and audited bytes.
+Old artifacts were not overwritten/relabelled; no codec/batching optimization
+implemented. Next: profile current PCBS/Snappy/Cascaded host costs on this cohort.

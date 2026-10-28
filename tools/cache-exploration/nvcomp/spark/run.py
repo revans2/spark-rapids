@@ -35,6 +35,20 @@ SERIALIZERS = {
     "cascaded": "SparkNvcompCascadedSerializer", "cascaded-byte": "SparkNvcompCascadedByteSerializer"}
 
 def verify(manifest, build):
+    source_build = manifest["source_build"]
+    if guard.digest(Path(source_build["path"])) != source_build["sha256"]:
+        raise RuntimeError("Changed source build proof")
+    spec = importlib.util.spec_from_file_location("spark_source_build", HERE / "build.py")
+    source_checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(source_checker)
+    if source_checker.validate_source_build(
+            Path(source_build["path"]), source_build["expected_head"]) != source_build:
+        raise RuntimeError("Source build proof no longer matches embedded provenance")
+    expected_dependencies = [source_build["proof"][name] for name in ["jni", "aggregator"]]
+    actual_dependencies = [{"path": entry["path"], "sha256": entry["sha256"]}
+                           for entry in manifest["plugin_dependencies"]]
+    if actual_dependencies != expected_dependencies:
+        raise RuntimeError("Plugin dependencies do not match the source build proof")
     recorded_scala = sorted(name for name in manifest["sources"]
                             if Path(name).parent == HERE and Path(name).suffix == ".scala")
     if sorted(str(p) for p in HERE.glob("*.scala")) != recorded_scala:
@@ -123,7 +137,10 @@ def main():
                "--conf", "spark.rapids.memory.gpu.allocSize=24g",
                "--conf", "spark.rapids.sql.enabled=true",
                "--conf", "spark.sql.session.timeZone=UTC",
-               str(snapshot), "--format", args.format if args.format in ["pcbs", "default"] else "nvcomp",
+               str(snapshot),
+               "--expected-plugin-jar", manifest["source_build"]["proof"]["aggregator"]["path"],
+               "--expected-jni-jar", manifest["source_build"]["proof"]["jni"]["path"],
+               "--format", args.format if args.format in ["pcbs", "default"] else "nvcomp",
                "--write-mode", "gpu", "--read-modes", "gpu",
                "--fixture", args.fixture, "--rows", str(rows), "--partitions", "4",
                "--warmups", str(args.warmups), "--repeats", str(args.repeats),
