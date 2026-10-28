@@ -6,8 +6,8 @@ Current-source CPU/GPU profiling is verified and READY FOR REVIEW below.
 User-approved decoded batching and its impact reruns are READY FOR REVIEW below.
 Configured-target batching and the 32-case size matrix are READY FOR REVIEW:
 31 cases completed, uncompressed 2GiB/task failed in JVM heap population.
-Direct multi-boundary GPU packing is implemented and verified; host-CPU/kernel
-profiles for it are IN PROGRESS below. CPU encode/decode remains deferred.
+Direct multi-boundary GPU packing and its host-CPU/kernel profiles are verified
+and READY FOR REVIEW below. CPU encode/decode remains deferred.
 Large-string performance and active GPU spill/retry validation remain pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
@@ -1310,6 +1310,80 @@ unverified, and known uncompressed2GiB heap failure was not rerun/repaired.
 Artifacts /data/tmp/nvcomp-spark-probe/multisplit-{codec}-fixed-{256,2048},
 build33. Missing larger sizes/codecs were not silently claimed as retested.
 
-Next already authorized verification: separate GPU population trace and host
-CPU profiles for optimized Snappy versus fresh PCBS control. No CPU encode/
-decode implementation, layout redesign, projection or predicate-pushdown work.
+Separate GPU population tracing and host CPU profiling are completed below.
+No CPU encode/decode implementation, layout redesign, projection or predicate-
+pushdown work was performed.
+
+## Multi-boundary packing profiles — READY FOR REVIEW
+
+Source checkpoint e11dd37272 contains the implementation, strengthened probe
+and initial timing evidence together. Final diagnostics use the same build33
+and pinned production artifacts. Root and the focused read-only reviewer
+continued using MCP docker_exec exclusively; no worker GPU/build execution.
+
+Host CPU profiles: multisplit-cpu-snappy-256 and multisplit-cpu-pcbs-256 under
+/data/tmp/nvcomp-spark-probe, with result.json, cpu-analysis.json and JFRs.
+These are GPU-enabled jobs, NOT CPU-only serialization. Root independently
+reconstructed ThreadMXBean deltas from raw before/after thread snapshots,
+summing executor task-worker CPU and excluding read warmups. Reviewer reproduced
+the population values independently.
+
+| Format | Population task CPU ms | Full-read mean task CPU ms | Id-read mean task CPU ms |
+| --- | ---: | ---: | ---: |
+| Optimized Snappy | 1248.377 | 192.705 | 154.173 |
+| Fresh PCBS control | 1744.747 | 297.354 | 167.352 |
+
+Prior source-correct Snappy population task CPU was2218.270ms, so observed
+task CPU fell44%; optimized Snappy used28.5% less than fresh PCBS. Population
+is a single cold observation and includes JIT/startup variability. CPU sums
+across task threads are not wall time; these data establish no CPU-only path
+performance or exact wall-time decomposition.
+
+GPU diagnostic: multisplit-profile-snappy-256/{profile.sqlite,analysis.json,
+profile.nsys-rep,result.json}. Compare profile-current-snappy-256, the earlier
+source-correct diagnostic. Root directly queried SQLite phase windows scoped
+to the JVM process; reviewer independently reproduced counts and copy volume.
+No kernels crossed the checked seven phase-window boundaries.
+
+| Population diagnostic | Before | Optimized |
+| --- | ---: | ---: |
+| Kernel events | 36858 | 1594 |
+| Summed kernel ms | 222.450 | 170.897 |
+| Snappy compression launches | 8 | 8 |
+| Summed Snappy compression ms | 139.200 | 143.235 |
+| Packing copy kernels | 260 | 8 |
+| Summed packing copy ms | 4.849 | 7.027 |
+| Device-to-device memcpy MiB | 1561.346 | 520.643 |
+| Device-to-host memcpy MiB | 524.348 | 525.042 |
+| CUDA runtime API union ms | 1008.517 | 458.789 |
+| Profiled population wall ms | 1917.322 | 1309.717 |
+
+The31992 removed old slicing/mask-related kernels comprise four families:
+subtract boundaries8060, segmented_count_bits8060, segmented_reduce8060,
+copy_offset_bitmask7812. This does not mean validity processing disappeared;
+multi-boundary packing performs its work in larger operations. Eight new
+packing launches reflect four parents with initial oversize trial plus refined
+successful trial. Compression work itself stayed approximately unchanged.
+Reduced small operations, redundant copies and host submission/bookkeeping
+explain the gain; faster compression is not the explanation.
+
+CUDA API union, summed kernels and memcpy intervals overlap and cannot be
+added into an exclusive wall-time budget. Memcpy counters omit data movement
+inside kernels. Whole population includes upstream/query work; the profiler
+perturbs timing, so use the unprofiled table for headline elapsed results.
+
+Final independent verification: python3.9
+/data/tmp/nvcomp-pcbs-rebuild-01/verify-multisplit.py PASS, reproducing all11
+successful unprofiled acceptance checks, raw CPU arithmetic and direct SQLite
+kernel/copy metrics. Focused final evidence review found no contradictions.
+No further GPU runs were needed. At checkpoint nvidia-smi showed no compute
+processes and ps showed no benchmark/build jobs. Tracked changes are limited
+to this checkpoint; unrelated untracked user files remain untouched.
+
+Remaining limits: no active-spill/retry behavior established by these no-spill
+runs; whole-parent packing's higher transient memory remains a pressure risk.
+Large-string correctness is covered, not representative string performance.
+The full old32-case matrix was not rerun after packing; this bounded11-run
+comparison is the verified scope. Known uncompressed2GiB heap failure remains.
+CPU-only encode/decode is deferred pending the user's next scope decision.
+Implementation and profiling are READY FOR REVIEW, not architect-accepted DONE.
