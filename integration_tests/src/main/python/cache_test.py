@@ -312,15 +312,16 @@ def test_cache_project_partitioning(aqe_enabled):
             cached.unpersist(blocking=True)
 
 
-def _assert_cached_project_aggregate_equal(projected_input, aqe_enabled, conf=None):
-    # Each input hashes by id, then projects id % 10 as k. The cached aggregate must
-    # shuffle again to combine equal k values from different input partitions.
+def _assert_cached_project_aggregate_equal(projected_input, aqe_enabled, conf=None,
+        group_by='k', value='v'):
+    # The cached aggregate must shuffle again when equal grouping keys occur in
+    # different input partitions.
     cached_frames = []
 
     def query(spark):
         cached = projected_input(spark).persist(StorageLevel.MEMORY_AND_DISK)
         cached_frames.append(cached)
-        return cached.groupBy('k').agg(f.max('v').alias('max_v')).orderBy('k')
+        return cached.groupBy(group_by).agg(f.max(value).alias('max_v')).orderBy(group_by)
 
     test_conf = copy_and_update({
         'spark.sql.adaptive.enabled': aqe_enabled,
@@ -377,8 +378,10 @@ def test_cache_project_after_broadcast_join(aqe_enabled):
 
 
 @pytest.mark.parametrize('aqe_enabled', ['true', 'false'])
+@pytest.mark.parametrize('join_strategy,non_ast_side', [
+    ('broadcast', 'right'), ('shuffle', 'left')], ids=['broadcast_right', 'shuffle_left'])
 @allow_non_gpu('InMemoryTableScanExec', 'ColumnarToRowExec')
-def test_cache_project_after_split_condition_join(aqe_enabled):
+def test_cache_project_after_split_condition_join(aqe_enabled, join_strategy, non_ast_side):
     def projected_input(spark):
         left = gen_df(spark, [
             ('id', LongGen(min_val=0, max_val=99, nullable=False)),
@@ -386,24 +389,34 @@ def test_cache_project_after_split_condition_join(aqe_enabled):
             length=256, seed=0).selectExpr('id', 'probe + 1 AS probe').repartition(4, 'id')
         right = gen_df(spark, [
             ('rid', LongGen(min_val=0, max_val=99, nullable=False)),
-            ('offset', LongGen(min_val=-1, max_val=1, nullable=False))], length=100, seed=1)
-        # Force Add out of AST so the condition requires a pre-projection on the right input.
-        condition = (left.id == right.rid) & (left.probe < right.rid + right['offset'])
-        joined = left.join(f.broadcast(right), condition)
-        projected = joined.selectExpr('id % 10 AS k', 'id AS v')
+            ('offset', LongGen(min_val=-1, max_val=1, nullable=False))],
+            length=100, seed=1).selectExpr('rid + 1 AS rid', 'offset')
+        # Force Add out of AST so the condition requires a pre-projection on this input.
+        residual = (left.probe + 1 < right.rid) if non_ast_side == 'left' else (
+            left.probe < right.rid + right['offset'])
+        condition = (left.id == right.rid) & residual
+        right = f.broadcast(right) if join_strategy == 'broadcast' else right.hint('merge')
+        joined = left.join(right, condition)
         if spark.conf.get('spark.rapids.sql.enabled') == 'true':
             # AQE converts query stages to GPU during execution; inspect the completed plan.
-            assert projected.collect(), 'Expected non-empty projected input'
+            assert joined.collect(), 'Expected non-empty join output'
             capture = spark._jvm.org.apache.spark.sql.rapids.ExecutionPlanCaptureCallback
-            capture.assertContains(projected._jdf, 'GpuProjectExec')
-            capture.assertContains(projected._jdf, 'GpuShuffleExchangeExec')
-            capture.assertContains(projected._jdf, 'GpuBroadcastHashJoinExec')
-            plan = projected._jdf.queryExecution().executedPlan().toString()
-            assert '_agpu_non_ast' in plan, 'Expected join-condition pre-projection:\n' + plan
-        return projected
+            capture.assertContains(joined._jdf, 'GpuProjectExec')
+            capture.assertContains(joined._jdf, 'GpuShuffleExchangeExec')
+            join_exec = ('GpuBroadcastHashJoinExec' if join_strategy == 'broadcast' else
+                'GpuShuffledHashJoinExec')
+            capture.assertContains(joined._jdf, join_exec)
+            plan = joined._jdf.queryExecution().executedPlan().toString()
+            assert f'_agpu_non_ast_{non_ast_side[0]}_' in plan, (
+                'Expected join-condition pre-projection:\n' + plan)
+        return joined
 
     _assert_cached_project_aggregate_equal(projected_input, aqe_enabled,
-        conf={'spark.rapids.sql.test.forceNonAst': 'Add'})
+        conf={'spark.rapids.sql.test.forceNonAst': 'Add',
+              'spark.rapids.sql.join.useShuffledSymmetricHashJoin': 'false',
+              'spark.sql.autoBroadcastJoinThreshold': '-1',
+              'spark.sql.adaptive.autoBroadcastJoinThreshold': '-1'},
+        group_by='offset', value='id')
 
 
 @pytest.mark.parametrize('data_gen', all_gen, ids=idfn)
