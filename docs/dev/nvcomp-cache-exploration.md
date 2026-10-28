@@ -202,7 +202,16 @@ Do not mix earlier pilot/staged-typed-03 results with this deterministic cohort.
 Source generation and validation peaks are distinguished from encode/decode GPU
 live peaks using scoped RMM counters reset only at completed phase barriers.
 
-Next run 512/1024/2048 MiB/task in increasing risk order under the same caps.
+512 and 1024 MiB/task are now also complete: all 12 additional fixture/block
+cases PASS under staged-typed-05, with the same independent JSON phase, size,
+allocation and budget checks. Total completed: 18 of 24 cases / 90 of 120 codec
+configurations. No host/GPU OOM or RSS guard failure in the final cohort. At 1 GiB,
+whole-run sampled RSS remains <=5.52 GiB and tracked live GPU peak <=11.52 GiB.
+Some records now use pageable memory; report actual pinned fractions, not just
+pool size. Whole-run RSS includes every codec and validation and cannot be
+attributed to one codec. GPU phase peaks are separately attributable.
+
+Next run 2048 MiB/task in increasing risk order under the same caps.
 Inspect failures before dependent work; no cap relaxation or host-OOM pressure
 experiments. Report final results inline with encode, decode, stored size/ratios,
 block-size tradeoffs and memory caveats. Full Spark serializer integration and
