@@ -140,3 +140,24 @@ Typed Cascaded integration follows this flat prerequisite. Large performance
 matrix, type-aware host round trips and final review remain unverified. No
 performance conclusion is supported by the tiny smoke.
 
+Two 256 MiB/task numeric flat-codec PILOTS passed at 64/256 KiB blocks with
+full-05 artifacts; directories pilot-flat-256-64k and pilot-flat-256-256k.
+The lead's /data/tmp/nvcomp-cache-probe/summarize.py independently checks resource
+values, all four records, framing-byte counts, retained-byte sums, stage/total
+bounds, correctness flags and final allocation zero before computing medians.
+At 64 KiB there were 4094 blocks/call; 256 KiB yielded 1024. These are not final
+performance evidence: lead found untimed sibling generation can overlap encoding,
+and sibling validation can overlap decoding. Worker is introducing two-item wave
+barriers so both generations finish before either encode, and both timed decodes
+finish before validation. Only two GPU source/result tables need coexist. This
+corrects measurement isolation while retaining two slots/four items/two waves.
+Do not silently mix pilot numbers with final staged cohorts.
+
+Guard fixes now independently pass CPU-only injected failure tests, including
+RSS crossing without real pressure, sampler exception, stale sources rejected
+before launch, process-group termination and a SIGTERM-ignoring descendant.
+Explicit ordered Spark jars plus source/compiled artifact/native SDK/runtime
+hashes are checked. Independent final launcher review found no remaining material
+finding after those fixes. Guarded runner: READY FOR REVIEW. Type-aware staged
+harness and final performance matrix remain IN PROGRESS. Native/fixtures
+prerequisite commit: 56450b834d.
