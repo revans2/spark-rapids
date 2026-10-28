@@ -31,6 +31,12 @@ representative wide numeric, low-cardinality strings and varying strings.
 Requested task-scale envelope is 256/512/1024/2048 MiB logical input, two slots/
 four work items. Separate physical packed bytes from canonical logical bytes.
 Use small correctness prerequisites before dependent larger/concurrent runs.
+User explicitly requires enough independent blocks to occupy the GPU for LZ4/Zstd,
+analogous to Parquet pages. The cuDF batched APIs already partition packed buffers
+and submit all chunks in one native batch. Expose block size and actual block count
+per native call; start with 64/256 KiB blocks (about 4096/1024 blocks per 256 MiB).
+Do not conflate codec blocks with independently decodable row/cache batches.
+Measure the block-size tradeoff rather than drawing conclusions from one block.
 Do not add native GPU Vortex decoding, CPU codec support or production configs.
 
 ## Observable acceptance
@@ -95,5 +101,42 @@ segments. Cascaded chunk size <=16 MiB. Buffer ownership and native error cleanu
 must remain correct on every failed stage. Source/runtime versions and native
 dependencies must be recorded.
 
-Next: bounded experimental implementation and small API smoke checks. No
-benchmarks have run for this objective yet.
+## Verified prerequisites — READY FOR REVIEW
+
+Lead independently built the isolated Cascaded bridge with g++17/Werror and
+javac/Xlint, then ran all 16 GPU byte-exact cases, including signed integer
+extremes, real compression, odd tails and multiple blocks. A mixed INT32 case
+produced compressed sizes [7948, 7792, 7660, 20], exercising two misaligned
+starts. The final smoke explicitly asserts bounce coverage and checks zero live
+RMM bytes. Rebuilt artifacts/provenance: /data/tmp/nvcomp-cache-probe/bridge-01.
+Lead also compiled and ran GPU fixtures: fixed-wide/strings-low/strings-wide,
+513-row known values/null patterns, exact string logical-size accounting,
+pack/unpack/byte checks and all-null/all-valid/sliced tails all PASS.
+
+Focused independent worker review checked exact runtime signatures, native SDK
+alignment/type limits, status/length validation, exception synchronization and
+non-owning packed-buffer views. No blocking native/fixture finding remains.
+The reviewed decoder reserves worst-case RMM bounce capacity for ALL blocks;
+this can approach another packed-input-sized allocation even with no copies.
+Callback times include host descriptor copies/synchronization/status validation,
+not pure codec kernel time. No native cudaMalloc is introduced.
+
+## Harness progress — IN PROGRESS
+
+A first flat-codec 513-row two-slot/four-record host round trip passed all four
+codecs, original packed-byte prerequisites, regenerated full-table validation
+and zero final RMM/HostAlloc live bytes. Exact initialized resources in
+/data/tmp/nvcomp-cache-probe/smoke-flat-03/results.json are heap16/pinned2/
+nonpinned30/managed32/device-pool-max24 GiB; all tiny retained payloads actually
+used pinned storage. Classes: full-04. Compilation needed the existing raw
+plugin dependency aggregator on the standalone classpath; production unchanged.
+The first two tiny harness launches failed on this missing class before any
+timing results and were corrected, without changing caps.
+
+The lead is verifying the guarded runner; review found stale-artifact checking
+and unexpected-launcher-error process cleanup gaps, both being repaired before
+scaled runs. Image python3 is 3.6; use available python3.9 for the new runner.
+Typed Cascaded integration follows this flat prerequisite. Large performance
+matrix, type-aware host round trips and final review remain unverified. No
+performance conclusion is supported by the tiny smoke.
+
