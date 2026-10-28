@@ -1,6 +1,13 @@
 # GPU contiguous packing and nvCOMP exploration
 
-Status: IN PROGRESS — REAL SPARK PROTOTYPE. User explicitly moved from the
+Status: PARKED AT USER REQUEST — repo/GPU handed back after CPU profiling checkpoint.
+Do not resume builds, benchmarks or edits until the user returns the repo.
+
+IMPORTANT BASELINE CORRECTION: all PCBS numbers below describe the hash-pinned
+prebuilt jar, whose reader predates the current branch's ParquetCachedBatchReader.
+They do NOT establish performance of the current branch source. See CPU checkpoint.
+
+Previous scope: REAL SPARK PROTOTYPE. User explicitly moved from the
 codec/host round-trip microbenchmark to a real Spark cache serializer. CPU encode
 and decode fallback MUST THROW for the new prototype (explicit user instruction).
 The microbenchmark phase below is historical evidence, not Spark cache timings.
@@ -488,3 +495,117 @@ exclusive attribution versus SDK internals. No speculative optimization applied.
 Memory approval unchanged heap16/host32 includingpin2/RSS64/GPU24GiB.
 Profiles peak5.25-6.01GiB process-tree RSS; no guard stops, OOM, cap relaxation
 or disk spill. Matrix512/1024/2048MiB/task and broader strings still pending.
+
+## CPU profiling checkpoint — parked for repo handoff
+
+User requested a stopping point to use the repo. No further work is authorized
+until the user returns it. All GPU/benchmark processes finished; root checked
+nvidia-smi (no compute processes) and pgrep for benchmark/SparkSubmit/nsys (none).
+Workers are completed/idle. All project operations, including worker handoffs
+and checks, used MCP docker_exec ONLY; preserve that requirement on resumption.
+
+CPU profiler implementation and bounded diagnostics READY FOR REVIEW, not DONE.
+New tools are UNRELEASED, no compatibility aliases needed. Production plugin,
+PCBS/default and shim sources/configuration remain unchanged. GPU-only serializer
+CPU fallback still throws. These CPU profiles measure host work in GPU execution,
+not CPU encode/decode implementations.
+
+Added CpuPhaseProfiler.java, CpuProfileReader.java, cpu_profile.py and optional
+--cpu-profile runner integration. Reuses the plugin-packaged async-profiler3.0
+loader: ctimer CPU sampling1ms plus wall5ms, native frame pointers, per-action JFR.
+This works with perf paranoid4; earlier sampling restriction applied to Nsight/
+perf, not every CPU profiling method. Plugin per-stage polling default5seconds
+would miss subsecond phases, so tools invoke the same loader at action boundaries.
+ThreadMX/process CPU counters plus GC/JIT counters complement samples. Reader
+uses [start,end) epoch bounds and separates CPU STATE_DEFAULT from wall
+RUNNABLE/SLEEPING (root/worker inspected AP3 source and smoke recording). Counts
+are samples, never nominal interval multiplied into CPU milliseconds.
+
+Verification:
+- Native/Java/Scala isolated builds passed. Root read decisive helper/reader/
+  analyzer and harness code. Focused worker source reviews and independent
+  final-PCBS counter/window arithmetic passed. Missing CPU counters remain null.
+- CPU burn/sleep reader checks reproduced15223events and excluded an empty
+  timestamp window; strict task stack+name filtering, known counters, GC/JIT and
+  new-thread cases passed. Root independently reran the check script.
+- Initial separate snapshot JSON return added~45ms transport before collect.
+  Moving begin/finish counter capture entirely into JVM removed that pollution:
+  final sample-minus-collect0.158-0.318ms, counter-epoch-minus-sample0.624-1.269ms.
+  Snapshots remain sequential and their durations are recorded. Draft build13/
+  build14 tight stacks are valid, but final CPU counter claims use build15/16.
+- Final profiles cpu-final-{pcbs,snappy,cascaded}-256 passed correctness, actual
+  GPU readers, unchanged population counters during reads, all4partitions
+  resident/no disk, unchanged heap16/host32incpin2/RSS64/GPU24GiB. Peak RSS
+  4.15-4.79GiB. One warmup plus5 measured full/id reads. No OOM/guard stops.
+- Small combined CUDA/NVTX + CPU profile smoke passed, both analyzers ran;
+  NVTX closes before the large CPU JSON reply. This smoke is capability
+  validation, not large-workload critical-path attribution.
+- Build17 is final metadata checkpoint: application classes byte-identical to
+  build16, provenance verified. Manifest now states git_head is the CHECKOUT
+  revision only and does not attest source alignment of prebuilt plugin jars.
+
+Mean final CPU diagnostics, milliseconds per action. Worker CPU sums both task
+slots and can exceed wall time; driver/task/process time is NOT an additive
+wall-time breakdown. Counter windows are slightly wider than collect.
+| Format | Phase | Wall ms | Executor-worker CPU ms | Driver-query CPU ms |
+| --- | --- | ---: | ---: | ---: |
+| PCBS measured jar | Population | 1132.78 | 1043.86 | 295.53 |
+| PCBS measured jar | Full read | 276.67 | 238.83 | 114.74 |
+| PCBS measured jar | Id-only read | 167.81 | 137.82 | 59.98 |
+| Packed Snappy | Population | 1498.55 | 1587.55 | 260.59 |
+| Packed Snappy | Full read | 543.10 | 734.04 | 118.23 |
+| Packed Snappy | Id-only read | 226.93 | 270.17 | 54.87 |
+| Packed Cascaded | Population | 1866.49 | 2339.09 | 283.72 |
+| Packed Cascaded | Full read | 704.38 | 1098.73 | 92.09 |
+| Packed Cascaded | Id-only read | 426.96 | 638.91 | 51.15 |
+
+Evidence-backed findings (CPU sample shares, not wall fractions):
+- Packing: Encoder.pack -> ColumnView.slice / Table.contiguousSplit appears in
+  452/1487 Snappy and628/2166 Cascaded population task CPU samples. Heap array
+  allocation/zeroing is also visible (206/984 PCBS population task samples).
+- Full-read task CPU leaf CUDA driver shares PCBS366/1154(31.7%),
+  Snappy1473/3498(42.1%), Cascaded2445/5183(47.2%). Packed stacks include RMM
+  alloc/free, host copies, synchronization, metadata copies and many downstream
+  scalar/reduction/cast/null-check/column-close calls. Not all work is decoding.
+- Cache records are PCBS4 total vs packed256 (64/partition), same source
+  GpuRange4batches/4194304rows. GPU profile fullread0 kernels732 vs Snappy28804 /
+  Cascaded28908. Full-minus-id kernels478 vs27202 for BOTH packed codecs.
+  Plans put partial GpuHashAggregate above cache scan without explicit coalescing.
+  Cache record counts are observed; scan output batch counts were not separately
+  instrumented. Code emits one packed output per record. This supports small
+  output batches amplifying downstream work, not simply a slower codec.
+- Measured PCBS id-only arraycopy/memcpy leaf339/653 task CPU samples(51.9%):
+  Table.readParquet(byte[]) -> HostMemoryBuffer.setBytes -> Unsafe.copyMemory.
+  PCBS GPU projection uploads fewer bytes, but this binary copies entire encoded
+  arrays to native host memory first.
+- Driver query wall samples mostly wait for tasks; task wall samples mostly
+  runnable. Background JIT remains substantial after1warmup. Warm full-read GC
+  counters total0ms PCBS/Snappy and5ms Cascaded, not a dominant explanation.
+- Longer warmup check cpu-warmed-snappy-256 (8warmups/5reads) stayed~527.5ms full
+  read vs543.1ms before, task CPU746.3ms vs734.0ms. Main per-batch cost persists;
+  no statistically significant speedup claim.
+
+CRITICAL provenance correction: prebuilt sql-plugin jar SHA256
+53714451c0fd3d829f4fd60086d4c69f29355b229848976faf74bef4e5ecaf4f
+contains a direct Table.readParquet(byte[]) call in its PCBS reader (javap and
+runtime stacks). Current branch source instead uses ParquetCachedBatchReader.
+Lead had checked source and artifact hashes but had NOT established their
+alignment; this was a material verification omission and was reported to user.
+All earlier PCBS comparisons remain observations of that frozen older artifact,
+not current WIP branch behavior. Do not silently replace/relabel those results.
+A fresh current-branch PCBS build and new baseline are required before a final
+comparison/decision. No production rebuild or optimization was attempted here.
+
+Artifacts all under /data/tmp/nvcomp-spark-probe:
+- build17 (final source/provenance), build15/16 (accepted CPU captures).
+- cpu-final-{pcbs,snappy,cascaded}-256/{result.json,cpu-analysis.json,cpu/*.jfr}.
+- cpu-warmed-snappy-256, cpu-gpu-combined-smoke/{gpu-analysis,cpu-analysis}.json.
+- cpu-final-raw-row-cache.json.gz, cpu-final-raw-interpretation.json,
+  cpu-final-context-evidence.json, batch-metadata-evidence.json.
+- verify-cpu-final.py, check-cpu-analysis.py, check-cpu-gaps.py reproduce checks.
+
+On resumption: read this tracker first; confirm repo/branch/GPU ownership and
+MCP-only tools with every worker. First resolve current-source PCBS artifact
+baseline. Potential prototype improvements to discuss are fewer packing JNI
+calls and coalescing decoded GPU outputs while retaining small cache records;
+neither change is implemented/accepted. Larger task/string matrix still pending.

@@ -39,6 +39,10 @@ def verify(manifest, build):
                             if Path(name).parent == HERE and Path(name).suffix == ".scala")
     if sorted(str(p) for p in HERE.glob("*.scala")) != recorded_scala:
         raise RuntimeError("Spark prototype Scala source inventory changed")
+    recorded_java = sorted(name for name in manifest["sources"]
+                           if Path(name).parent == HERE and Path(name).suffix == ".java")
+    if sorted(str(p) for p in HERE.glob("*.java")) != recorded_java:
+        raise RuntimeError("Spark prototype Java source inventory changed")
     actual_spark_jars = sorted(str(p) for p in (Path(manifest["spark_home"]) / "jars").glob("*.jar")
                                if p.is_file())
     if actual_spark_jars != sorted(entry["path"] for entry in manifest["spark_dependencies"]):
@@ -71,6 +75,8 @@ def main():
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--probe", action="store_true", help="Run bounded Scala correctness/CPU-rejection probe")
+    parser.add_argument("--cpu-profile", action="store_true",
+                        help="Separate diagnostic CPU/wall samples and JVM CPU counters per action")
     parser.add_argument("--profile", action="store_true",
                         help="Separate diagnostic run with Nsight CUDA/NVTX tracing; timings are perturbed")
     args = parser.parse_args()
@@ -94,6 +100,12 @@ def main():
     jars = ",".join([entry["path"] for entry in manifest["plugin_dependencies"]]
                     + [manifest["application"]["path"]])
     native_option = "-Dcacheexploration.cascaded.library=" + manifest["native_library"]
+    if args.cpu_profile:
+        if args.probe:
+            parser.error("CPU profiling requires measured cache actions")
+        native_option += " -Dap_loader_extraction_dir=" + str(output / "ap-native")
+        native_option += (" -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints"
+                          " -XX:+PreserveFramePointer")
     if args.profile:
         if args.probe:
             parser.error("Profile measured cache actions rather than the correctness probe")
@@ -117,6 +129,8 @@ def main():
                "--warmups", str(args.warmups), "--repeats", str(args.repeats),
                "--storage", "dataframe-default", "--output", str(output / "result.json"),
                "--payload-audit-class", "org.apache.spark.sql.cacheexploration.NvcompPayloadAudit"]
+    if args.cpu_profile:
+        command += ["--cpu-profile-dir", str(output / "cpu")]
     if args.profile:
         command += ["--nvtx-phases"]
     if args.format in SERIALIZERS:
@@ -138,8 +152,10 @@ def main():
     environment.update(SPARK_HOME=manifest["spark_home"], SPARK_LOCAL_IP="127.0.0.1",
                        PYSPARK_PYTHON=sys.executable, PYSPARK_DRIVER_PYTHON=sys.executable)
     launch = {"command": command, "build": str(build), "format": args.format,
-              "profiled": args.profile,
-              "timing_scope": "Nsight diagnostic; perturbed" if args.profile else "Unprofiled benchmark",
+              "profiled": args.profile or args.cpu_profile,
+              "gpu_profiled": args.profile, "cpu_profiled": args.cpu_profile,
+              "timing_scope": ("Diagnostic profiling; perturbed" if args.profile or args.cpu_profile
+                               else "Unprofiled benchmark"),
               "rows": rows, "task_slots": 2, "partitions": 4,
               "rss_stop_bytes": 64*GIB, "heap_bytes": 16*GIB,
               "configured_host_budget_bytes": 32*GIB, "pinned_bytes": 2*GIB,

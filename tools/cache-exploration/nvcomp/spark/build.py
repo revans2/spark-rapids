@@ -70,6 +70,7 @@ def main():
     classpath = os.pathsep.join(map(str, [classes] + dependencies + spark_jars))
     java_sources = [HERE.parent / name for name in [
         "CascadedCodec.java", "ByteCodec.java", "PackedSegments.java", "PackedTableCodec.java"]]
+    java_sources += sorted(HERE.glob("*.java"))
     subprocess.run(["javac", "-Xlint:all", "-cp", classpath, "-d", str(classes)]
                    + list(map(str, java_sources)), check=True)
     compiler = os.pathsep.join(str(p) for p in spark_jars
@@ -83,13 +84,14 @@ def main():
     sources = java_sources + scala_sources + [Path(__file__),
         REPO / "tools/cache-exploration/spark_cache_bench.py",
         REPO / "tools/cache-exploration/measure_process.py", HERE.parent / "run.py"]
-    for name in ["benchmark.py", "run.py", "profile.py"]:
+    for name in ["benchmark.py", "run.py", "profile.py", "cpu_profile.py"]:
         path = HERE / name
         if path.exists():
             sources.append(path)
     manifest = {
         "scope": "Experimental real local Spark3.5.5/Scala2.12 GPU CachedBatchSerializer; CPU paths throw",
         "git_head": subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True).strip(),
+        "git_head_scope": "Checkout only; prebuilt plugin jars are hash-pinned, not verified built from this revision",
         "application": artifact(jar),
         "plugin_dependencies": [artifact(p) for p in dependencies],
         "spark_home": str(SPARK),

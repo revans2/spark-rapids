@@ -241,17 +241,33 @@ def prototype_counters(spark, cache_format):
 
 
 @contextmanager
-def profile_phase(spark, enabled, name):
-    """Process-wide start/end ranges tolerate Py4J calls from different JVM threads."""
+def profile_phase(spark, enabled, name, cpu_directory=None, cpu_phases=None):
+    """Action-scoped diagnostics; setup/teardown are outside the collect timer."""
     marker = None
-    if enabled:
-        marker = spark.sparkContext._jvm.ai.rapids.cudf.NvtxUniqueRange(
-            'cache-exploration/' + name, 0xFF00AAFF - 2**32)  # signed Java ARGB int
+    sampler = None
+    record = None
     try:
+        if cpu_directory is not None:
+            sampler = spark.sparkContext._jvm.org.apache.spark.sql.cacheexploration.CpuPhaseProfiler
+            path = cpu_directory / (name.replace('/', '-') + '.jfr')
+            record = {'name': name, 'file': str(path),
+                      'profiler': json.loads(sampler.start(str(path)))}
+        if enabled:
+            marker = spark.sparkContext._jvm.ai.rapids.cudf.NvtxUniqueRange(
+                'cache-exploration/' + name, 0xFF00AAFF - 2**32)  # signed Java ARGB int
+        if sampler is not None:
+            sampler.begin()
         yield
     finally:
-        if marker is not None:
-            marker.close()
+        try:
+            if marker is not None:
+                marker.close()
+            if record is not None:
+                record.update(json.loads(sampler.finish()))
+                cpu_phases.append(record)
+        finally:
+            if record is not None:
+                sampler.stop()
 
 
 def main():
@@ -274,6 +290,8 @@ def main():
     parser.add_argument('--warmups', type=int, default=2)
     parser.add_argument('--payload-audit-class',
                         help='Optional tools helper with summarize(DataFrame); runs after all measurements')
+    parser.add_argument('--cpu-profile-dir', type=Path,
+                        help='Separate action-scoped async-profiler CPU/wall recordings')
     parser.add_argument('--nvtx-phases', action='store_true',
                         help='Mark timed actions for a separate Nsight profiling run')
     parser.add_argument('--output', type=Path, required=True)
@@ -284,6 +302,9 @@ def main():
         parser.error('positive rows/partitions/repeats and cpu/gpu read modes required')
     if args.output.exists():
         parser.error('output file already exists')
+    if args.cpu_profile_dir is not None:
+        args.cpu_profile_dir = args.cpu_profile_dir.resolve()
+        args.cpu_profile_dir.mkdir(parents=True, exist_ok=False)
     serializers = {'default': 'org.apache.spark.sql.execution.columnar.DefaultCachedBatchSerializer',
                    'pcbs': 'com.nvidia.spark.ParquetCachedBatchSerializer',
                    'vortex': args.vortex_class, 'nvcomp': args.serializer_class}
@@ -291,7 +312,7 @@ def main():
              .config('spark.sql.cache.serializer', serializers[args.format])
              .config('spark.sql.session.timeZone', 'UTC').getOrCreate())
     result = {'arguments': vars(args).copy(), 'spark_version': spark.version,
-              'serializer': serializers[args.format], 'reads': [],
+              'serializer': serializers[args.format], 'reads': [], 'cpu_phases': [],
               'scope': 'Local Spark cache job; resident bytes are BlockManager storage accounting. '
                        'Heap snapshots are not temporary-memory peaks. Serializer size is a '
                        'separate reported statistic, not an estimate of total process memory. '
@@ -358,7 +379,8 @@ def main():
         result['driver_heap_before_population'] = heap(spark)
         result['plugin_memory_before_population'] = plugin_memory(spark)
         population = frame.agg(F.count('*').alias('rows'))
-        with profile_phase(spark, args.nvtx_phases, 'population'):
+        with profile_phase(spark, args.nvtx_phases, 'population',
+                           args.cpu_profile_dir, result['cpu_phases']):
             started = time.perf_counter_ns()
             observed_rows = population.collect()[0]['rows']
             result['population_ns'] = time.perf_counter_ns() - started
@@ -386,7 +408,8 @@ def main():
                     query = aggregate(frame, narrow)
                     phase = 'read/{}/{}/{}'.format(
                         mode, 'id-only' if narrow else 'full', iteration)
-                    with profile_phase(spark, args.nvtx_phases, phase):
+                    with profile_phase(spark, args.nvtx_phases, phase,
+                                       args.cpu_profile_dir, result['cpu_phases']):
                         started = time.perf_counter_ns()
                         observed = query.collect()[0].asDict()
                         elapsed = time.perf_counter_ns() - started
