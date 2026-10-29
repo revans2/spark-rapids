@@ -2930,3 +2930,117 @@ No reply yet to optional stockSpark-scope question. BaselineSpark remains unchan
 a stockSparkfix is a separatefollow-up unless the user directs inclusion and
 provideswritablecheckout. This does not block guards/correctness in our serializers.
 All project work and delegated checkpoints remain MCP docker_exec-only.
+
+### Local Spark 3.5.5 proof of concept — READY FOR REVIEW
+
+The user clarified this remains a proof of concept and favors reusing Parquet's
+existing predicate logic. PCBS already delegates to Spark ParquetFilters and
+Parquet RowGroupFilter; its small guard prevents lossy literal conversion before
+that call. nvCOMP reuses Spark's cache statistics evaluator with conservative
+normalization for its two reproduced edge cases. The stock Spark prefix issue
+remains a follow-up; no Spark checkout was changed or broader design started.
+
+Final code source91a86cdc3c7a7e5a55dcfc965dbe8abb01edcb23:
+clean source-bound Maven355 verify PASS425.585s, including scalastyle/provider checks.
+Production proof: production-final/source-build.json; aggregator SHA
+2f0ae5374a746da6d90c1f082fc1472a6f35a8fad8bb5db5b336f570d77787df
+.
+Final experimental build46 compiles all JVM/native sources against this proof.
+Root compiled ONLY the12-test suite against the packaged final aggregator (no
+helper-shadow classes):12PASS with fatal warnings. Actual final Snappy/PCBS
+predicate probes and Snappy CPU/GPU interoperability probe ALLPASS, independently
+checked from raw logs/completions/proof bindings. The Snappy probe explicitly
+executes the committed invalid-prefix regression and both default/created-stream
+native statistics checks. Final focused peer review found no new issue.
+GPU idle and tracked main-worktree clean before this documentation update.
+
+Release/compatibility classification is unchanged: preserve released PCBS records,
+bytes, decoder APIs and existing controls. nvCOMP remains UNRELEASED, flat
+int/long/default-binary-string, wirev3 with no obsolete-format adapter.
+Unsupported predicates/types retain records; Spark's residual filters remain.
+CPU ArrowWriter and per-iterator reusable codec contexts remain in place.
+
+This READY FOR REVIEW disposition applies to the LOCAL EXPLORATION only.
+Production integration/cross-version acceptance remains INCOMPLETE, not DONE:
+final HEAD-only static coverage32profiles/3839requirements/0findings; required
+review/advisory both INCOMPLETE because gh is absent and upstream fetch DNS failed.
+The attempted330compile has110missing join symbols across8unchanged files.
+No new pruning source appears in emitted errors, but330baseline was not rebuilt
+and no330/4.x/Databricks compatibility success is claimed. No PR is proposed.
+
+All21planned numeric timing cases VERIFIED:14small +7large;0failed/invalid.
+Timing artifact is frozen build45/sourcee849, before the invalid-string guards.
+The dataset does not exercise those guarded paths. Guard correctness is separately
+bound to final build46; no build46 timing measurement is claimed.
+All reads below are five-sample medians after one warmup; population is one first
+cache action. Both widths and write/read modes remain separate.
+Settings remain16GiB heap,32GiB managed host including2GiB pinned,24GiB RMM limit,
+64GiB sampled tree-RSS stop guard,local[2],fourtasks/twowaves,1GiB GPU output target.
+The local Spark distribution is instrumented; existing compression stream tracing
+is disabled for this cohort, so these are not claimed stock-Spark measurements.
+
+256MiB/task (1024MiB total),32cached fields:
+
+| Writer | Format | Population s | CPU full / ID s | GPU-mode full / ID s | Encoded MiB total |
+| --- | --- | ---: | ---: | ---: | ---: |
+| cpu | default | 20.118 | 1.479 / 0.077 | 0.714 / 0.111 | 415.7 |
+| cpu | lz4 | 2.777 | 2.468 / 0.123 | 0.226 / 0.105 | 506.0 |
+| cpu | pcbs | 13.297 | 5.305 / 4.083 | 0.255 / 0.217 | 701.2 |
+| cpu | snappy | 2.912 | 2.538 / 0.145 | 0.263 / 0.095 | 516.9 |
+| cpu | uncompressed | 2.754 | 1.874 / 0.110 | 0.317 / 0.103 | 1024.1 |
+| cpu | zstd | 4.301 | 2.406 / 0.130 | 0.210 / 0.097 | 393.4 |
+| gpu | ans | 1.155 | — / — | 0.346 / 0.126 | 559.3 |
+| gpu | cascaded | 1.104 | — / — | 0.350 / 0.092 | 389.0 |
+| gpu | default | 20.554 | 1.452 / 0.080 | 0.714 / 0.102 | 415.7 |
+| gpu | lz4 | 1.232 | 1.816 / 0.103 | 0.266 / 0.122 | 507.9 |
+| gpu | pcbs | 1.375 | 5.117 / 3.876 | 0.232 / 0.139 | 489.7 |
+| gpu | snappy | 1.203 | 2.043 / 0.129 | 0.275 / 0.095 | 520.8 |
+| gpu | uncompressed | 1.286 | 1.747 / 0.140 | 0.336 / 0.129 | 1025.1 |
+| gpu | zstd | 1.464 | 2.028 / 0.121 | 0.263 / 0.096 | 386.3 |
+
+2GiB/task (8192MiB total),GPU-written/GPU-requested reads ONLY.
+CPU population/CPU-query reads were NOT_RUN in this supplement.
+GPU-uncompressed remains SKIPPED_NOT_RERUN due to the previously reproduced
+2GiB heap failure. It is not counted as successful. All remaining seven passed.
+
+Predicate values are paired SAME-predicate full-read medians, pruning OFF -> ON.
+All-match controls remain visible rather than assuming pruning is free.
+
+| Format | Population s | GPU-mode full / ID s | Encoded MiB total | All-match OFF -> ON s | High-quarter OFF -> ON s | No-match OFF -> ON s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| pcbs | 4.426 | 1.043 / 0.484 | 3917.4 | 1.014 -> 1.047 | 0.958 -> 0.581 | 0.973 -> 0.211 |
+| snappy | 4.505 | 1.293 / 0.201 | 4166.3 | 1.347 -> 1.267 | 1.213 -> 0.539 | 1.116 -> 0.208 |
+| lz4 | 4.830 | 1.391 / 0.217 | 4055.9 | 1.300 -> 1.321 | 1.122 -> 0.488 | 1.219 -> 0.192 |
+| zstd | 5.847 | 1.228 / 0.197 | 3020.2 | 1.195 -> 1.211 | 1.066 -> 0.480 | 0.996 -> 0.169 |
+| ans | 4.138 | 1.575 / 0.228 | 4517.9 | 1.640 -> 1.536 | 1.366 -> 0.569 | 1.345 -> 0.143 |
+| cascaded | 4.859 | 1.885 / 0.216 | 3138.7 | 1.912 -> 1.896 | 1.631 -> 0.522 | 1.586 -> 0.177 |
+| default | 156.765 | 4.802 / 0.437 | 3325.6 | 4.585 -> 4.537 | 4.266 -> 1.793 | 4.530 -> 0.279 |
+
+Default GPU-mode queries retain a CPU cache decoder (and CPU cache encoding).
+PCBS CPU-written payloads use UNCOMPRESSED Parquet pages with Parquet encoding;
+GPU-written PCBS uses Snappy. Encoded audit includes framing/statistics/footer
+bytes except the separate default-Spark statistics row. These are actual cached
+payload bytes, not serializer-reported uncompressed size or whole-process memory.
+
+The high-quarter case avoids75% of nvCOMP decoded packed bytes/roots; no-match
+avoids all selected payload decode, while all-match retains identical work.
+PCBS actual scan-row skipping is separately established for allfourCPU/GPU
+writer/reader combinations in pcbs-scan-metrics-45/verified-scan-pruning.json.
+Do not equate codec call counters with physical kernel counts or counter bytes
+with independently traced PCIe transfers.
+
+All four cache partitions remained resident; disk/recomputation observations0.
+Available spill/retry counters recorded0; missing CPU-side counters remain
+unavailable. Spill recovery was not exercised by these successful cases.
+Largest sampled whole-job tree RSS19.830GiB; largest tracked RMM highwater12.049GiB.
+These include whole-job stages and are not isolated per-task working sets.
+
+Source replay remains strict after final edits:
+verify_archived_timing_results.py --json --require-complete
+verify_archived_large_gpu_results.py --json --require-complete
+Both preserve original binary/header/proof/runtime checks and require archived
+sources matching Git9fa. Original launcher guards still reject changed sources.
+Raw results, CPU reference aggregates, full/ID predicate controls, storage,
+memory and spill observations remain in verified-256-archived.json and
+verified-large.json. No unresolved required local check remains; broader
+production compatibility and stock-Spark issue are explicitly separate.
