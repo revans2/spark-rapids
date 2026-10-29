@@ -110,6 +110,8 @@ def main():
     parser.add_argument("--probe", action="store_true", help="Run bounded Scala GPU correctness probe")
     parser.add_argument("--cpu-probe", action="store_true",
                         help="Run CPU/GPU table interoperability correctness checks")
+    parser.add_argument("--predicate-reads", action="store_true",
+                        help="Measure matched all/range/no-match predicate scans with pruning off/on")
     parser.add_argument("--predicate-probe", action="store_true",
                         help="Check conservative predicate pruning across CPU/GPU cache paths")
     parser.add_argument("--cpu-profile", action="store_true",
@@ -168,6 +170,7 @@ def main():
                "--conf", "spark.rapids.memory.gpu.allocSize=24g",
                "--conf", "spark.rapids.sql.enabled=" + str(args.write_mode == "gpu").lower(),
                "--conf", "spark.sql.session.timeZone=UTC",
+               "--conf", "spark.test.compression_logging.enabled=false",
                str(snapshot),
                "--expected-plugin-jar", manifest["source_build"]["proof"]["aggregator"]["path"],
                "--expected-jni-jar", manifest["source_build"]["proof"]["jni"]["path"],
@@ -177,6 +180,8 @@ def main():
                "--warmups", str(args.warmups), "--repeats", str(args.repeats),
                "--storage", "dataframe-default", "--output", str(output / "result.json"),
                "--payload-audit-class", "org.apache.spark.sql.cacheexploration.NvcompPayloadAudit"]
+    if args.predicate_reads:
+        command += ["--predicate-reads"]
     if args.cpu_profile:
         command += ["--cpu-profile-dir", str(output / "cpu")]
     if args.profile:

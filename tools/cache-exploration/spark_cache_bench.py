@@ -340,6 +340,9 @@ def main():
     parser.add_argument('--storage', choices=['dataframe-default', 'serialized-memory-and-disk',
                                              'serialized-memory-only'], default='dataframe-default')
     parser.add_argument('--warmups', type=int, default=2)
+    parser.add_argument('--predicate-reads', action='store_true',
+                        help='After normal reads, compare cache predicate pruning off/on; '
+                             'one warmup when --warmups is nonzero, then --repeats measurements')
     parser.add_argument('--payload-audit-class',
                         help='Optional tools helper with summarize(DataFrame); runs after all measurements')
     parser.add_argument('--expected-plugin-jar', type=Path)
@@ -425,6 +428,21 @@ def main():
                    for value in partition_sizes.values()):
                 raise AssertionError('Source partition logical bytes differ from requested task size')
         result['expected_aggregates'] = expected
+        if args.predicate_reads:
+            predicate_cases = [
+                ('all-match', 'id >= -991'),
+                ('range-match', 'id >= {}'.format((args.rows * 3 // 4) * 17 - 991)),
+                ('no-match', 'id < -991')]
+            # These actions use the uncached CPU reference before registering/populating frame.
+            # Keep both widths independent, including empty-input SUM/null aggregate semantics.
+            started = time.perf_counter_ns()
+            predicate_expected = {
+                label: {str(narrow): aggregate(reference.where(predicate), narrow).first().asDict()
+                        for narrow in [False, True]}
+                for label, predicate in predicate_cases}
+            result['predicate_reference_ns'] = time.perf_counter_ns() - started
+            result['expected_predicate_aggregates'] = predicate_expected
+            result['predicate_reads'] = []
         spark.conf.set('spark.rapids.sql.enabled', str(args.write_mode == 'gpu').lower())
         frame = fixture(spark, args.fixture, args.rows, args.partitions)
         storage = {'dataframe-default': StorageLevel.MEMORY_AND_DISK_DESER,
@@ -506,6 +524,64 @@ def main():
             if expected_rows is not None:
                 if validation_frame(frame).orderBy('id').collect() != expected_rows:
                     raise AssertionError('full row comparison failed for ' + mode)
+        if args.predicate_reads:
+            pruning_key = 'spark.sql.inMemoryColumnarStorage.partitionPruning'
+            original_pruning = spark.conf.get(pruning_key)
+            try:
+                for mode in read_modes:
+                    spark.conf.set('spark.rapids.sql.enabled', str(mode == 'gpu').lower())
+                    for label, predicate in predicate_cases:
+                        for narrow in [False, True]:
+                            for pruning in [False, True]:
+                                spark.conf.set(pruning_key, str(pruning).lower())
+                                for iteration in range(-min(args.warmups, 1), args.repeats):
+                                    query = aggregate(frame.where(predicate), narrow)
+                                    phase = 'predicate_read/{}/{}/{}/{}/{}'.format(
+                                        mode, label, 'id-only' if narrow else 'full',
+                                        'pruning-on' if pruning else 'pruning-off', iteration)
+                                    counters_before = prototype_counters(spark, args.format)
+                                    with spill_phase(spill_monitor, phase,
+                                                     spill_unavailable) as read_spill, \
+                                            profile_phase(spark, args.nvtx_phases, phase,
+                                                          args.cpu_profile_dir,
+                                                          result['cpu_phases']):
+                                        started = time.perf_counter_ns()
+                                        collected = query.collect()
+                                        elapsed = time.perf_counter_ns() - started
+                                    observed = collected[0].asDict()
+                                    if observed != predicate_expected[label][str(narrow)]:
+                                        raise AssertionError(
+                                            'cache predicate aggregate mismatch: {}: {}'.format(
+                                                phase, repr(observed)))
+                                    plan = query._jdf.queryExecution().executedPlan().toString()
+                                    read_plan = plan.split('InMemoryRelation', 1)[0]
+                                    reader_backend = (
+                                        'gpu' if 'GpuInMemoryTableScan' in read_plan
+                                        else 'cpu' if 'InMemoryTableScan' in read_plan else 'unknown')
+                                    observation = {
+                                        'predicate': predicate, 'label': label,
+                                        'pruning_enabled': pruning, 'requested_mode': mode,
+                                        'narrow': narrow, 'warmup': iteration < 0,
+                                        'iteration': iteration, 'elapsed_ns': elapsed,
+                                        'observed_cache_reader': reader_backend,
+                                        'has_cpu_expression_bridge': 'GpuCpuBridge' in read_plan,
+                                        'plan': plan, 'aggregate': observed, 'spill': read_spill,
+                                        'storage': storage_info(spark, rdd_id, partition_sizes),
+                                        'driver_heap_after_read': heap(spark),
+                                        'plugin_memory_after_read': plugin_memory(spark),
+                                        'prototype_counters_before_read': counters_before,
+                                        'prototype_counters': prototype_counters(spark, args.format)}
+                                    result['predicate_reads'].append(observation)
+                                    print(json.dumps({
+                                        'phase': 'predicate_read', 'label': label,
+                                        'predicate': predicate, 'pruning_enabled': pruning,
+                                        'requested_mode': mode, 'narrow': narrow,
+                                        'warmup': iteration < 0, 'iteration': iteration,
+                                        'elapsed_ns': elapsed,
+                                        'observed_cache_reader': reader_backend,
+                                        'aggregate_checked': True}), flush=True)
+            finally:
+                spark.conf.set(pruning_key, original_pruning)
         result['storage_after_reads'] = storage_info(spark, rdd_id, partition_sizes)
         result['prototype_after_reads'] = prototype_counters(spark, args.format)
         result['serializer_reported_size_bytes_after_reads'] = cache.sizeInBytesStats().value()

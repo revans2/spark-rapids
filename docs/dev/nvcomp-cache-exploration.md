@@ -2725,3 +2725,17 @@ quantified. It is not evidence that the cache codec itself is spending the logge
 Spark task-result transport time. Future timing cohort will disable this existing
 diagnostic switch, record the change, and not call historical data clean stockSpark.
 No old result is silently relabeled or discarded.
+
+Optional predicate timing harness added after existing normal scans: independently
+computed uncached CPU references for allmatch/highquarter/no-match, both full/ID
+widths, both requested executionmodes, pruningoff/on on the SAME resident cache.
+Timings cover collectonly; eachaggregate is checked, plans/counters/spill/storage
+recorded. No filter replaces residual row semantics. Original pruning flag restored.
+Root independently inspected this delegated harness diff and parsed both Python
+sources. First measured cohort will use256MiB/task, fourtasks/twowaves,1warmup and
+5samples under the unchanged16/32/2/24/64GiB settings. Future timing runs explicitly
+disable the existing Spark compression diagnosticlogging switch as announced.
+Historical build44 sources all match Git173be5bf8d:36files verified against the
+recorded main/native/host/statistics manifests; inventory in
+/data/tmp/cache-predicate-pruning/build44-git-source-match.json.
+Other codecs/default correctness plus new performance observations remain pending.
