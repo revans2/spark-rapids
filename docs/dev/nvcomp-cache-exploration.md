@@ -1680,3 +1680,26 @@ First512MiB/task Snappy run completed exit0/no guard, resultPASS with all4
 partitions resident/disk0. Full scale verifier/provenance crosscheck pending;
 do not present the entire size matrix as completed.
 Artifacts /data/tmp/nvcomp-spark-probe/cpu-scale-{format}-fixed-{512,1024,2048}.
+
+###512MiB/task cohort — READY FOR REVIEW
+
+All6formats complete and independently verified with unchangedbuild39/settings.
+Rootread scaleverifierdiff and reran fullcohort:150phases/774taskattempts,
+360RAPIDSmetricattempts,78CPUphases explicitlyunavailable; allresident/disk0,
+Sparkspills0 and observedGPUspill/retry0. Worker independentlyverifiedfirst5
+whilePCBSwasrunning; rootverifiedPCBS and fullcrossformataggregate equality.
+MCPdocker_exec-only confirmed atcheckpoint. Only root launched serialjobs.
+
+|Format|CPU population s|CPU full s|CPU ID s|GPU-mode full s|GPU-mode ID s|Encoded MiB|RSS GiB|
+|---|---:|---:|---:|---:|---:|---:|---:|
+|default|39.987|2.802|0.107|1.167|0.142|831.394|12.308|
+|pcbs|23.483|10.842|8.196|0.392|0.262|1402.372|8.414|
+|snappy|5.432|5.038|1.760|0.320|0.254|1035.265|9.961|
+|lz4|4.886|4.810|1.559|0.290|0.202|1011.914|6.295|
+|zstd|7.598|4.808|1.563|0.291|0.209|787.642|6.764|
+|uncompressed|4.511|4.472|1.208|0.359|0.249|2047.354|7.293|
+
+GPU columns read CPU-populated bytes; default still usesCPUcache-reader fallback.
+Payloadtotal covers2GiBlogicalinput across4tasks. Populationsinglecoldsample;
+reads5samplemediansafter1warmup. No active-spill/pressure conclusion.
+1GiB/task and2GiB/task cohorts remain IN PROGRESS; no source/cap changes.
