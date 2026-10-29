@@ -2757,3 +2757,53 @@ sourcecheck will distinguish final owned changes from those unrelated files.
 The documented old scalastyle:check prefix is unavailable in this checkout;
 use the existing parent antrun execution scalastyle-all-modules with its
 spark.rapids.source.basedir property. No check is skipped or disabled.
+
+### Predicate first timing / actual PCBS pruning checkpoint
+
+All17build45 validation applications passed; root independently checked raw
+completions, terminal assertion messages and production-source proof bindings.
+Together with Snappy/PCBSbuild44 predicate cases, allcurrent8formatsetups have
+realSQL predicate/residual correctness evidence. CPUcolumnar INPUT remains
+unverified as before; CPUrows/ArrowWriter and allfourCPU/GPU write/read combinations
+for supported CPUcodecs are verified. GPU-onlyANS/Cascaded CPUcodec scope unchanged.
+
+Clean isolated scalastyle check at4d256e0d4a passed2041files,0errors/0warnings,
+plus4provider-selection tests; log /data/tmp/cache-predicate-pruning/scalastyle-final.log.
+Spark330 compilation was attempted with the pinned private330 artifact and failed
+110missingjoin-symbol errors across8UNCHANGEDsourcefiles. No changed pruning file
+appears in emittederrors; this is not a successful330compile or a proven baseline
+failure (baseline330was not rebuilt). Artifacts compat330/{maven.log,error-scope.json}.
+Do not broaden scope to repair unrelated join/backend compatibility here.
+
+First timing case timing-cpu-snappy-256-45 VERIFIED independently by root:
+152.80s whole job,6.907GiB sampledRSS,132records,516.921MiB encodedtotal.
+Population2.912s; normal CPUfull2.538/CPUID0.145/GPUfull0.263/GPUID0.095s.
+Predicate full-read medians pruningoff->on:
+CPU allmatch3.261->3.219s, highquarter2.624->1.650s, none2.133->0.063s;
+GPU allmatch0.196->0.203s, highquarter0.180->0.165s, none0.174->0.088s.
+These are samecache/samepredicate pairs, not normal-vs-filtered timing claims.
+Highquarter decoded1073225472->268306368bytes,4224->1056roots;
+GPU decodecalls4->1 and cache outputrows4194304->1048576.
+No-match on decoded0bytes/roots/calls/outputrows; allmatch preserves work.
+No recomputation observed. Root reproduced sampledRSSpeak from470rawsamples.
+A disposable rawresult with fabricated no-match selectedbytes was rejected;
+no acceptance criterion was weakened.
+
+Verifier /data/tmp/cache-predicate-pruning/verify_timing_results.py,
+SHA dfcde35da9e1bdba90ae21e1dc1eb1de92d8cd14868d42a13121b7def2fee511.
+Root read implementation, independently ran it and all10negative checks.
+verified-first.json contains full evidence. First-case review marker released
+remaining13serial256MiB/task timing cases; aggregate cohort still IN PROGRESS.
+All operations/worker checkpoints remain MCP docker_exec-only.
+
+Separate PCBS SQLmetrics diagnostic (DEBUGmetrics + RESTpolling, NO timingclaims)
+uses the same e849production/build45 artifacts and approved memorysettings.
+Root read decisive SparkREST/store/CPUscan and GPUmetric/scan code.
+For BOTHCPU/GPU writers and BOTHCPU/GPU readers:
+highrange cache rows20005->5002 with pruningoff/on, residual rows1004unchanged;
+no-match cache rows20005->0, residual rows0unchanged.
+This confirms actual scan pruning rather than only direct helper behavior.
+Artifact pcbs-scan-metrics-45/verified-scan-pruning.json references captured
+SQLexecutionIDs and rawRESTplans/metrics.89completedSQLexecutions captured;
+not every last execution was captured, but ALL8required comparisonpairs were.
+The diagnostic does not modify sources or enter headline timingresults.
