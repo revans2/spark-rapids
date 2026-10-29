@@ -239,7 +239,10 @@ def prototype_counters(spark, cache_format):
         .SparkNvcompSerializer.snapshot()
     return dict(zip(['encoded_groups', 'decoded_groups', 'successful_group_encode_calls',
                      'successful_group_decode_calls', 'concatenations', 'output_batches',
-                     'output_rows', 'output_device_bytes', 'max_output_device_bytes'], list(values)))
+                     'output_rows', 'output_device_bytes', 'max_output_device_bytes',
+                     'cpu_selected_encoded_bytes', 'cpu_selected_decoded_bytes', 'cpu_selected_columns',
+                     'gpu_selected_encoded_bytes', 'gpu_selected_decoded_bytes', 'gpu_selected_columns'],
+                    list(values)))
 
 
 def create_spill_monitor(spark):

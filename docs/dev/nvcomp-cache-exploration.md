@@ -1,6 +1,6 @@
 # GPU contiguous packing and nvCOMP exploration
 
-Status: IN PROGRESS — user returned repo; current-source baseline rebuilt and verified.
+Status: IN PROGRESS — column-pruning integration and actual Spark performance reruns authorized.
 Source/provenance repairs and the corrected 256MiB/task cohort are READY FOR REVIEW.
 Current-source CPU/GPU profiling is verified and READY FOR REVIEW below.
 User-approved decoded batching and its impact reruns are READY FOR REVIEW below.
@@ -2218,3 +2218,77 @@ hardware-derived targets, accepted budgets, filters or unsupported-type behavior
 to obtain a passing result. Large strings, nested/new types, Arrow-writer indexing,
 active spill recovery and full Spark pruning performance remain unverified.
 Research status: READY FOR REVIEW. Architect alone marks DONE.
+
+## Column-pruning integration — IN PROGRESS
+
+User clarified that overnight authorization included proceeding beyond research
+to actual serializer integration and updated performance numbers. Root stopped
+too early at research; no pruning timing was available at that checkpoint.
+Continue now with column-indexed CPU/GPU records, cross-mode correctness and
+the existing size/settings matrix. Predicate integration follows separately.
+
+MCP docker_exec ONLY for all operations; repeat at worker resumptions and
+checkpoints. Root owns serial GPU/build jobs and independently verifies all
+delegated work. Native bridge and CPU-path workers own separate files; root
+owns shared wire/GPU path. Experimental wire is UNRELEASED and replaced directly.
+Preserve released production plugin, PCBS and cuDF contracts. No new knobs.
+
+Keep one spill owner per packed record, one dense selected GPU output allocation
+per row record, grouped async transfers with drained lifetimes, selected-byte
+output grouping, existing codec contexts and Spark ArrowWriter. Native metadata
+projection avoids a second GPU pack. Per-mode selected encoded/decoded byte and
+column counters must establish real pruning rather than just correct results.
+Main budgets remain16GiB heap/32GiB host including2GiB pinned/24GiB GPU/64GiB
+sampled RSS stop guard. Guard/OOM/provenance failures park without relaxed caps.
+
+No implementation/performance acceptance claim yet. Rebuild with a NEW manifest;
+build39 is historical baseline and cannot verify against edited sources.
+
+### Column directory implementation — READY FOR REVIEW; timings IN PROGRESS
+
+Build42 compiles native C++ and Scala/Java with the same source-verified PCBS/JNI
+dependencies. Experimental wire v2 replaces v1 directly, with one descriptor and
+opaque cuDF metadata per root column, followed by its independently compressed
+segments. No released format/configuration or production source changed.
+
+GPU writer retains one parent spill owner, borrows zero-copy column slices and
+compresses columns across records in batched submissions. One group host buffer
+receives async D2H payload copies and is drained before release. GPU reader gathers
+selected columns, queues grouped H2D transfers, decompresses into one dense output
+allocation per row record, and combines metadata on the host (no second GPU pack).
+Output grouping counts unique selected decoded bytes. Temporary owners drain
+before release; existing spill/retry paths remain. CPU writer reuses ArrowWriter
+and one CpuPackedCodec/iterator, indexes packed bytes once and compresses columns
+independently. CPU reader materializes only selected Arrow columns and restores
+requested ordinal order/duplicates. Count-only bypasses all payload decoding.
+
+Root inspected all decisive changes, compiled build42, and independently ran
+11 final-build correctness probes: CPU-supported uncompressed/Snappy/LZ4/Zstd
+across all four CPU/GPU write/read combinations, plus GPU probes for all seven
+codecs. Probes include ID/string-only pruning byte/root counters, reordered and
+duplicate projections, final empty/all-null string roots, multiple records,
+empty/count-only selection, CPU zero-column input, disk serialization, partial
+consumption and resource cleanup. Direct CPU columnar input remains unverified.
+Artifacts: /data/tmp/nvcomp-column-pruning-spark/probe-{cpu,gpu}-*-42 plus
+probe-gpu-snappy-01 (build42). Early probe-cpu-snappy-01 uses build41 and is
+supplemental, not the final-build acceptance evidence.
+
+Focused peer review found a directory-inclusive heap-bound check occurred after
+frame allocation. Root corrected it to calculate/check frameSize across the group
+before allocating any frame byte arrays; reviewer independently verified the fix.
+No remaining review finding. Build and runtime verification are root-owned.
+All project operations/checkpoints remain MCP docker_exec-only; workers confirmed.
+
+Snapshot appends six process-local counters: selected encoded bytes, decoded bytes
+and unique roots for CPU and GPU separately. These are successful-read payload
+observations, not total CUDA bus traffic (pointer metadata is excluded). The
+benchmark maps all15 fields. Unsupported codecs/types still fail explicitly.
+
+Serial matrix supervisor /data/tmp/nvcomp-column-pruning-spark/run_matrix.py
+completed its ten prerequisites and started56 main cases (CPU+GPU population
+separate, four sizes, CPU/GPU reads where supported; GPU-only ANS/typed Cascaded).
+One additional build42 GPU Snappy prerequisite had already passed. All main
+cases retain16GiB heap,32GiB host including2GiB pinned,24GiB GPU,64GiB sampled
+RSS stop guard,4tasks/local[2], one warmup/five measured reads. The supervisor
+parks on failure for root investigation. Timings and large-case acceptance are
+IN PROGRESS; no speedup claim yet. Predicate statistics/scan hook remain separate.

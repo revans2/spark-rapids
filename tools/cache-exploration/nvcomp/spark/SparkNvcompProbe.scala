@@ -47,11 +47,16 @@ object SparkNvcompProbe {
     println("PASS explicit CPU rejection: " + label)
   }
 
-  private def gpuRows(frame: DataFrame, expected: Array[Row], label: String): Unit = {
+  private def gpuRows(frame: DataFrame, expected: Array[Row], label: String): Array[Long] = {
+    val before = SparkNvcompSerializer.snapshot().drop(9)
+    require(before.length == 6, "Missing CPU/GPU column-pruning counters")
     require(frame.collect().sameElements(expected), label + " values/nulls/order")
     val plan = frame.queryExecution.executedPlan.toString
     require(plan.contains("GpuInMemoryTableScan"), label + " lacks actual GPU cache scan: " + plan)
+    val after = SparkNvcompSerializer.snapshot().drop(9)
+    val delta = after.zip(before).map { case (end, start) => end - start }
     println("PASS GPU cache " + label)
+    delta
   }
 
   def main(args: Array[String]): Unit = {
@@ -76,7 +81,8 @@ object SparkNvcompProbe {
       val expected = Array.tabulate[Row](1025) { i =>
         val key: java.lang.Integer = if (i % 13 == 0) null else Int.box((i * 37) % 1009)
         val text = if (i % 17 == 0) null else if (i % 19 == 0) "" else "µ-雪-" + i
-        Row(i * 17L - 991L, key, null, null, null, text, i * 29L - 17L)
+        Row(i * 17L - 991L, key, null, null, null, text, i * 29L - 17L,
+          if (i % 2 == 0) "" else null)
       }
       val cached = spark.range(0, 1025, 1, 4).selectExpr(
         "id * 17L - 991L as id",
@@ -85,15 +91,30 @@ object SparkNvcompProbe {
         "cast(null as string) as null_string",
         "case when id % 17 = 0 then cast(null as string) when id % 19 = 0 then '' " +
           "else concat('µ-雪-', cast(id as string)) end as payload",
-        "id * 29L - 17L as valid_long").persist()
+        "id * 29L - 17L as valid_long",
+        "case when id % 2 = 0 then '' else cast(null as string) end as tail_string").persist()
       try {
         require(cached.count() == expected.length, "Cache population count")
-        gpuRows(cached.selectExpr("*"), expected, "full edge values")
+        val full = gpuRows(cached.selectExpr("*"), expected, "full edge values")
+        val id = gpuRows(cached.selectExpr("id"), expected.map(r => Row(r.get(0))), "ID-only")
+        val text = gpuRows(cached.selectExpr("payload"), expected.map(r => Row(r.get(5))),
+          "string-only")
+        require(id(3) > 0 && id(3) < full(3) && id(4) > 0 && id(4) < full(4),
+          "ID-only did not prune encoded/decoded bytes")
+        require(text(3) > 0 && text(3) < full(3) && text(4) > 0 && text(4) < full(4),
+          "String-only did not prune encoded/decoded bytes")
+        require(id(5) > 0 && id(5) * expected.head.length == full(5) && text(5) == id(5),
+          "Selected-root counts")
+        gpuRows(cached.selectExpr("tail_string"), expected.map(r => Row(r.get(7))),
+          "final-root empty/null string")
+        gpuRows(cached.selectExpr("null_string"), expected.map(r => Row(r.get(4))),
+          "all-null string")
         gpuRows(cached.selectExpr("payload", "key", "id", "id as again", "null_long"),
           expected.map(r => Row(r.get(5), r.get(1), r.get(0), r.get(0), r.get(3))),
           "projected/reordered/duplicate fields")
         val count = cached.selectExpr("count(*) as n")
-        gpuRows(count, Array(Row(1025L)), "count-only empty selection")
+        val countDelta = gpuRows(count, Array(Row(1025L)), "count-only empty selection")
+        require(countDelta.forall(_ == 0), "Count-only scan decoded column payload")
         require(count.queryExecution.executedPlan.collect {
           case scan: GpuInMemoryTableScanExec => scan.attributes
         }.exists(_.isEmpty), "Count-only GPU scan did not prune every selected attribute")

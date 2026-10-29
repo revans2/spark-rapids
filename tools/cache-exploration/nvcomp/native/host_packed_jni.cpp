@@ -16,6 +16,7 @@
 #include <cudf/contiguous_split.hpp>
 #include <cudf/table/table_view.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -137,6 +138,144 @@ void check_column(int type, int rows, int nulls, jlong data, jlong mask, jlong o
   }
 }
 
+
+std::vector<std::uint8_t> read_metadata(JNIEnv* env, jbyteArray array)
+{
+  require(array != nullptr, "Null packed metadata");
+  auto size = env->GetArrayLength(array);
+  require(size > 0, "Empty packed metadata");
+  std::vector<std::uint8_t> bytes(size);
+  env->GetByteArrayRegion(array, 0, size, reinterpret_cast<jbyte*>(bytes.data()));
+  if (env->ExceptionCheck()) throw std::runtime_error("Cannot read packed metadata");
+  return bytes;
+}
+
+jbyteArray metadata_array(JNIEnv* env, std::vector<std::uint8_t> const& metadata)
+{
+  require(metadata.size() <= static_cast<std::size_t>(std::numeric_limits<jsize>::max()),
+          "Metadata exceeds Java array length");
+  auto result = env->NewByteArray(static_cast<jsize>(metadata.size()));
+  if (result) env->SetByteArrayRegion(result, 0, static_cast<jsize>(metadata.size()),
+                                     reinterpret_cast<jbyte const*>(metadata.data()));
+  return result;
+}
+
+// Validate metadata-derived spans without dereferencing the possibly-device pointers.
+void check_span(cudf::column_view const& col, std::uint8_t const* base,
+                std::size_t length, bool gpu_order)
+{
+  auto type = static_cast<int>(col.type().id());
+  require(col.size() > 0 && col.offset() == 0 && col.null_count() >= 0 &&
+            col.null_count() <= col.size(), "Invalid packed row/null count");
+  require(type == 3 || type == 4 || type == 23, "Packed index supports int/long/string only");
+  auto data = pointer_offset(col.head<void>(), base, length);
+  auto mask = pointer_offset(col.null_mask(), base, length);
+  if (mask == -1) require(col.null_count() == 0, "Nullable column lacks validity buffer");
+  else check_buffer(mask, ((static_cast<std::uint64_t>(col.size()) + 31) / 32) * 4,
+                    length, 4);
+  if (type == 23) {
+    require(col.num_children() == 1, "Expected one string offsets child");
+    auto const& child = col.child(0);
+    require(child.type().id() == cudf::type_id::INT32 &&
+              static_cast<std::int64_t>(child.size()) == static_cast<std::int64_t>(col.size()) + 1 &&
+              child.offset() == 0 && child.null_count() == 0 && child.num_children() == 0,
+            "Invalid string offsets child");
+    auto offsets = pointer_offset(child.head<void>(), base, length);
+    check_buffer(offsets, (static_cast<std::uint64_t>(col.size()) + 1) * 4, length, 4);
+    if (data != -1) {
+      check_buffer(data, 0, length, 1);
+      // Validated for this pinned GPU packer only; CPU layout stores offsets before chars.
+      if (gpu_order) require(data <= offsets, "Unrecognized GPU chars/offsets order");
+    }
+  } else {
+    require(col.num_children() == 0, "Unexpected fixed-width children");
+    check_buffer(data, static_cast<std::uint64_t>(col.size()) * (type == 3 ? 4 : 8),
+                 length, type == 3 ? 4 : 8);
+  }
+}
+
+struct column_index {
+  std::vector<jlong> ranges;
+  std::vector<std::vector<std::uint8_t>> metadata;
+};
+
+column_index index_columns(cudf::table_view const& table, std::uint8_t const* base,
+                           std::size_t length, bool host)
+{
+  require(table.num_columns() > 0 && table.num_rows() > 0, "Empty packed table");
+  require(static_cast<std::uint64_t>(table.num_columns()) * 2 <=
+            std::numeric_limits<jsize>::max(), "Too many packed columns");
+  struct column_span { int ordinal; jlong start; };
+  std::vector<column_span> spans;
+  for (int i = 0; i < table.num_columns(); ++i) {
+    auto const& col = table.column(i);
+    check_span(col, base, length, !host);
+    jlong start = static_cast<jlong>(length);
+    auto include = [&](void const* pointer) {
+      auto pos = pointer_offset(pointer, base, length);
+      if (pos >= 0) start = std::min(start, pos);
+    };
+    include(col.head<void>());
+    include(col.null_mask());
+    if (col.type().id() == cudf::type_id::STRING) include(col.child(0).head<void>());
+    require(start < static_cast<jlong>(length) && start % 64 == 0,
+            "Missing or unaligned packed root buffers");
+    spans.push_back({i, start});
+  }
+  std::sort(spans.begin(), spans.end(), [](auto const& a, auto const& b) {
+    return a.start < b.start;
+  });
+  require(spans.front().start == 0, "Unrecognized packed prefix");
+  column_index result;
+  result.ranges.resize(static_cast<std::size_t>(table.num_columns()) * 2);
+  result.metadata.resize(table.num_columns());
+  for (std::size_t i = 0; i < spans.size(); ++i) {
+    auto const& s = spans[i];
+    auto end = i + 1 < spans.size() ? spans[i + 1].start : static_cast<jlong>(length);
+    require(end > s.start && end % (host ? 64 : 8) == 0,
+            "Overlapping or unaligned packed column span");
+    auto bytes = static_cast<std::size_t>(end - s.start);
+    auto column_base = base + s.start;
+    auto const& col = table.column(s.ordinal);
+    check_span(col, column_base, bytes, !host);
+    if (host) {
+      auto type = static_cast<int>(col.type().id());
+      check_column(type, col.size(), col.null_count(),
+                   pointer_offset(col.head<void>(), column_base, bytes),
+                   pointer_offset(col.null_mask(), column_base, bytes),
+                   type == 23 ? pointer_offset(col.child(0).head<void>(), column_base, bytes) : -1,
+                   column_base, bytes);
+    }
+    result.ranges[s.ordinal * 2] = s.start;
+    result.ranges[s.ordinal * 2 + 1] = static_cast<jlong>(bytes);
+    result.metadata[s.ordinal] = cudf::pack_metadata(
+      cudf::table_view(std::vector<cudf::column_view>{col}), column_base, bytes);
+  }
+  return result;
+}
+
+jobjectArray index_array(JNIEnv* env, column_index const& index)
+{
+  auto object_class = env->FindClass("java/lang/Object");
+  auto bytes_class = env->FindClass("[B");
+  if (!object_class || !bytes_class) return nullptr;
+  auto result = env->NewObjectArray(2, object_class, nullptr);
+  auto ranges = env->NewLongArray(static_cast<jsize>(index.ranges.size()));
+  auto metadata = env->NewObjectArray(static_cast<jsize>(index.metadata.size()), bytes_class, nullptr);
+  if (!result || !ranges || !metadata) return nullptr;
+  env->SetLongArrayRegion(ranges, 0, static_cast<jsize>(index.ranges.size()), index.ranges.data());
+  for (std::size_t i = 0; i < index.metadata.size(); ++i) {
+    auto bytes = metadata_array(env, index.metadata[i]);
+    if (!bytes) return nullptr;
+    env->SetObjectArrayElement(metadata, static_cast<jsize>(i), bytes);
+    env->DeleteLocalRef(bytes);
+    if (env->ExceptionCheck()) return nullptr;
+  }
+  env->SetObjectArrayElement(result, 0, ranges);
+  env->SetObjectArrayElement(result, 1, metadata);
+  return result;
+}
+
 void throw_java(JNIEnv* env, std::exception const& failure)
 {
   if (!env->ExceptionCheck()) {
@@ -252,6 +391,96 @@ Java_org_apache_spark_sql_cacheexploration_HostPackedBridge_parse(
       env->SetLongArrayRegion(result, 0, static_cast<jsize>(descriptors.size()), descriptors.data());
     }
     return result;
+  } catch (std::exception const& failure) {
+    throw_java(env, failure);
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_org_apache_spark_sql_cacheexploration_HostPackedBridge_indexDevice(
+  JNIEnv* env, jclass, jbyteArray java_metadata, jlong address, jlong length)
+{
+  try {
+    require(address != 0 && length > 0, "Invalid device packed allocation");
+    auto base = static_cast<std::uintptr_t>(address);
+    require(static_cast<std::uint64_t>(length) <=
+              std::numeric_limits<std::uintptr_t>::max() - base, "Packed address overflow");
+    auto metadata = read_metadata(env, java_metadata);
+    auto pointer = reinterpret_cast<std::uint8_t const*>(base);
+    auto table = cudf::unpack(std::span<std::uint8_t const>(metadata), pointer);
+    return index_array(env, index_columns(table, pointer, static_cast<std::size_t>(length), false));
+  } catch (std::exception const& failure) {
+    throw_java(env, failure);
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_org_apache_spark_sql_cacheexploration_HostPackedBridge_indexHost(
+  JNIEnv* env, jclass, jbyteArray java_metadata, jbyteArray java_packed)
+{
+  try {
+    auto metadata = read_metadata(env, java_metadata);
+    column_index index;
+    {
+      pinned_bytes packed(env, java_packed);
+      auto table = cudf::unpack(std::span<std::uint8_t const>(metadata), packed.data);
+      index = index_columns(table, packed.data, packed.length, true);
+    }
+    // Allocate Java results only after releasing the borrowed critical packed array.
+    return index_array(env, index);
+  } catch (std::exception const& failure) {
+    throw_java(env, failure);
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_org_apache_spark_sql_cacheexploration_HostPackedBridge_project(
+  JNIEnv* env, jclass, jobjectArray java_metadata, jlongArray java_lengths)
+{
+  try {
+    require(java_metadata != nullptr, "Null column metadata array");
+    auto lengths = read_array<jlong>(env, java_lengths);
+    require(!lengths.empty() &&
+              lengths.size() == static_cast<std::size_t>(env->GetArrayLength(java_metadata)),
+            "Projected metadata/length counts differ or are empty");
+    // Synthetic addresses are never dereferenced. pack_metadata only records offsets.
+    constexpr std::uintptr_t synthetic_base = 0x100000000ULL;
+    std::uint64_t total = 0;
+    for (auto length : lengths) {
+      require(length > 0 && length % 8 == 0, "Invalid projected column span length");
+      require(static_cast<std::uint64_t>(length) <=
+                static_cast<std::uint64_t>(std::numeric_limits<jint>::max()) - total,
+              "Projected packed size exceeds Java array bound");
+      total += length;
+    }
+    require(total <= std::numeric_limits<std::uintptr_t>::max() - synthetic_base,
+            "Projected address overflow");
+    std::vector<cudf::column_view> columns;
+    columns.reserve(lengths.size());
+    std::uint64_t position = 0;
+    cudf::size_type rows = 0;
+    for (std::size_t i = 0; i < lengths.size(); ++i) {
+      auto array = static_cast<jbyteArray>(
+        env->GetObjectArrayElement(java_metadata, static_cast<jsize>(i)));
+      if (env->ExceptionCheck()) return nullptr;
+      auto metadata = read_metadata(env, array);
+      env->DeleteLocalRef(array);
+      auto base = reinterpret_cast<std::uint8_t const*>(synthetic_base + position);
+      auto table = cudf::unpack(std::span<std::uint8_t const>(metadata), base);
+      require(table.num_columns() == 1, "Projection expects one-column metadata");
+      auto const& col = table.column(0);
+      check_span(col, base, static_cast<std::size_t>(lengths[i]), false);
+      require(i == 0 || col.size() == rows, "Projected columns have different row counts");
+      rows = col.size();
+      columns.push_back(col);
+      position += lengths[i];
+    }
+    auto metadata = cudf::pack_metadata(cudf::table_view(columns),
+      reinterpret_cast<std::uint8_t const*>(synthetic_base), static_cast<std::size_t>(total));
+    return metadata_array(env, metadata);
   } catch (std::exception const& failure) {
     throw_java(env, failure);
     return nullptr;

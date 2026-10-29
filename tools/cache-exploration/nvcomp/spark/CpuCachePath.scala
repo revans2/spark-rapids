@@ -164,14 +164,25 @@ object CpuCachePath {
           }
         }
         writer.finish()
-        if (types.isEmpty) {
-          SparkNvcompSerializer.cpuWire(rows, Array.emptyByteArray, Array.emptyByteArray,
-            Array.emptyByteArray, codec)
+        val columns = if (types.isEmpty) {
+          Array.empty[SparkNvcompSerializer.CpuColumn]
         } else {
           val packed = pack(writer.root, types)
-          SparkNvcompSerializer.cpuWire(rows, packed.metadata, packed.bytes,
-            context.encode(packed.bytes, 0, packed.bytes.length), codec)
+          val indexed = HostPackedBridge.indexHost(packed.metadata, packed.bytes)
+          val ranges = indexed(0).asInstanceOf[Array[Long]]
+          val metadata = indexed(1).asInstanceOf[Array[Array[Byte]]]
+          require(ranges.length == types.length * 2 && metadata.length == types.length,
+            "CPU packed column index count")
+          types.indices.map { i =>
+            val start = Math.toIntExact(ranges(i * 2))
+            val length = Math.toIntExact(ranges(i * 2 + 1))
+            require(start >= 0 && length >= 0 && start <= packed.bytes.length - length,
+              "CPU packed column index range")
+            SparkNvcompSerializer.CpuColumn(metadata(i), length.toLong,
+              context.encode(packed.bytes, start, length))
+          }.toArray
         }
+        SparkNvcompSerializer.cpuWire(rows, columns, codec)
       } catch { case failure: Throwable => close(); throw failure }
     }
 
@@ -192,6 +203,10 @@ object CpuCachePath {
       indices: Array[Int], codec: String) extends Iterator[InternalRow] with AutoCloseable {
     private val context = new CpuPackedCodec(codec, ChunkBytes.toInt)
     private val types = schema.fields.map(_.dataType)
+    private val uniqueIndices = indices.distinct
+    private val selectedSchema = StructType(uniqueIndices.map(schema.fields))
+    private val selectedTypes = uniqueIndices.map(types)
+    private val outputIndices = indices.map(uniqueIndices.indexOf(_))
     private val projection = UnsafeProjection.create(indices.map(types))
     private var root: VectorSchemaRoot = null
     private var rows: Iterator[InternalRow] = Iterator.empty
@@ -210,26 +225,28 @@ object CpuCachePath {
       if (indices.isEmpty) {
         rows = Iterator.fill(record.rows)(InternalRow.empty)
       } else {
-        val bytes = if (record.lengths.length == 1) {
-          context.decode(record.bytes, record.payloadOffsets(0), record.payloadLengths(0),
-            Math.toIntExact(record.packedBytes))
-        } else {
-          val result = new Array[Byte](Math.toIntExact(record.packedBytes))
-          record.lengths.indices.foreach { i =>
-            val part = context.decode(record.bytes, record.payloadOffsets(i),
-              record.payloadLengths(i), Math.toIntExact(record.lengths(i)))
-            System.arraycopy(part, 0, result, Math.toIntExact(record.offsets(i)), part.length)
-          }
-          result
-        }
-        val descriptors = HostPackedBridge.parse(record.metadata, bytes)
-        require(descriptors.length == types.length * 6, "CPU packed column count")
-        root = VectorSchemaRoot.create(ArrowUtils.toArrowSchema(arrowSchema(schema), "UTC", true),
+        require(record.columns.length == types.length, "CPU packed column count")
+        root = VectorSchemaRoot.create(
+          ArrowUtils.toArrowSchema(arrowSchema(selectedSchema), "UTC", true),
           ArrowUtils.rootAllocator)
         val vectors = root.getFieldVectors.asScala.toArray
-        vectors.indices.foreach { i =>
-          val base = i * 6
-          require(descriptors(base) == typeId(types(i)) && descriptors(base + 1) == record.rows,
+        uniqueIndices.indices.foreach { i =>
+          val column = record.columns(uniqueIndices(i))
+          val bytes = if (column.lengths.length == 1) {
+            context.decode(record.bytes, column.payloadOffsets(0), column.payloadLengths(0),
+              Math.toIntExact(column.packedBytes))
+          } else {
+            val result = new Array[Byte](Math.toIntExact(column.packedBytes))
+            column.lengths.indices.foreach { segment =>
+              val part = context.decode(record.bytes, column.payloadOffsets(segment),
+                column.payloadLengths(segment), Math.toIntExact(column.lengths(segment)))
+              System.arraycopy(part, 0, result, Math.toIntExact(column.offsets(segment)), part.length)
+            }
+            result
+          }
+          val descriptors = HostPackedBridge.parse(column.metadata, bytes)
+          require(descriptors.length == 6, "CPU selected packed column count")
+          require(descriptors(0) == typeId(selectedTypes(i)) && descriptors(1) == record.rows,
             "CPU packed column type/rows mismatch")
           val vector = vectors(i)
           vector.setInitialCapacity(record.rows)
@@ -242,37 +259,38 @@ object CpuCachePath {
             }
             destination.setBytes(0, bytes, offset.toInt, length)
           }
-          val mask = descriptors(base + 4)
+          val mask = descriptors(4)
           if (mask < 0) {
             vector.getValidityBuffer.setOne(0, (record.rows.toLong + 7) / 8)
           } else {
             copy(mask, (record.rows + 7) / 8, vector.getValidityBuffer)
           }
-          types(i) match {
+          selectedTypes(i) match {
             case IntegerType =>
-              copy(descriptors(base + 3), Math.multiplyExact(record.rows, 4), vector.getDataBuffer)
+              copy(descriptors(3), Math.multiplyExact(record.rows, 4), vector.getDataBuffer)
             case LongType =>
-              copy(descriptors(base + 3), Math.multiplyExact(record.rows, 8), vector.getDataBuffer)
+              copy(descriptors(3), Math.multiplyExact(record.rows, 8), vector.getDataBuffer)
             case StringType =>
-              copy(descriptors(base + 5), Math.multiplyExact(record.rows + 1, 4),
+              copy(descriptors(5), Math.multiplyExact(record.rows + 1, 4),
                 vector.getOffsetBuffer)
               val chars = vector.getOffsetBuffer.getInt(record.rows.toLong * 4)
-              val charStart = descriptors(base + 3)
+              val charStart = descriptors(3)
               require(chars >= 0 && (chars == 0 ||
                 (charStart >= 0 && charStart <= bytes.length.toLong - chars)),
                 "CPU decoded string payload range")
               val variable = vector.asInstanceOf[org.apache.arrow.vector.VarCharVector]
               while (variable.getDataBuffer.capacity() < chars) variable.reallocDataBuffer()
-              if (chars != 0) copy(descriptors(base + 3), chars, variable.getDataBuffer)
+              if (chars != 0) copy(descriptors(3), chars, variable.getDataBuffer)
               variable.setLastSet(record.rows - 1)
             case _ => throw new UnsupportedOperationException("Unsupported CPU decoded type")
           }
           vector.setValueCount(record.rows)
         }
         root.setRowCount(record.rows)
-        val batch = new ColumnarBatch(indices.map(i =>
+        val batch = new ColumnarBatch(outputIndices.map(i =>
           new ArrowColumnVector(vectors(i)).asInstanceOf[ColumnVector]), record.rows)
         rows = batch.rowIterator().asScala
+        SparkNvcompSerializer.recordCpuRead(uniqueIndices.map(record.columns))
       }
     }
 

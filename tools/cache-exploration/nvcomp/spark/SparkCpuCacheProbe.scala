@@ -19,12 +19,18 @@ import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 
 /** Real Spark cache CPU/GPU interoperability prerequisites; no performance claims. */
 object SparkCpuCacheProbe {
-  private def check(frame: DataFrame, expected: Array[Row], gpu: Boolean, label: String): Unit = {
+  private def check(frame: DataFrame, expected: Array[Row], gpu: Boolean,
+      label: String): Array[Long] = {
+    val before = SparkNvcompSerializer.snapshot().drop(9)
+    require(before.length == 6, "Missing CPU/GPU column-pruning counters")
     require(frame.collect().sameElements(expected), label + " values/nulls/order")
     val plan = frame.queryExecution.executedPlan.toString()
     require(plan.contains("GpuInMemoryTableScan") == gpu, label + " execution mode: " + plan)
     require(plan.contains("InMemoryTableScan"), label + " missing cache read")
+    val after = SparkNvcompSerializer.snapshot().drop(9)
+    val delta = after.zip(before).map { case (end, start) => end - start }
     println("PASS " + label)
+    delta
   }
 
   def main(args: Array[String]): Unit = {
@@ -61,12 +67,28 @@ object SparkCpuCacheProbe {
           for (readGpu <- Seq(false, true)) {
             spark.conf.set("spark.rapids.sql.enabled", readGpu)
             val label = name + " writeGpu=" + writeGpu + " readGpu=" + readGpu
-            check(cached.selectExpr("*"), expected, readGpu, label + " full")
+            val full = check(cached.selectExpr("*"), expected, readGpu, label + " full")
+            val id = check(cached.selectExpr("id"), expected.map(r => Row(r.get(0))),
+              readGpu, label + " ID-only")
+            val text = check(cached.selectExpr("payload"), expected.map(r => Row(r.get(2))),
+              readGpu, label + " string-only")
+            val base = if (readGpu) 3 else 0
+            require(id(base) > 0 && id(base) < full(base) &&
+              id(base + 1) > 0 && id(base + 1) < full(base + 1),
+              label + " ID-only did not prune encoded/decoded bytes")
+            require(text(base) > 0 && text(base) < full(base) &&
+              text(base + 1) > 0 && text(base + 1) < full(base + 1),
+              label + " string-only did not prune encoded/decoded bytes")
+            require(id(base + 2) > 0 && id(base + 2) * expected.head.length == full(base + 2) &&
+              text(base + 2) == id(base + 2), label + " selected-root counts")
+            check(cached.selectExpr("empty_string"), expected.map(r => Row(r.get(5))),
+              readGpu, label + " final-root all-null string")
             check(cached.selectExpr("payload", "key", "id", "id as again"),
               expected.map(r => Row(r.get(2), r.get(1), r.get(0), r.get(0))),
               readGpu, label + " projection/reorder/duplicate")
-            check(cached.selectExpr("count(*) as n"), Array(Row(1025L)),
+            val count = check(cached.selectExpr("count(*) as n"), Array(Row(1025L)),
               readGpu, label + " count-only")
+            require(count.forall(_ == 0), label + " count-only decoded column payload")
           }
         } finally { cached.unpersist(blocking = true) }
       }

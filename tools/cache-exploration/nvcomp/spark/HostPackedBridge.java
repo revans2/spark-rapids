@@ -13,9 +13,10 @@
 package org.apache.spark.sql.cacheexploration;
 
 /**
- * Host-only cuDF packed metadata adapter for the isolated int/long/string experiment.
- * Arrays are borrowed for the call; metadata/descriptors are newly owned. No GPU work or
- * row-to-column conversion occurs here. The pinned native build records cuDF dependencies.
+ * cuDF packed metadata adapter for the isolated int/long/string experiment.
+ * Arrays/device addresses are borrowed for the call; metadata/descriptors are newly owned.
+ * These methods inspect host metadata without GPU work or row-to-column conversion.
+ * The pinned native build records cuDF dependencies.
  */
 public final class HostPackedBridge {
   static {
@@ -37,4 +38,19 @@ public final class HostPackedBridge {
    * validity offset, string INT32-offsets offset (-1 for fixed-width columns).
    */
   public static native long[] parse(byte[] metadata, byte[] packed);
+
+  /**
+   * Returns Object[]{long[] interleavedStartsAndLengths, byte[][] rebasedColumnMetadata}.
+   * The address borrows an intact GPU packed allocation; no device bytes are read.
+   */
+  public static native Object[] indexDevice(byte[] metadata, long address, long length);
+
+  /** Same result as indexDevice, validating CPU-written buffers without column data copies. */
+  public static native Object[] indexHost(byte[] metadata, byte[] packed);
+
+  /**
+   * Combines one-column metadata for spans concatenated in the requested column order.
+   * Each raw length includes that span's padding; no packed data is accessed or copied.
+   */
+  public static native byte[] project(byte[][] columnMetadata, long[] rawLengths);
 }
