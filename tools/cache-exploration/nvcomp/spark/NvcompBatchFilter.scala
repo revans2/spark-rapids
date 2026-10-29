@@ -45,6 +45,10 @@ private[cacheexploration] object NvcompBatchFilter {
         IsNull(a)
       case EqualNullSafe(literal: Literal, a: AttributeReference) if literal.value == null =>
         IsNull(a)
+      // Spark's metrics prefix bounds use character substrings. A partial UTF8 prefix can
+      // match raw bytes yet be ordered below that substring, so retain it conservatively.
+      case StartsWith(_: AttributeReference, Literal(prefix: UTF8String, _))
+          if UTF8String.fromString(prefix.toString) != prefix => Literal(true)
       case InSet(a: AttributeReference, values) if values.exists(_ != null) =>
         // A bounding interval is conservative and avoids generating an expression per set member.
         val ordering = TypeUtils.getInterpretedOrdering(a.dataType)

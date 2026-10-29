@@ -2894,3 +2894,39 @@ GPUfull1.293/GPU-ID0.201s,4166.257MiB encodedtotal,9.760GiB sampledRSS.
 Samepredicatefull-read off->on: highquarter1.213->0.539s; no-match1.116->0.208s.
 CPUreadsNOT_RUN in thissupplement. Firstlargecase accepted after proof/log/
 counter/RSSchecks; remaining independentlargecases released withsamebudgets.
+
+### nvCOMP prefix guard / frozen timing-source preservation
+
+Root reproduced nvCOMP's inherited partialUTF8prefix false-negative using the REAL
+CPUArrowWriter->packed/uncompressed path, CUDA_VISIBLE_DEVICES empty:
+valueC3A9, prefixC3, Catalysttrue, oldfilterretained0. Applied a conservative
+normalizer guard for lossy StartsWith literals only; the default helper can still
+prune independentANDconjuncts and retainsunsafeOR. Direct rawUTF8 equality remains
+supported. The SAME CPU proof compiled withfatalwarnings passes afterguard:
+retained1, safeANDexclusion0, ORretention1, rawFFequality1, Arrowallocation0.
+Artifacts invalid-prefix-nvcomp/{before.log,after.log,NvcompInvalidPrefix.scala}.
+Added this coverage to the normal SparkPredicateProbe Snappy entry point.
+
+Mainprototype edit happened AFTER the finalfrozenbuild45 job(default2GiB) launched;
+no furtherbuild45launch is queued. RuntimeJAR/sourcebinding remains immutable for
+the running numeric job. Final source-bound rebuild/probe still pending. Do not
+call these measurements newguard-binary measurements; timedartifactremainse849/
+build45 and the fixes affect invalid-string predicates absent from numericdata.
+
+Historical inputs preserved: frozen-sources-45 has36referenced repositorysources
+matchingGit9fa1d78378cea17caf6f696a37250ed40c158ff6,949externalinputs unchanged.
+Archive manifestSHAe89d62f28e923ae7ea2cc9991168141d62ce434b495383690bc474c6a6a1f8e3.
+Root read the164line adapter, bothentrypoints andacceptancechecker, independently
+reran original/archive equality: small14verified; large6verified/1pending atcheck.
+Outputs byte-identical; corrupted disposable snapshots rejectedwithExit2 before
+results. Originallauncher/sourceguards are UNCHANGED and correctlyrejectchanged
+currentprototype sources. Use verify_archived_timing_results.py and
+verify_archived_large_gpu_results.py for historical numericresultreplay.
+AdapterSHA197aee37a9b5e8124cbcf9dc757753823a9c87a95b08d5944e9bbe07f44ea6a0.
+Bothretain allbinary/header/productionproof/runtimeorigin checks. Sourcearchive
+is a verification artifact, not runtime compatibility for obsoletecacheformats.
+
+No reply yet to optional stockSpark-scope question. BaselineSpark remains unchanged;
+a stockSparkfix is a separatefollow-up unless the user directs inclusion and
+provideswritablecheckout. This does not block guards/correctness in our serializers.
+All project work and delegated checkpoints remain MCP docker_exec-only.

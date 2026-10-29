@@ -204,6 +204,34 @@ object SparkPredicateProbe {
     println("PASS native UTF8/null/long-prefix/packed-layout edges stream=" + stream.getStream)
   }
 
+  private def invalidStringPrefixes(): Unit = {
+    val value = org.apache.spark.unsafe.types.UTF8String.fromString("é")
+    val prefix = Literal.create(org.apache.spark.unsafe.types.UTF8String.fromBytes(
+      Array(0xc3.toByte)), StringType)
+    val attribute = AttributeReference("value", StringType)()
+    val schema = StructType(Seq(StructField("value", StringType)))
+    val records = CpuCachePath.encodeRows(
+      Iterator(org.apache.spark.sql.catalyst.InternalRow(value)), schema, "uncompressed").toVector
+    require(StartsWith(Literal.create(value, StringType), prefix).eval() == true,
+      "Partial UTF8 prefix must match raw bytes")
+    def retained(predicate: Expression): Int =
+      NvcompBatchFilter.build(Seq(predicate), Seq(attribute), "uncompressed")(
+        0, records.iterator).size
+    val expression = StartsWith(attribute, prefix)
+    require(retained(expression) == 1, "Invalid prefix pruning lost a matching record")
+    val excludes = EqualTo(attribute, Literal("no-match"))
+    require(retained(And(expression, excludes)) == 0, "Independent safe AND cannot prune")
+    require(retained(Or(expression, excludes)) == 1, "Invalid prefix OR lost match")
+    val raw = Literal.create(org.apache.spark.unsafe.types.UTF8String.fromBytes(
+      Array(0xff.toByte)), StringType)
+    val rawRecords = CpuCachePath.encodeRows(
+      Iterator(org.apache.spark.sql.catalyst.InternalRow(raw.value)),
+      schema, "uncompressed").toVector
+    require(NvcompBatchFilter.build(Seq(EqualTo(attribute, raw)), Seq(attribute), "uncompressed")(
+      0, rawRecords.iterator).size == 1, "Raw UTF8 equality lost match")
+    println("PASS conservative invalid UTF8 prefix and safe AND/OR/raw equality")
+  }
+
   def main(args: Array[String]): Unit = {
     val codec = args.headOption.getOrElse("snappy")
     val spark = SparkSession.builder().appName("Cache predicate pruning")
@@ -241,6 +269,7 @@ object SparkPredicateProbe {
         }
       }
       if (codec == "snappy") {
+        invalidStringPrefixes()
         nativeStatistics(Cuda.DEFAULT_STREAM)
         withResource(new Cuda.Stream(true))(nativeStatistics)
       }
