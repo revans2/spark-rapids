@@ -73,6 +73,14 @@ private[rapids] object ParquetCachedBatchFilter {
     case _ => false
   }
 
+  // The deprecated overload is the footer-only API shared by supported Parquet versions.
+  // Its replacement requires a live reader for dictionary/bloom filtering, which is not needed.
+  @scala.annotation.nowarn("msg=method filterRowGroups in class RowGroupFilter is deprecated")
+  private def mayMatch(filter: FilterCompat.Filter,
+      footer: org.apache.parquet.hadoop.metadata.ParquetMetadata): Boolean =
+    !RowGroupFilter.filterRowGroups(filter, footer.getBlocks,
+      footer.getFileMetaData.getSchema).isEmpty
+
   def buildFilter(predicates: Seq[Expression], attributes: Seq[Attribute],
       conf: SQLConf): (Int, Iterator[CachedBatch]) => Iterator[CachedBatch] = {
     // Respect the existing Parquet pushdown controls as well as the caller's cache-pruning gate.
@@ -127,7 +135,7 @@ private[rapids] object ParquetCachedBatchFilter {
             // This overload uses only footer statistics, never dictionaries or encoded pages.
             // Legacy records may contain several groups: keep the record if any group survives.
             compiled.forall { filter =>
-              !RowGroupFilter.filterRowGroups(filter, footer.getBlocks, schema).isEmpty
+              mayMatch(filter, footer)
             }
           case _ => true
         }

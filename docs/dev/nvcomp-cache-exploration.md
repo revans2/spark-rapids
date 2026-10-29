@@ -2667,3 +2667,12 @@ decisive helper, caller and test changes. A focused independent review is runnin
 The shim preflight skill applies; final proposed-tree coverage/profile builds
 and advisory evidence must still be recorded. Current online advisory tooling
 is unavailable (gh absent); investigate base-fetch evidence before final status.
+
+First source-clean355 build rejected the deprecated footer-only RowGroupFilter
+overload under fatal warnings. Root read its bytecode: the replacement needs
+a live reader, while the older overload performs exactly statistics-only filtering.
+Kept that shared API with a narrowly matched deprecation annotation and explanatory
+comment, consistent with existing repository usage; no compiler check was disabled.
+Independent production semantic review found no actionable correctness issue.
+Upstream fetch failed: configured origin gitlab-master.nvidia.com does not resolve.
+Current-main/advisory evidence remains INCOMPLETE, not a clean compatibility claim.
