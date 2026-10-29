@@ -9,7 +9,7 @@ Configured-target batching and the 32-case size matrix are READY FOR REVIEW:
 Direct multi-boundary GPU packing and its host-CPU/kernel profiles are verified
 and READY FOR REVIEW below. CPU codec prerequisites are READY FOR REVIEW;
 CPU row/packed cache integration and first 256MiB/task comparison are
-READY FOR REVIEW below.
+READY FOR REVIEW below. CPU scaling at512/1024/2048MiB/task is IN PROGRESS.
 Large-string performance and active GPU spill/retry validation remain pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
@@ -1643,3 +1643,40 @@ No CPU512MiB/1GiB/2GiB performance sweep or representative string performance
 matrix run yet. ANS/Cascaded CPU remain unsupported. Separate-column compression,
 predicate pushdown, CPU columnar output, production integration and pressure
 testing are outside this completed bounded checkpoint. Architect alone marks DONE.
+
+## CPU scaling to512MiB/1GiB/2GiB per task — IN PROGRESS
+
+User requested scaling the successful CPU cohort. Reuse finalbuild39 unchanged:
+same6formats,CPU population,CPU/GPU read modes,4tasks/local2/two waves,1warmup
+and5measured full/ID reads. Extend to512/1024/2048MiB/task, total2/4/8GiB.
+No implementation/configuration/resource-budget changes.16GiBheap,
+32GiBmanagedhost including2GiBpinned,24GiBGPU and64GiBsampledRSS guard.
+Longer900s job timeout accommodates scale; it is not a memory/algorithm cap.
+Root owns serial jobs. Review each size before proceeding to the next; stop
+failed cases without changing caps, inspect saved failure evidence and continue
+only independent safe work.
+
+Release classification unchanged: experimental tools UNRELEASED; production
+frozen released contracts unaffected. No source changes or compatibility paths.
+All project operations MUST continue through MCP docker_exec; root and verifier
+worker confirmed this at handoff/checkpoint. No worker GPU/build/benchmark jobs.
+
+Success requires correct aggregates, complete execution-mode/timing observations,
+pinned provenance and budget evidence. Spill/disk/eviction are measured outcomes,
+not forced failures. Do not carry previous all-resident/zero-spill assumptions
+into a scale verifier. Preserve metric arithmetic/coverage and explicitly
+distinguish unavailable CPU RAPIDS metrics from observed zero. If eviction
+causes recomputation, label timings/serializer accumulators accordingly;
+post-run payload audit can recompute and is not a retained-memory statistic.
+
+Safe prerequisite: current CPU uncompressed full record uses32752rows,
+8,380,480packedbytes +1296metadata +72framing =8,381,848-byte arrays,
+below8MiB. This differs from prior GPU4MiB+metadata arrays consuming8MiB G1
+regions. Predicted2GiB/task CPU retained humongous regions are~8.03GiB total,
+not~16GiB. No evidence of unavoidable old failure; larger heap pressure remains
+empirical. No heap increase, OOM stress or algorithm change authorized/inferred.
+
+First512MiB/task Snappy run completed exit0/no guard, resultPASS with all4
+partitions resident/disk0. Full scale verifier/provenance crosscheck pending;
+do not present the entire size matrix as completed.
+Artifacts /data/tmp/nvcomp-spark-probe/cpu-scale-{format}-fixed-{512,1024,2048}.
