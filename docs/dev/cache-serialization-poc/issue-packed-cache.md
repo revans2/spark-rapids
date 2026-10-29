@@ -1,5 +1,9 @@
 # Explore a shared CPU/GPU packed-column cache
 
+Built on [PR #16633](https://github.com/NVIDIA/cudf-spark/pull/16633), which provides
+the small-record PCBS baseline. This issue compares packed-column compression,
+CPU fallback and pruning against that improved PCBS implementation.
+
 This Spark cache POC uses small packed records with independently compressed
 columns. CPU population reuses Spark ArrowWriter and task-owned codec contexts;
 GPU population uses cuDF contiguous packing and batched chunk compression. A

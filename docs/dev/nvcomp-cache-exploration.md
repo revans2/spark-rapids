@@ -1,6 +1,6 @@
 # GPU contiguous packing and nvCOMP exploration
 
-Status: LOCAL PROOF OF CONCEPT READY FOR REVIEW. The current publication handoff,
+Status: VALIDATING PROOF-OF-CONCEPT UPMERGE. The current publication handoff,
 two issue drafts, figures and result summary are in
 [cache-serialization-poc/README.md](cache-serialization-poc/README.md).
 Only the architect marks DONE; production/cross-version acceptance is INCOMPLETE.
@@ -3114,3 +3114,18 @@ Root checked table equality and local links; focused peer review found no issue.
 git diff --check PASS. Documentation only; no runtime changes or benchmark runs.
 Release classification is unchanged. All work/review used MCP docker_exec,
 confirmed by the worker. User review is next; nothing published.
+
+### Production baseline upmerge — IN PROGRESS
+
+Merged productionPR16633 headf409b860fa (main49d3be946c) into POC4d9b6689c6
+without conflicts. PRhead independently verified against GitHub. All prior
+exploration commits remain. No algorithm, format, settings or scope changes.
+Released PCBS contracts remain preserved; productionPR additions and the packed
+format are still unreleased. No compatibility adapters added.
+
+IssuePCBS now referencesPR16633 and focuses on additional footer-statistics
+pruning, with pairedCPU/GPU controls and a new chart. Packed issue identifies
+that improvedPCBS baseline. Timing data remains build45, not an upmerge rerun.
+Source/claim reviews and chart verification use MCP docker_exec exclusively;
+workers confirm this at checkpoints. Current355build/probes and shim checks
+are pending; broader compatibility remains incomplete. No push/issues filed.

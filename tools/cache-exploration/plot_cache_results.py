@@ -157,6 +157,58 @@ def plot_pcbs_history(summary, output):
                 "Historical PCBS final-policy before/after results; raw archive unavailable.")
 
 
+def plot_pcbs_pruning(summary, output):
+    cases = (("256m", "cpu", "cpu", 256, "CPU-written / CPU-read · 256 MiB/task"),
+             ("2g-gpu", "gpu", "gpu", 2048, "GPU-written / GPU-read · 2 GiB/task"))
+    predicates = ("all-match", "range-match", "no-match")
+    positions = np.arange(len(predicates))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6.5))
+    plotted = []
+    for ax, (name, writer, reader, task_mib, title) in zip(axes, cases):
+        cohort = next(item for item in summary["cohorts"] if item["name"] == name)
+        rows = [row for row in cohort["results"]
+                if row["codec"] == "pcbs" and row["writer"] == writer]
+        assert len(rows) == 1 and rows[0]["task_mib"] == task_mib
+        row = rows[0]
+        for shift, enabled, label, color in (
+                (-0.19, False, "Pruning OFF", "#777777"),
+                (0.19, True, "Pruning ON", "#0072B2")):
+            values = []
+            for predicate in predicates:
+                matches = [sample["median_s"] for sample in row["predicate_medians"]
+                           if sample["mode"] == reader and not sample["narrow"]
+                           and sample["label"] == predicate
+                           and sample["pruning_enabled"] is enabled]
+                assert len(matches) == 1
+                values.append(matches[0])
+            bars = ax.bar(positions + shift, values, width=0.36, color=color, label=label)
+            np.testing.assert_allclose([bar.get_height() for bar in bars], values)
+            ax.bar_label(bars, labels=[format(value, ".3f") for value in values],
+                         padding=4, fontsize=11)
+            plotted.append({"cohort": name, "pruning_enabled": enabled, "seconds": values})
+        ax.set(title=title, ylabel="Median full-read time (seconds)", xticks=positions,
+               xticklabels=("All rows match", "Highest quarter", "No rows match"))
+        ax.set_ylim(0, ax.get_ylim()[1] * 1.12)
+        ax.grid(axis="y", alpha=0.2)
+        ax.set_axisbelow(True)
+        ax.spines[["top", "right"]].set_visible(False)
+    fig.suptitle("PCBS cache predicate pruning", fontsize=19, y=0.98)
+    fig.text(0.5, 0.91, "Same predicates and resident cache; separate CPU/GPU scales",
+             ha="center", fontsize=12)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.12),
+               ncol=2, frameon=False, fontsize=12)
+    fig.text(0.5, 0.035,
+             "Historical build 45 · full 32-column reads · 4 tasks / 2 task slots\n"
+             "Median of 5 samples after 1 warmup · instrumented Spark 3.5.5, tracing OFF\n"
+             "Source: results.json; measurements predate the production-branch upmerge",
+             ha="center", fontsize=10.5, linespacing=1.45)
+    fig.subplots_adjust(top=0.81, bottom=0.29, left=0.065, right=0.98, wspace=0.19)
+    save_figure(fig, output, "pcbs-pruning",
+                "Historical paired PCBS predicate-pruning measurements, before the upmerge.")
+    return plotted
+
+
 def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -175,12 +227,14 @@ def main():
     })
     crossings = plot_cpu_reuse(summary, args.output)
     plot_pcbs_history(summary, args.output)
+    pruning = plot_pcbs_pruning(summary, args.output)
     print(json.dumps({
         "matplotlib": matplotlib.__version__,
         "results_sha256": hashlib.sha256(raw).hexdigest(),
         "snappy_default_crossover_reads": crossings,
         "arrays_checked_against_results": True,
-        "figures": ["cpu-reuse-cost", "pcbs-historical-tradeoffs"],
+        "pcbs_pruning": pruning,
+        "figures": ["cpu-reuse-cost", "pcbs-historical-tradeoffs", "pcbs-pruning"],
     }, sort_keys=True))
 
 

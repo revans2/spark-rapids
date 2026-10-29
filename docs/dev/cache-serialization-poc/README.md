@@ -1,9 +1,10 @@
 # Cache serialization proof of concept
 
-Branch `poc/cache-serialization`, based on `pcbs-rowgroup-production` at
-`77afe5a90f`. **READY FOR REVIEW**; not pushed and no issues filed.
+Branch `poc/cache-serialization`, upmerged from production
+[PR #16633](https://github.com/NVIDIA/cudf-spark/pull/16633) at `f409b860fa`,
+including main `49d3be946c`. Validation of the upmerge is in progress.
 
-- [PCBS improvements](issue-pcbs.md)
+- [Additional PCBS predicate pruning](issue-pcbs.md)
 - [Shared CPU/GPU packed cache](issue-packed-cache.md)
 - [Results](results.json) · [Detailed tracker](../nvcomp-cache-exploration.md)
 
@@ -18,9 +19,10 @@ and `tests`; the experimental serializer and native bridges are under
 for the tested configuration. The stock Spark UTF-8-prefix pruning bug remains
 a separate follow-up, guarded locally.
 
-This continuation branch inherits metadata/Delta changes and historical Vortex
-work; its complete diff against main is not cache-only. Vortex is outside both
-issues. Released PCBS contracts are preserved; the packed wire format is unreleased.
+Small-record batching belongs to PR #16633. The POC adds PCBS predicate pruning
+and the experimental packed cache; historical Vortex work is outside both issues.
+Released PCBS contracts are preserved. PR #16633 and the packed wire format are
+unreleased; obsolete experimental formats need no compatibility support.
 
 ## Build
 
@@ -38,7 +40,7 @@ spark-rapids-jni build tree, linking `libcudf.so` from the pinned artifact. Its
 bounds-checked `cudf::unpack` overload is exported by that runtime but absent
 from the mounted public header: a pinned POC dependency, not a portable ABI.
 
-Final plugin build (`rapids-plugin-mvn` is the sandbox Maven wrapper):
+Historical build46 commands (`rapids-plugin-mvn` is the sandbox Maven wrapper):
 
 ```text
 rapids-plugin-mvn -o -nsu -Dbuildver=355 \
@@ -82,7 +84,8 @@ python3 tools/cache-exploration/plot_cache_results.py \
 ```
 
 Plotting requires matplotlib. Reuse curves model `P + N × R` from measured phases;
-crossovers use full precision. PCBS charts use the historical final-policy report.
+crossovers use full precision. `pcbs-pruning.png` shows paired pruning controls;
+`pcbs-historical-tradeoffs.png` retains the earlier batching results for reference.
 
 ## Verification and provenance
 
@@ -92,11 +95,11 @@ crossovers use full precision. PCBS charts use the historical final-policy repor
 | Build45 numeric timings: plugin | `e8491e4f5684f2b338445b155533cf676e3eed44` |
 | Build46 final guard validation | `91a86cdc3c7a7e5a55dcfc965dbe8abb01edcb23` |
 
-The numeric fixture does not exercise the later UTF-8 fixes. Final Spark 3.5.5
-Maven verify, twelve packaged-artifact PCBS filter tests, Snappy/PCBS predicate
-probes and Snappy CPU/GPU interoperability passed. Tests ran separately from the
-Maven command above. Other codecs and statistics/stream cases have earlier
-prerequisite coverage in the tracker.
+The numeric fixture does not exercise the later UTF-8 fixes. Historical build46
+passed Spark 3.5.5 Maven verify, twelve PCBS filter tests, Snappy/PCBS predicate
+probes and Snappy CPU/GPU interoperability. Tests ran separately from the Maven
+command above. Other codecs and statistics/stream cases have earlier coverage
+in the tracker.
 
 All 21 current cases were replay-verified at handoff: fourteen 256 MiB/task cases
 and seven 2 GiB/task GPU-only cases, zero failed/invalid. `results.json` contains
@@ -108,7 +111,8 @@ Historical PCBS results come from the Git report `91d748957d`; their original
 `/data/pcbs-oom` archive is unavailable. Later CPU lazy-writer cleanup was validated
 separately, not retimed in that report.
 
-Cross-version acceptance remains **INCOMPLETE**: upstream fetch/GitHub tooling
-were unavailable for current-main/advisory checks; Spark 3.3 compilation failed
-on join symbols in unchanged files without a successful baseline rebuild.
-No 3.3/4.x/Databricks success or spill-recovery validation is claimed.
+Cross-version acceptance remains **INCOMPLETE**. The earlier Spark 3.3 attempt
+failed on join symbols without a baseline rebuild; current-main validation is
+being refreshed after this upmerge. No 3.3/4.x/Databricks success or spill-recovery
+validation is claimed. Timing data and reuse curves remain historical; no
+post-upmerge performance rerun is implied.

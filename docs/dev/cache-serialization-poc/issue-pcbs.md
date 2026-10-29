@@ -1,76 +1,52 @@
-# Reduce Parquet cache heap pressure while preserving large GPU batches
+# Add predicate pruning to Parquet cached batches on CPU and GPU
 
-PCBS can cache large Parquet arrays that accumulate between Spark's count-based
-unroll checks and serialization resets. This POC stores approximately 8 MiB
-uncompressed row groups, then bundles them toward the configured GPU batch target.
+[PR #16633](https://github.com/NVIDIA/cudf-spark/pull/16633) provides small stored
+records and bundled GPU reads. This POC builds on that baseline, adding
+statistics-based cache pruning without changing the writer or cache format.
+Parquet already provides column pruning.
 
-Records are extracted without reencoding column chunks and materialized lazily
-from spillable staging. The reader combines column-chunk views and a rewritten
-footer without concatenating the encoded payload. Existing record/reader
-contracts and Parquet column pruning are preserved. The 8 MiB target is soft,
-not a bound on encoded size or peak memory.
+PCBS now implements Spark's cache `buildFilter` using Parquet footer statistics,
+Spark ParquetFilters and Parquet RowGroupFilter. GPU cache scans invoke the same
+hook already used by CPU scans. Records that cannot match are skipped before
+decoding; residual filters still run. Unsupported predicates retain records,
+with conservative guards for lossy UTF-8 literals.
 
-## Population, reads and heap
+## Read performance
 
-Matched historical results, before → after: Spark 3.5.5, sixteen partitions,
-eight slots/two GPU tasks, 48 GiB heap, DISK_ONLY, 1 GiB GPU target, 15 GiB GPU
-pool, 40 GiB managed host, 2 GiB pinned, inner Snappy, default reset100/unroll16.
-Each arm used one fresh JVM, one warmup and three reuse reads; read time is the
-median. Outer compression also affects other Spark paths.
+Same cache and predicate, pruning OFF → ON. Times are seconds, medians of five
+reads after one warmup. Four tasks/two waves, 32 numeric columns, full-column
+reads; the high-quarter predicate selects the highest quarter of IDs.
 
-| Dataset / outer compression | Population s | Read s | Observed heap GiB | Parquet payload GiB |
-| --- | ---: | ---: | ---: | ---: |
-| GHArchive / OFF | 48.721 → 46.500 | 15.645 → 15.407 | 19.984 → 16.311 | 23.512 → 23.336 |
-| GHArchive / LZ4 | 54.949 → 52.193 | 14.131 → 13.808 | 38.505 → 16.157 | 23.512 → 23.336 |
-| GHArchive / Zstd | 70.013 → 67.309 | 19.373 → 19.337 | 43.734 → 16.651 | 23.512 → 23.336 |
-| TLC / OFF | 18.625 → 18.137 | 4.905 → 6.468 | 15.685 → 15.950 | 5.755 → 6.265 |
+| MiB/task | Writer | Reader | All match | High quarter | No match |
+| --- | --- | --- | ---: | ---: | ---: |
+| 256 | CPU | CPU | 5.368 → 5.388 | 4.818 → 2.776 | 4.194 → 0.057 |
+| 256 | CPU | GPU | 0.203 → 0.207 | 0.266 → 0.202 | 0.262 → 0.170 |
+| 256 | GPU | CPU | 5.047 → 5.060 | 4.550 → 2.562 | 4.022 → 0.074 |
+| 256 | GPU | GPU | 0.214 → 0.214 | 0.196 → 0.149 | 0.195 → 0.103 |
+| 2048 | GPU | GPU | 1.014 → 1.047 | 0.958 → 0.581 | 0.973 → 0.211 |
 
-GHArchive: 32,078,549 rows; TLC: 239,470,448. Heap is sampled occupancy, including
-garbage. GHArchive improves; TLC reads regress 31.9% and its payload grows 8.9%.
+![PCBS predicate pruning](figures/pcbs-pruning.png)
 
-![PCBS read time and heap occupancy](figures/pcbs-historical-tradeoffs.png)
+Pruning helps selective reads, particularly CPU scans. Separate scan metrics
+confirm skipping in all four writer/reader combinations while preserving query
+results. CPU-written
+PCBS uses uncompressed Parquet pages with Parquet encoding; GPU-written PCBS
+uses Snappy.
 
-For `total = population + N × read`, the TLC crossover is 0.31 reuse reads per
-population: the old layout wins from the first reuse read. The new layout wins
-both phases in the three GHArchive cases.
+Settings: Spark 3.5.5, local[2], 1 GiB GPU output target, 16 GiB heap, 32 GiB
+managed host including 2 GiB pinned, 24 GiB RMM, 64 GiB sampled RSS stop guard.
+The 2 GiB/task supplement ran GPU population/reads only.
 
-These previously verified results come from
-`91d748957d:docs/dev/pcbs-rowgroup-production-results.md`: baseline `60c28e44f0`
-versus selected 8 MiB/default-row candidate `d9ba8787f6` (policy `fa29f4d90c`).
-The raw archive is currently unavailable, so these have not been freshly replayed.
+## Scope and evidence
 
-## OOM and batching evidence
+Initial support covers flat int/long/default-binary strings. Existing Parquet
+pushdown controls and Spark's cache-pruning gate are honored. Legacy records
+with multiple row groups are kept if any group can match.
 
-An earlier 8 MiB/65,536-row-cap implementation (`c385525a51`) tested 96 GiB of
-semantic values across sixteen partitions with a 48 GiB heap and default Spark
-reset/unroll settings. Original PCBS failed MEMORY_AND_DISK readback in **3/3**
-fresh JVMs; the patch passed **3/3**. Stored records increased from 112 to 12,400,
-while the largest encoded record fell from 895.936 to 7.938 MiB. A separate
-diagnostic returned **112 GPU batches in both implementations**.
-
-This establishes the batching approach; it is distinct from the final default-row
-policy measured above. Later lazy-writer changes were validated separately, not
-retimed in that cohort.
-
-## Predicate pruning
-
-The POC connects GPU cache scans to the serializer's batch filter, reusing Spark
-ParquetFilters and Parquet RowGroupFilter. Unsupported predicates retain records;
-residual filters still run. A conservative guard covers lossy UTF-8 literals.
-
-A separate 2 GiB/task numeric cohort measured the same predicates with pruning
-OFF → ON, using GPU population and GPU full reads:
-
-| Predicate | PCBS read s |
-| --- | ---: |
-| All rows match | 1.014 → 1.047 |
-| Highest quarter | 0.958 → 0.581 |
-| No rows match | 0.973 → 0.211 |
-
-Actual scan metrics separately confirm skipping for all four CPU/GPU writer/reader
-combinations. This cohort uses an instrumented Spark runtime with tracing disabled.
-
-All patches are in the plugin repository. Cross-version acceptance remains
-incomplete. [Build/provenance](README.md) · [Results](results.json).
+These are build45 measurements from before the upmerge, on an instrumented Spark
+runtime with compression tracing disabled. Final UTF-8 guard correctness was
+validated separately in build46; cross-version acceptance remains incomplete.
+The batching/OOM results belong to PR #16633, not this pruning comparison.
+[Build/provenance](README.md) · [Results](results.json).
 
 *Proof of concept; implementation, analysis and draft prepared with AI assistance.*
