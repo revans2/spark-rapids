@@ -135,6 +135,9 @@ def main():
     dependencies = [Path(proof[name]["path"]) for name in ["jni", "aggregator"]]
     subprocess.run(["python3.9", str(HERE.parent / "native/build.py"),
                     "--output", str(output), "--cudf-jar", str(dependencies[0])], check=True)
+    subprocess.run(["python3.9", str(HERE.parent / "native/host_build.py"),
+                    "--output", str(output / "host"), "--cudf-jar", str(dependencies[0])],
+                   check=True)
     spark_jars = sorted(p for p in (SPARK / "jars").glob("*.jar") if p.is_file())
     if not spark_jars:
         raise RuntimeError("Need built Spark3.5.5 distribution")
@@ -163,7 +166,7 @@ def main():
     if validate_source_build(args.source_build, args.source_head) != source_build:
         raise RuntimeError("Source build proof changed while compiling the experiment")
     manifest = {
-        "scope": "Experimental real local Spark3.5.5/Scala2.12 GPU CachedBatchSerializer; CPU paths throw",
+        "scope": "Experimental local Spark3.5.5/Scala2.12 CPU/GPU packed cache; int/long/string only",
         "git_head": subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True).strip(),
         "git_head_scope": "Experiment checkout; plugin source revision is recorded in source_build",
         "source_build": source_build,
@@ -173,6 +176,8 @@ def main():
         "spark_dependencies": [artifact(p) for p in spark_jars],
         "sources": {str(p): digest(p) for p in sources},
         "native_library": str(output / "libcascaded_exploration.so"),
+        "host_library": str(output / "host/libhost_packed.so"),
+        "host_build_manifest": digest(output / "host/host-build.json"),
         "native_build_manifest": digest(output / "build-provenance.json"),
     }
     (output / "spark-provenance.json").write_text(json.dumps(manifest, indent=2) + "\n")

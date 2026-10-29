@@ -148,6 +148,16 @@ object SparkNvcompProbe {
         } finally {
           disk.unpersist(blocking = true)
         }
+        if (CpuCachePath.supports(args.headOption.getOrElse("lz4"))) {
+          spark.conf.set("spark.rapids.sql.enabled", false)
+          try {
+            require(cached.selectExpr("*").collect().sameElements(expected),
+              "GPU-populated cache CPU values/nulls/order")
+            println("PASS GPU-populated cache CPU row decoding")
+          } finally {
+            spark.conf.set("spark.rapids.sql.enabled", true)
+          }
+        } else {
         expectCpuFailure("row encode") {
           serializer.convertInternalRowToCachedBatch(null, Seq.empty,
             StorageLevel.MEMORY_AND_DISK, SQLConf.get)
@@ -165,6 +175,7 @@ object SparkNvcompProbe {
           }
         } finally {
           spark.conf.set("spark.rapids.sql.enabled", true)
+        }
         }
       } finally {
         cached.unpersist(blocking = true)

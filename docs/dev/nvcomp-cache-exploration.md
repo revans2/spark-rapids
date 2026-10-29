@@ -8,7 +8,8 @@ Configured-target batching and the 32-case size matrix are READY FOR REVIEW:
 31 cases completed, uncompressed 2GiB/task failed in JVM heap population.
 Direct multi-boundary GPU packing and its host-CPU/kernel profiles are verified
 and READY FOR REVIEW below. CPU codec prerequisites are READY FOR REVIEW;
-CPU table packing/integration awaits the layout decision below.
+CPU row/packed cache integration and first 256MiB/task comparison are
+READY FOR REVIEW below.
 Large-string performance and active GPU spill/retry validation remain pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
@@ -1485,3 +1486,160 @@ CPU row-major->column-major packing, row decoding, cross CPU/GPU table roundtrip
 task-lifetime integration and CPU/default/PCBS timing+size matrix remain
 UNIMPLEMENTED/UNVERIFIED. Existing Spark prototype still throws on CPU fallback.
 Only codec prerequisite is READY FOR REVIEW. No claim of completed CPU serializer.
+
+## CPU row → columnar → packed/compressed cache — READY FOR REVIEW
+
+User explicitly selected the native bridge and corrected the implementation
+direction: MUST reuse existing row-to-columnar conversion; then convert those
+columns into packed/compressed batches. Exact packing implementation is flexible
+for this proof of concept; all datatypes are not required. Separate column
+compression/indexing remains a future direction, not implemented here.
+
+Release/compatibility classification unchanged: all additions/edits are
+UNRELEASED experimental tools, absent from main/release artifacts/documented
+production configuration. No compatibility aliases/migrations. Frozen released
+PCBS/plugin artifacts and contracts unchanged. No POM, versioned shim, source
+selection or production shared shim caller changed; preflight NOT_APPLICABLE
+under the recorded isolated Spark3.5.5-local boundary. This is not a production
+serializer or distributed deployment.
+
+Root and workers used MCP docker_exec exclusively for all project operations;
+code-index first for covered discovery. Every handoff/resume/review checkpoint
+reconfirmed MCP-only use. Workers did bounded native bridge/launcher work and
+focused reviews; root read decisive source, inspected changes and independently
+built, tested and verified saved numbers. Only root ran serial GPU/Spark jobs.
+
+Implementation:
+- CpuCachePath reuses Spark ArrowWriter (ArrowWriter.scala31-118) to convert
+  schema-specific InternalRows to Arrow columns. No custom row-value converter.
+  Unique internal Arrow names preserve duplicate cached field names/order.
+- Bounded row input forms at most8MiB packed records. The row-size upper bound
+  accounts for fixed slots, UTF8 bytes, offsets, validity and alignment. A row
+  retained across iterator advancement is copied because Spark codegen may
+  overwrite it. One row exceeding the existing record bound rejects explicitly.
+- Arrow column buffers are copied once into aligned packed heap bytes; no
+  intermediate full-table GPU split. Native host bridge creates cuDF metadata
+  borrowing these bytes, then existing CpuPackedCodec compresses64KiB chunks.
+  Metadata/wire remains interoperable with GPU records.
+- Snappy/LZ4/Zstd and uncompressed CPU paths support int/long/string/nulls.
+  Context owner is per task iterator, reusing native Zstd contexts across
+  chunks/records; LZ4/Snappy use retained/static implementations. Completion,
+  exhaustion and errors release codec contexts and Arrow roots. No per-record
+  codec construction.
+- CPU reads decompress into packed heap bytes, parse metadata using the bridge,
+  copy buffers into Arrow columns, then use Spark ColumnarBatch rows plus
+  UnsafeProjection. CPU columnar output remains advertised unsupported, so
+  Spark chooses its row scan. A direct CPU columnar-output route is not built.
+  CPU columnar input currently uses its producer-owned row iterator and the
+  same ArrowWriter; this route has not received an independent direct-input test.
+- Native HostPackedBridge uses pinned libcudf host pack_metadata and bounded
+  unpack(std::span,...) APIs, not a JVM copy of private metadata. Validates
+  type/row/null counts, fixed buffers/masks, string offsets/ranges and absent
+  empty chars. Explicit null counts avoid GPU null-count work.
+- Reused public view headers are from mounted sources rather than exact pinned
+  revision. Actual view ABI/API smoke and CPU/GPU table values pass; headers
+  and runtime are hash-pinned. Bounded unpack's exported declaration is absent
+  in the mounted header and is forward-declared with its tested signature.
+  This is a proof-of-concept build limitation, not a general ABI guarantee.
+- Own trivial JNI_OnLoad prevents inheriting libcudf's Java registration
+  entrypoint when loading the standalone bridge without cuDF Java classes.
+
+Actual copies are not hidden: row-to-Arrow field writes use existing Spark
+code; Arrow->packed is one raw copy; compression uses reusable chunk/output
+scratch plus copies into the returned encoded array and final cache framing.
+CPU read is decompression->packed, packed->Arrow copy, then Spark row output.
+Native metadata operations copy small metadata/descriptors, not whole raw
+buffers explicitly; GetPrimitiveArrayCritical may copy depending on JVM.
+No Arrow IPC intermediate. No claim that this is minimum-copy CPU encoding.
+Whole-record compression still prevents skipping unselected compressed columns;
+raw metadata describes columns but separate compressed-column indexing is pending.
+
+Build/provenance:
+host_build.py extracts only pinned libcudf.so to a shared hash-addressed cache,
+builds the small bridge with current public headers, and hashes all headers
+from BOTH bridge and RMM translation units. Review found/fixed a missing RMM
+cuda/std/version dependency. Spark build/run manifests bind the bridge, library,
+headers and source; launchers enforce hashes. No replacement/rebuild of pinned
+production artifacts. Added explicit CPU population/read flags and separate
+CPU/GPU correctness probe selection; default benchmark behavior remains GPU.
+Root independently reran7mocked launcher cases,9invalid combinations,13source
+proof tests; all PASS.
+
+Verification:
+- Build36 caught an Arrow version mismatch (ArrowBuf.setMemory does not exist);
+  corrected to the available setOne API. Build37 compiled. Build38 passed all
+  four CPU-supported codecs' actual Spark CPU->CPU,CPU->GPU,GPU->CPU,GPU->GPU
+  table roundtrips with exact rows/nulls/UTF8/order, duplicate/reordered
+  projections, count-only and multi-record strings.
+- Focused review found/fixed Arrow root allocation-failure ownership:
+  create/guard VectorSchemaRoot before ArrowWriter.create(root). Unique Arrow
+  field names fixed duplicate cached names. Input CPU batches stay producer-owned.
+- Final build39 includes stronger Snappy probe: partial-read TaskEnd Arrow memory
+  returns to baseline, duplicate cached names, empty and zero-column caches.
+  Root independently ran final probe PASS.
+- Existing strengthened GPU Snappy probe PASS after replacing obsolete CPU
+  rejection assertions for supported codecs with actual CPU reads; unsupported
+  CPU codecs retain explicit rejection. Exact disk bytes, skewed large strings,
+  multi-record concatenation and GPU/managed-host early cleanup remain checked.
+- Root reran native metadata smoke with CUDA_VISIBLE_DEVICES empty and no cuDF
+  Java classes using build39 bridge; PASS int/long/string/nulls and malformed
+  bounds/counts. Native bridge operates without a visible GPU in this test.
+- Root independently reran CpuPackedCodecTest PASS. Earlier both-direction
+  chunk interop remains valid; full table interop now adds actual Spark evidence.
+
+First bounded performance cohort (not all-size sweep):
+4tasks/local[2]/two waves,256MiB canonical logical/task =1GiB total, fixed-wide
+deterministic values. CPU population for EVERY row in this table. One cold
+population sample;1warmup+5measured full and ID-only reads in each execution mode.
+16GiBheap,32GiBmanagedhost including2GiBpinned,24GiBGPU,64GiBsampledRSS guard;
+actual initialized pools checked. No budget changes. Times are whole-action
+wall seconds, reads are independent warmed medians. GPU columns below read
+the CPU-written cache, not the previous GPU-written cache.
+
+| Format | CPU population s | CPU full s | CPU ID s | GPU-mode full s | GPU-mode ID s | Encoded MiB total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Default Spark | 19.076 | 1.465 | 0.075 | 0.727 | 0.109 | 415.7 |
+| PCBS CPU uncompressed Parquet | 13.339 | 5.580 | 4.141 | 0.309 | 0.151 | 701.2 |
+| Packed Snappy | 2.719 | 2.509 | 0.904 | 0.225 | 0.142 | 517.6 |
+| Packed LZ4 | 2.807 | 2.511 | 0.835 | 0.206 | 0.145 | 506.0 |
+| Packed Zstd | 3.963 | 2.402 | 0.802 | 0.246 | 0.147 | 393.8 |
+| Packed uncompressed | 2.562 | 2.274 | 0.643 | 0.255 | 0.177 | 1023.7 |
+
+Default requested-GPU mode still uses a CPU cache reader (observed plan), with
+GPU-enabled downstream execution. All other GPU-mode rows have actual
+GpuInMemoryTableScan. Do not label default as native GPU decoding.
+PCBS CPU explicitly uses UNCOMPRESSED Parquet codec, still benefiting from
+Parquet encoding/dictionaries. Default payload excludes its separate statistics
+row; PCBS/packed payload includes framing/metadata. Values are emitted payload
+bytes from post-run audit, not serializer-defined default uncompressed stats,
+resident accounting or process memory. No new compression-ratio assumption.
+
+All6runs PASS, all4partitions resident/disk0, exact aggregates match source
+and each other; all6runtime class origins and source/dependency hashes checked.
+Packed records132each, PCBS136, default420. Root read verifier implementation
+and independently ran /data/tmp/nvcomp-pcbs-rebuild-01/verify-cpu-first.py PASS:
+150phases/774task attempts,360with RAPIDS metrics. Spark spill counters observed
+and0; available GPU spill/retry counters0. RAPIDS counters are unavailable for
+78CPU-only phases (population+12CPU reads each), not assumed zero. No pressure
+or active-spill behavior established.
+Whole-process sampled RSS GiB: default8.591,PCBS9.426,Snappy5.992,LZ45.181,
+Zstd5.205,uncompressed5.511. These include mixed CPU/GPU read stages and startup,
+not CPU-population-only peaks. Arrow native buffers are not RAPIDS host-budget
+allocations; record bounding and cleanup constrain temporary use. No total
+native/process hard memory cap is claimed.
+
+Interpretation limited to this fixture/cohort: CPU population and reads beat
+PCBS, but default Spark CPU reads remain faster, especially projected ID-only.
+Whole-record decoding and row output remain material opportunities; no
+unprofiled attribution of all remaining CPU time. Zstd produces the smallest
+packed cache here with a higher CPU population cost. Population rankings are
+single cold observations, not confidence intervals. GPU CPU-written-cache reads
+remain fast; do not substitute them for earlier GPU-populated results.
+
+Artifacts /data/tmp/nvcomp-spark-probe/cpu-first-{format}-fixed-256,
+cpu-spark-{codec}-probe-01, cpu-spark-snappy-probe-final,
+cpu-enabled-gpu-snappy-probe-01, build39 (build-39 directory).
+No CPU512MiB/1GiB/2GiB performance sweep or representative string performance
+matrix run yet. ANS/Cascaded CPU remain unsupported. Separate-column compression,
+predicate pushdown, CPU columnar output, production integration and pressure
+testing are outside this completed bounded checkpoint. Architect alone marks DONE.

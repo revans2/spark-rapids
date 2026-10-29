@@ -19,6 +19,7 @@ import java.nio.{ByteBuffer, ByteOrder}
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
 
+import scala.collection.JavaConverters._
 import scala.collection.mutable.ArrayBuffer
 
 import ai.rapids.cudf.{CloseableArray, Cuda, DefaultHostMemoryAllocator, DeviceMemoryBuffer,
@@ -58,12 +59,27 @@ abstract class SparkNvcompSerializer extends ParquetCachedBatchSerializer {
       (Int, Iterator[CachedBatch]) => Iterator[CachedBatch] = (_, input) => input
 
   override def convertInternalRowToCachedBatch(input: RDD[InternalRow], schema: Seq[Attribute],
-      storageLevel: StorageLevel, conf: SQLConf): RDD[CachedBatch] =
-    throw SparkNvcompSerializer.cpuUnsupported("row encoding")
+      storageLevel: StorageLevel, conf: SQLConf): RDD[CachedBatch] = {
+    SparkNvcompSerializer.requireSupported(schema.toStructType)
+    CpuCachePath.requireCodec(codec)
+    val selectedCodec = codec
+    val types = schema.toStructType
+    input.mapPartitions(rows => CpuCachePath.encodeRows(rows, types, selectedCodec))
+  }
 
   override def convertCachedBatchToInternalRow(input: RDD[CachedBatch], cached: Seq[Attribute],
-      selected: Seq[Attribute], conf: SQLConf): RDD[InternalRow] =
-    throw SparkNvcompSerializer.cpuUnsupported("row decoding")
+      selected: Seq[Attribute], conf: SQLConf): RDD[InternalRow] = {
+    SparkNvcompSerializer.requireSupported(cached.toStructType)
+    CpuCachePath.requireCodec(codec)
+    val indices = selected.map { attribute =>
+      val index = cached.indexWhere(_.exprId == attribute.exprId)
+      require(index >= 0, "Selected attribute is missing from the nvCOMP cache")
+      index
+    }.toArray
+    val selectedCodec = codec
+    val types = cached.toStructType
+    input.mapPartitions(records => CpuCachePath.decodeRows(records, types, indices, selectedCodec))
+  }
 
   override def convertCachedBatchToColumnarBatch(input: RDD[CachedBatch], cached: Seq[Attribute],
       selected: Seq[Attribute], conf: SQLConf): RDD[ColumnarBatch] =
@@ -73,7 +89,19 @@ abstract class SparkNvcompSerializer extends ParquetCachedBatchSerializer {
       schema: Seq[Attribute], storageLevel: StorageLevel, conf: SQLConf): RDD[CachedBatch] = {
     SparkNvcompSerializer.requireSupported(schema.toStructType)
     val selectedCodec = codec
-    input.mapPartitions(batches => new SparkNvcompSerializer.Encoder(batches, selectedCodec))
+    val types = schema.toStructType
+    input.mapPartitions { batches =>
+      if (!batches.hasNext) Iterator.empty
+      else {
+        val first = batches.next()
+        val all = Iterator.single(first) ++ batches
+        if (first.numCols() > 0 && first.column(0).isInstanceOf[GpuColumnVector]) {
+          new SparkNvcompSerializer.Encoder(all, selectedCodec)
+        } else {
+          CpuCachePath.encodeRows(all.flatMap(_.rowIterator().asScala), types, selectedCodec)
+        }
+      }
+    }
   }
 
   override def gpuConvertCachedBatchToColumnarBatch(input: RDD[CachedBatch], cached: Seq[Attribute],
@@ -123,11 +151,11 @@ class SparkNvcompCascadedByteSerializer extends SparkNvcompSerializer {
 }
 
 object SparkNvcompSerializer {
-  private val RecordBytes = 8L * 1024 * 1024
+  private[cacheexploration] val RecordBytes = 8L * 1024 * 1024
   private val GroupBytes = 256L * 1024 * 1024
   // Leave space for codec expansion and wire framing; the actual heap group is checked as well.
   private val RawGroupBytes = GroupBytes - RecordBytes
-  private val ChunkBytes = 64L * 1024
+  private[cacheexploration] val ChunkBytes = 64L * 1024
   private val HeaderBytes = 40
   private val DescriptorBytes = 32
   private val Magic = 0x4e564343
@@ -167,13 +195,13 @@ object SparkNvcompSerializer {
     case _ => throw new IllegalArgumentException("Unknown experimental nvCOMP codec")
   }
 
-  private final case class Parsed(rows: Int, packedBytes: Long, metadata: Array[Byte],
+  private[cacheexploration] final case class Parsed(rows: Int, packedBytes: Long, metadata: Array[Byte],
       offsets: Array[Long], lengths: Array[Long], bits: Array[Int],
       payloadOffsets: Array[Int], payloadLengths: Array[Int], bytes: Array[Byte]) {
     def layout: Array[PackedSegments.Segment] = PackedTableCodec.layout(offsets, lengths, bits)
   }
 
-  private def parse(raw: CachedBatch, codec: String): Parsed = {
+  private[cacheexploration] def parse(raw: CachedBatch, codec: String): Parsed = {
     val record = raw match {
       case value: NvcompCacheRecord => value
       case _ => throw new IllegalArgumentException("Unexpected nvCOMP cached record type")
@@ -249,6 +277,23 @@ object SparkNvcompSerializer {
       out.position(out.position() + length)
     }
     NvcompCacheRecord(rows, result)
+  }
+
+  private[cacheexploration] def cpuWire(rows: Int, metadata: Array[Byte],
+      packed: Array[Byte], payload: Array[Byte], codec: String): NvcompCacheRecord = {
+    val count = if (packed.isEmpty) 0 else 1
+    val size = Math.toIntExact(HeaderBytes.toLong + metadata.length +
+      count * DescriptorBytes.toLong + payload.length)
+    require(size <= GroupBytes, "CPU encoded cache record exceeds heap bound")
+    val bytes = new Array[Byte](size)
+    val out = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+    out.putInt(Magic).putInt(1).putInt(codecId(codec)).putInt(rows)
+      .putLong(ChunkBytes).putLong(packed.length).putInt(metadata.length).putInt(count)
+    out.put(metadata)
+    if (count != 0) out.putLong(0).putLong(packed.length).putInt(8).putInt(0)
+      .putLong(payload.length)
+    out.put(payload)
+    NvcompCacheRecord(rows, bytes)
   }
 
   private final case class PackedRecord(rows: Int, metadata: Array[Byte],
