@@ -2,7 +2,7 @@
 
 Branch `poc/cache-serialization`, upmerged from production
 [PR #16633](https://github.com/NVIDIA/cudf-spark/pull/16633) at `f409b860fa`,
-including main `49d3be946c`. Validation of the upmerge is in progress.
+including main `49d3be946c`. **READY FOR REVIEW**; not pushed and no issues filed.
 
 - [Additional PCBS predicate pruning](issue-pcbs.md)
 - [Shared CPU/GPU packed cache](issue-packed-cache.md)
@@ -59,8 +59,8 @@ python3.9 tools/cache-exploration/nvcomp/spark/build.py \
   --source-head c0941b6bf211ecd002ea92d180bade3fc9882166
 ```
 
-Use a new output directory. The upmerge proof retains the exact command and jar hashes. It requires an
-unchanged clean source checkout,
+Use a new output directory. The proof records the exact command and jar hashes,
+and requires an unchanged clean source checkout,
 `source_root`, `source_head`, `source_clean`, `returncode`, build `command`, and
 `{path,sha256}` entries for `build_log`, `aggregator`, `jni`, `private`. A portable
 proof generator is not yet committed. Probe/benchmark options are in
@@ -94,13 +94,16 @@ crossovers use full precision. `pcbs-pruning.png` shows paired pruning controls;
 | --- | --- |
 | Build45 numeric timings: prototype | `9fa1d78378cea17caf6f696a37250ed40c158ff6` |
 | Build45 numeric timings: plugin | `e8491e4f5684f2b338445b155533cf676e3eed44` |
-| Build46 final guard validation | `91a86cdc3c7a7e5a55dcfc965dbe8abb01edcb23` |
+| Build46 guard validation | `91a86cdc3c7a7e5a55dcfc965dbe8abb01edcb23` |
+| Upmerge plugin/probes | `c0941b6bf211ecd002ea92d180bade3fc9882166` |
+| Added byte-mode predicate probe | `822c96969f580766ceb27b2a5343b8b61a620cbd` |
 
-The numeric fixture does not exercise the later UTF-8 fixes. Historical build46
-passed Spark 3.5.5 Maven verify, twelve PCBS filter tests, Snappy/PCBS predicate
-probes and Snappy CPU/GPU interoperability. Tests ran separately from the Maven
-command above. Other codecs and statistics/stream cases have earlier coverage
-in the tracker.
+The upmerge passed source-clean Spark 3.5.5 verify: **71 Scala + 13 Java tests**,
+including twelve PCBS filter tests. Rebuilt native/JVM prototypes passed nine
+predicate probes (default, PCBS and all seven packed variants), Snappy CPU/GPU
+interoperability and byte-Cascaded GPU roundtrip checks. CPU-unsupported codecs
+were tested on GPU only. These use the newer dependencies listed above;
+build45 timings and the numeric fixture's UTF-8 limitations remain historical.
 
 All 21 current cases were replay-verified at handoff: fourteen 256 MiB/task cases
 and seven 2 GiB/task GPU-only cases, zero failed/invalid. `results.json` contains
@@ -112,8 +115,7 @@ Historical PCBS results come from the Git report `91d748957d`; their original
 `/data/pcbs-oom` archive is unavailable. Later CPU lazy-writer cleanup was validated
 separately, not retimed in that report.
 
-Cross-version acceptance remains **INCOMPLETE**. The earlier Spark 3.3 attempt
-failed on join symbols without a baseline rebuild; current-main validation is
-being refreshed after this upmerge. No 3.3/4.x/Databricks success or spill-recovery
-validation is claimed. Timing data and reuse curves remain historical; no
-post-upmerge performance rerun is implied.
+Static source-selection checks pass for 32 profiles; online review/advisory is
+**INCOMPLETE** because `gh` is unavailable. Other Spark/Databricks runtime profiles
+and spill recovery remain unverified. The earlier Spark 3.3 attempt failed on
+join symbols without a baseline rebuild. No post-upmerge performance rerun is implied.

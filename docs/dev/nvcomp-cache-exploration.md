@@ -1,6 +1,6 @@
 # GPU contiguous packing and nvCOMP exploration
 
-Status: VALIDATING PROOF-OF-CONCEPT UPMERGE. The current publication handoff,
+Status: LOCAL PROOF OF CONCEPT READY FOR REVIEW. The current publication handoff,
 two issue drafts, figures and result summary are in
 [cache-serialization-poc/README.md](cache-serialization-poc/README.md).
 Only the architect marks DONE; production/cross-version acceptance is INCOMPLETE.
@@ -3140,4 +3140,23 @@ Rebuilt experimental JVM/native libraries with current JNI31/private25 artifacts
 eight supported predicate probes, byte-Cascaded GPU roundtrip and Snappy CPU/GPU
 interop PASS. Original extra byte-predicate invocation failed before SparkSession
 because its harness mapping was absent. Added only that mapping and GPU-only
-mode gates; byte-predicate check is pending. Plugin/runtime code unchanged.
+mode gates; rebuilt probe822 byte-predicate PASS. Plugin/runtime code unchanged.
+
+### Upmerge validation — READY FOR REVIEW
+
+PluginC094 source-clean verify355:71Scala+13Java PASS; correctedprototype822:
+9predicate codecs (default/PCBS/7packed), SnappyCPU/GPUinterop and byte-Cascaded
+GPUroundtrip PASS. Root checked raw completions, expected row counts/modes,
+UTF8guard/default+created-stream markers, artifact hashes and JUnitXML failures.
+Source proof and verified-upmerge.json are under /data/tmp/poc-production-upmerge-validation.
+Native/JVM builds use copied JNI31/private25 artifacts; historical timings remain
+build45 with no performance rerun. No algorithm/configuration/format changes.
+
+All21measurement rows and112reuse comparisons unchanged; license metadata only.
+NewPCBS issue citesPR16633 and covers additionalpruning; root inspected its chart,
+replayed all6figure files byte-identically and checked table values/local links.
+Focused source/claim review found no issue. Scala2.13 regeneration unchanged.
+MCP docker_exec used exclusively; workers confirmed. Productionref remainsf409,
+alloldPOC commits preserved. Static coverage32profiles/3839requirements/0findings
+PASS. Online review/advisory INCOMPLETE:gh unavailable; other runtimes/spill unverified.
+Only architect marksDONE. Nothing pushed or filed.
