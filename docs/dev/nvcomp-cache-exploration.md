@@ -2435,3 +2435,56 @@ The1GiB/task cohort has started. The complete remaining matrix is still authoriz
 and IN PROGRESS, with serial jobs under the original caps/protocol. Large CPU
 fallback scans dominate elapsed matrix time. Do not report the remaining1/2GiB
 numbers as measured until their completion and independent verification.
+
+### GPU read cost candidates identified during the frozen matrix
+
+No algorithm/source change is made mid-matrix. At1GiB/task, uncompressed GPU
+full reads are slower than compressed variants. Source shows an upload allocation
+per payload plus D2D assembly into per-record outputs. A later direct-to-output
+H2D path for uncompressed records could avoid the intermediate allocations/copies;
+a single compressed upload slab could reduce allocations and H2D submissions for
+compressed codecs. Keep decoded record allocations independently owned/spillable;
+do not introduce aliased per-record spill owners over one large raw allocation.
+
+BatchedDecompressor also fetches chunk-size headers back from device memory:
+fetchMetadata gathers input prefixes with Cuda.multiBufferCopyAsync, copies the
+gathered metadata to host, builds pointers/sizes there and copies those vectors
+to device. Root read the implementation and independently inspected bytecode
+from the actual pinned972b04a7... JNI jar with javap -p -c: fetchMetadata,
+multiBufferCopyAsync, HostMemoryBuffer.copyFromDeviceBuffer and
+DeviceMemoryBuffer.copyFromHostBuffer are present. The cached payload already
+contains these size headers on CPU, so a host-metadata-aware batched decoder may
+avoid that round trip and many tiny copies. This is a structural opportunity,
+NOT a measured attribution or implemented optimization. Profile current large
+read phases before claiming its wall-time contribution. Preserve GPU batching,
+existing formats/contracts, codec reuse and spill-safe ownership.
+
+## Predicate pruning follow-up authorized — RESEARCH IN PROGRESS
+
+Latest user instruction: after finishing the size matrix, implement proper
+predicate pruning across current setups, INCLUDING PCBS; resolve routine details
+autonomously, ask only substantial design questions/blockers, and report decisions
+when asked or at the end. At a genuine2GiB-stage blocker it is explicitly okay
+to stop the size matrix, after considering evidence from the older2GiB runs.
+Do not force a run through by relaxing accepted limits or changing the protocol.
+
+Current coverage to design: default Spark's existing CPU filtering (including
+GPU-enabled CPU cache-reader fallback), CPU/GPU PCBS, and CPU/GPU experimental
+nvCOMP codecs supported in each mode. Preserve residual row filters. Unknown
+statistics/predicates/types must KEEP records; rejection requires proof.
+PCBS/default supported contracts and stored bytes remain RELEASED; nvCOMP's
+experimental records/interfaces remain UNRELEASED and may change directly.
+
+While the frozen build42 matrix continues, bounded workers perform READ-ONLY
+MCP research on CPU/Parquet filtering reuse and fused GPU statistics. No source
+edits/builds/GPU jobs are delegated during timing. Every handoff/resumption and
+checkpoint repeats MCP-only tool use. Root reads decisive code and independently
+verifies, then begins implementation after the timing checkpoint.
+
+Research candidates: reuse PCBS's existing footer ROWGROUP statistics, use
+conservative host batch filtering, add GPU scan buildFilter hook respecting
+Spark's existing partition-pruning config, and generate nvCOMP per-record stats
+without per-column/per-record GPU launch storms. New shared production JVM work
+requires the repository shim skill/preflight, independent advisory evidence and
+affected profile checks before being declared ready. No new user-facing config
+or unsupported-data behavior is authorized implicitly.
