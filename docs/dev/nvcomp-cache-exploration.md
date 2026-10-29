@@ -2488,3 +2488,39 @@ without per-column/per-record GPU launch storms. New shared production JVM work
 requires the repository shim skill/preflight, independent advisory evidence and
 affected profile checks before being declared ready. No new user-facing config
 or unsupported-data behavior is authorized implicitly.
+
+### Pruning 1GiB/task cohort — READY FOR REVIEW; 2GiB IN PROGRESS
+
+Root independently reran the frozen-build verifier:42main cases and ten
+supervisor probes verified,14main cases pending,0failed/invalid. Separate final
+GPU Snappy prerequisite remains verified. Four tasks/two slots, total4096MiB
+canonical input; one cold population sample and separate five-sample read medians.
+No available spill/retry value was positive and no disk storage was observed;
+CPU missing RAPIDS values remain unavailable. No guard fired.
+Stable snapshot: /data/tmp/nvcomp-column-pruning-spark/verified-1024.json.
+
+| Writer | Format | Population s | CPU full s | CPU ID s | GPU-mode full s | GPU-mode ID s | Encoded MiB total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | snappy | 8.966 | 10.006 | 0.430 | 0.623 | 0.114 | 2067.0 |
+| cpu | lz4 | 9.120 | 9.438 | 0.325 | 0.589 | 0.114 | 2023.4 |
+| cpu | zstd | 14.736 | 9.465 | 0.371 | 0.621 | 0.120 | 1572.0 |
+| cpu | uncompressed | 8.660 | 8.960 | 0.375 | 1.056 | 0.212 | 4095.7 |
+| cpu | pcbs | 47.420 | 21.135 | 15.586 | 0.659 | 0.366 | 2804.7 |
+| cpu | default | 80.279 | 5.409 | 0.168 | 1.781 | 0.278 | 1662.8 |
+| gpu | snappy | 2.841 | 7.737 | 0.341 | 0.901 | 0.121 | 2088.8 |
+| gpu | lz4 | 2.848 | 7.071 | 0.333 | 0.936 | 0.185 | 2026.9 |
+| gpu | zstd | 3.427 | 7.746 | 0.393 | 0.699 | 0.140 | 1516.8 |
+| gpu | uncompressed | 3.462 | 6.685 | 0.350 | 1.076 | 0.170 | 4099.2 |
+| gpu | pcbs | 2.596 | 20.042 | 15.247 | 0.580 | 0.267 | 1958.6 |
+| gpu | default | 83.458 | 5.287 | 0.198 | 2.097 | 0.314 | 1662.8 |
+| gpu | ans | 2.634 | unsupported | unsupported | 0.856 | 0.153 | 2267.7 |
+| gpu | cascaded | 2.971 | unsupported | unsupported | 0.922 | 0.115 | 1560.0 |
+
+Two writer modes remain separate; default GPU-mode reader is CPU; default payload
+excludes its separate statistics row. Packed/PCBS audited sizes include framing.
+These are same-cohort comparisons against unchanged PCBS, not PCBS before/after
+effects. GPU-read population is not included in read-only medians.
+
+2GiB/task is now running. User explicitly allows parking at a genuine2GiB blocker
+after examining older2GiB evidence. No failure is present yet. Predicate research
+is read-only; source stays frozen until timing completion/park checkpoint.
