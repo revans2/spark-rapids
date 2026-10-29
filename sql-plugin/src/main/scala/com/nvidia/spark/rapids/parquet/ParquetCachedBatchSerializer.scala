@@ -38,7 +38,7 @@ import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.mapreduce.RecordWriter
 import org.apache.parquet.{HadoopReadOptions, ParquetReadOptions}
 import org.apache.parquet.column.ParquetProperties
-import org.apache.parquet.hadoop.{CodecFactory, MemoryManager, ParquetFileReader, ParquetFileWriter, ParquetInputFormat, ParquetOutputFormat, ParquetRecordWriter, ParquetWriter}
+import org.apache.parquet.hadoop.{ParquetFileReader, ParquetInputFormat, ParquetOutputFormat, ParquetWriter}
 import org.apache.parquet.hadoop.ParquetFileWriter.Mode
 import org.apache.parquet.hadoop.api.WriteSupport
 import org.apache.parquet.hadoop.metadata.CompressionCodecName
@@ -49,7 +49,7 @@ import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, GenericInternalRow, SpecializedGetters, UnsafeRow}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression, GenericInternalRow, SpecializedGetters}
 import org.apache.spark.sql.catalyst.expressions.codegen.GenerateUnsafeProjection
 import org.apache.spark.sql.catalyst.util.{ArrayBasedMapData, ArrayData, GenericArrayData, MapData}
 import org.apache.spark.sql.columnar.CachedBatch
@@ -121,6 +121,7 @@ private class ParquetBufferConsumer(val numRows: Int) extends HostBufferConsumer
     AutoCloseable {
   private val regions = mutable.ArrayBuffer.empty[(SpillableHostBuffer, Long)]
   private var recordsCreated = false
+  private var source: Option[ParquetCachedBatchFiles.EncodedSource] = None
   @volatile private var closed = false
 
   Option(TaskContext.get()).foreach { tc =>
@@ -140,9 +141,10 @@ private class ParquetBufferConsumer(val numRows: Int) extends HostBufferConsumer
   def records: Iterator[ParquetCachedBatch] = {
     require(!closed && !recordsCreated, "Parquet writer output already consumed")
     recordsCreated = true
-    val source = ParquetCachedBatchFiles.fromSpillableRegions(regions.toVector)
+    val encodedSource = ParquetCachedBatchFiles.fromSpillableRegions(regions.toVector)
+    source = Some(encodedSource)
     new Iterator[ParquetCachedBatch] {
-      private lazy val pieces = ParquetCachedBatchFiles.split(source)
+      private lazy val pieces = ParquetCachedBatchFiles.split(encodedSource)
       private var returnedRows = 0L
 
       override def hasNext: Boolean = {
@@ -180,7 +182,8 @@ private class ParquetBufferConsumer(val numRows: Int) extends HostBufferConsumer
   override def close(): Unit = synchronized {
     if (!closed) {
       closed = true
-      val buffers = regions.map(_._1).toVector
+      val buffers = source.toVector ++ regions.map(_._1).toVector
+      source = None
       regions.clear()
       buffers.safeClose()
     }
@@ -1222,23 +1225,11 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
         hasMore
       }
 
-      //estimate the size of a row
-      val estimatedSize: Long = cachedAttributes.map { attr =>
-        attr.dataType.defaultSize.toLong
-      }.sum
-
       override def next(): CachedBatch = cachedBatches.next()
-
-      // The input can write its next row over the values of the row it returned when hasNext
-      // is called, as whole-stage codegen does, so a row kept for the next batch is copied.
-      protected def keepForNextBatch(row: InternalRow): InternalRow = row.copy()
 
       protected def convertRowIteratorToCachedBatch(
           rowIterator: Iterator[InternalRow]): Iterator[CachedBatch] = new Iterator[CachedBatch] {
-        // Keep a row that did not fit in the previous record for the next call to next().
-        private var leftOverRow: Option[InternalRow] = None
-
-        override def hasNext: Boolean = leftOverRow.nonEmpty || rowIterator.hasNext
+        override def hasNext: Boolean = rowIterator.hasNext
 
         override def next(): CachedBatch = {
           if (!hasNext) {
@@ -1259,39 +1250,16 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
           val recordWriter = SQLConf.withExistingConf(conf) {
             parquetOutputFileFormat.getRecordWriter(outputFile, hadoopConf)
           }
-          var totalSize = 0L
-          while ((rowIterator.hasNext || leftOverRow.nonEmpty)
-            && totalSize < bytesAllowedPerBatch) {
-
-            val row = if (leftOverRow.nonEmpty) {
-              val a = leftOverRow.get
-              leftOverRow = None // reset value
-              a
-            } else {
-              rowIterator.next()
-            }
-            totalSize += {
-              row match {
-                case r: UnsafeRow =>
-                  r.getSizeInBytes
-                case _ =>
-                  estimatedSize
-              }
-            }
-            // A row larger than the budget must still make progress in its own record.
-            if (rows == 0 || totalSize <= bytesAllowedPerBatch) {
+          withResource(recordWriter) { writer =>
+            // Parquet counts buffered encoded data, including variable-width values for generic
+            // and host-columnar rows. This is a soft target: the last row, page buffering and the
+            // footer can take a record over budget. Write at least one row to guarantee progress.
+            while (rows < Int.MaxValue && (rows == 0 ||
+                writer.getDataSize < bytesAllowedPerBatch) && rowIterator.hasNext) {
+              writer.write(null, rowIterator.next())
               rows += 1
-              if (rows < 0) {
-                throw new IllegalStateException("CachedBatch doesn't support rows larger " +
-                  "than Int.MaxValue")
-              }
-              recordWriter.write(null, row)
-            } else {
-              leftOverRow = Some(keepForNextBatch(row))
             }
           }
-          // passing null as context isn't used in this method
-          recordWriter.close(null)
           ParquetCachedBatch(rows, stream.toByteArray)
         }
       }
@@ -1317,11 +1285,6 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
       override def next(): CachedBatch = myIter.next()
 
       override def hasNext: Boolean = myIter.hasNext
-
-      // A batch's row iterator moves its row only in next(), which the writer calls after the
-      // kept row is written. ColumnarBatchRow.copy() also lacks types the writer takes, such as
-      // Variant before Spark 4.1.2.
-      override protected def keepForNextBatch(row: InternalRow): InternalRow = row
 
       val myIter = iter.asInstanceOf[Iterator[ColumnarBatch]].flatMap { batch =>
         val hostBatch = if (batch.column(0).isInstanceOf[GpuColumnVector]) {
@@ -1473,59 +1436,48 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
   }
 }
 
-/**
- * Similar to ParquetFileFormat
- */
-private[rapids] class ParquetOutputFileFormat {
-
-  @scala.annotation.nowarn(
-    "msg=constructor .* in class .* is deprecated"
-  )
-  def getRecordWriter(output: OutputFile, conf: Configuration): RecordWriter[Void, InternalRow] = {
-    import ParquetOutputFormat._
-
-    val blockSize = getLongBlockSize(conf)
-    val maxPaddingSize =
-      conf.getInt(MAX_PADDING_BYTES, ParquetWriter.MAX_PADDING_SIZE_DEFAULT)
-    val validating = getValidation(conf)
-
-    val writeSupport = new ParquetWriteSupport().asInstanceOf[WriteSupport[InternalRow]]
-    val init = writeSupport.init(conf): @scala.annotation.nowarn(
-      "cat=deprecation&msg=method init in class WriteSupport is deprecated"
-    )
-    val writer = new ParquetFileWriter(output, init.getSchema,
-      Mode.CREATE, blockSize, maxPaddingSize)
-    writer.start()
-
-    val writerVersion =
-      ParquetProperties.WriterVersion.fromString(conf.get(ParquetOutputFormat.WRITER_VERSION,
-        ParquetProperties.WriterVersion.PARQUET_1_0.toString))
-
-    val codecFactory = new CodecFactory(conf, getPageSize(conf))
-
-    new ParquetRecordWriter[InternalRow](writer, writeSupport, init.getSchema,
-      init.getExtraMetaData, blockSize, getPageSize(conf),
-      codecFactory.getCompressor(CompressionCodecName.UNCOMPRESSED), getDictionaryPageSize(conf),
-      getEnableDictionary(conf), validating, writerVersion,
-      ParquetOutputFileFormat.getMemoryManager(conf))
-
-  }
+/** A record writer that exposes Parquet's buffered data size without inspecting row values. */
+private[rapids] abstract class SizedParquetRecordWriter
+    extends RecordWriter[Void, InternalRow] with AutoCloseable {
+  def getDataSize: Long
+  override def close(): Unit = close(null)
 }
 
-private object ParquetOutputFileFormat {
-  var memoryManager: MemoryManager = _
-  val DEFAULT_MEMORY_POOL_RATIO: Float = 0.95f
-  val DEFAULT_MIN_MEMORY_ALLOCATION: Long = 1 * 1024 * 1024 // 1MB
+/**
+ * Similar to ParquetFileFormat, using the public ParquetWriter size-accounting API.
+ * The cache record target bounds each writer's lifetime, rather than the Hadoop record writer's
+ * shared MemoryManager. The size is encoded buffered data, not a strict heap or file-size cap.
+ */
+private[rapids] class ParquetOutputFileFormat {
+  private class WriterBuilder(output: OutputFile)
+      extends ParquetWriter.Builder[InternalRow, WriterBuilder](output) {
+    override protected def self(): WriterBuilder = this
 
-  def getMemoryManager(conf: Configuration): MemoryManager = {
-    synchronized {
-      if (memoryManager == null) {
-        import ParquetOutputFormat._
-        val maxLoad = conf.getFloat(MEMORY_POOL_RATIO, DEFAULT_MEMORY_POOL_RATIO)
-        val minAllocation = conf.getLong(MIN_MEMORY_ALLOCATION, DEFAULT_MIN_MEMORY_ALLOCATION)
-        memoryManager = new MemoryManager(maxLoad, minAllocation)
-      }
+    override protected def getWriteSupport(conf: Configuration): WriteSupport[InternalRow] =
+      new ParquetWriteSupport().asInstanceOf[WriteSupport[InternalRow]]
+  }
+
+  def getRecordWriter(output: OutputFile, conf: Configuration): SizedParquetRecordWriter = {
+    import ParquetOutputFormat._
+
+    val writer = new WriterBuilder(output).withConf(conf)
+      .withWriteMode(Mode.CREATE)
+      .withRowGroupSize(getLongBlockSize(conf))
+      .withPageSize(getPageSize(conf))
+      .withDictionaryPageSize(getDictionaryPageSize(conf))
+      .withDictionaryEncoding(getEnableDictionary(conf))
+      .withValidation(getValidation(conf))
+      .withWriterVersion(ParquetProperties.WriterVersion.fromString(
+        conf.get(WRITER_VERSION, ParquetProperties.WriterVersion.PARQUET_1_0.toString)))
+      .withMaxPaddingSize(conf.getInt(MAX_PADDING_BYTES, ParquetWriter.MAX_PADDING_SIZE_DEFAULT))
+      .withCompressionCodec(CompressionCodecName.UNCOMPRESSED)
+      .build()
+
+    new SizedParquetRecordWriter {
+      override def getDataSize: Long = writer.getDataSize
+      override def write(key: Void, row: InternalRow): Unit = writer.write(row)
+      override def close(context: org.apache.hadoop.mapreduce.TaskAttemptContext): Unit =
+        writer.close()
     }
-    memoryManager
   }
 }

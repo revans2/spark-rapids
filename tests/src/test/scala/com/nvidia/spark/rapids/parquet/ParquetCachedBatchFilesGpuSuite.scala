@@ -17,15 +17,63 @@ package com.nvidia.spark.rapids.parquet
 
 import ai.rapids.cudf.{ColumnVector, CompressionType, HostMemoryBuffer,
   ParquetChunkedReader => CudfParquetChunkedReader, ParquetOptions, ParquetWriterOptions, Table}
-import com.nvidia.spark.rapids.Arm.withResource
+import com.nvidia.spark.rapids.{SparkQueryCompareTestSuite, SpillableHostBuffer, SpillPriorities}
+import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
 import com.nvidia.spark.rapids.RapidsPluginImplicits._
-import com.nvidia.spark.rapids.SparkQueryCompareTestSuite
 import com.nvidia.spark.rapids.jni.{CpuRetryOOM, RmmSpark}
 import com.nvidia.spark.rapids.spill.SpillFramework
+import org.mockito.Mockito.{doAnswer, spy, times, verify}
+import org.mockito.invocation.InvocationOnMock
 
 import org.apache.spark.sql.types.{LongType, StringType, StructType}
 
 class ParquetCachedBatchFilesGpuSuite extends SparkQueryCompareTestSuite {
+  test("spilled source reuses one region and evicts it before loading another") {
+    withGpuSparkSession { _ =>
+      val handles = SpillFramework.stores.hostStore.numHandles
+      val materialized = scala.collection.mutable.ArrayBuffer.empty[HostMemoryBuffer]
+      val regions = (0 until 2).map { region =>
+        val buffer = closeOnExcept(HostMemoryBuffer.allocate(16)) { allocated =>
+          allocated.setBytes(0, Array.tabulate[Byte](16)(i => (region * 16 + i).toByte), 0, 16)
+          allocated
+        }
+        val spillable = spy(SpillableHostBuffer(
+          buffer, 16, SpillPriorities.ACTIVE_BATCHING_PRIORITY))
+        doAnswer((invocation: InvocationOnMock) => {
+          // Any previous disk materialization must be released before the next allocation.
+          assert(materialized.forall(_.getRefCount == 0))
+          val result = invocation.callRealMethod().asInstanceOf[HostMemoryBuffer]
+          materialized += result
+          result
+        }).when(spillable).getDataHostBuffer()
+        (spillable, 16L)
+      }
+      withResource(regions.map(_._1)) { _ =>
+        assert(SpillFramework.stores.hostStore.spill(Long.MaxValue) > 0)
+        withResource(ParquetCachedBatchFiles.fromSpillableRegions(regions)) { source =>
+          val bytes = new Array[Byte](8)
+          source.readFully(0, bytes, 0, 8)
+          assert(bytes.toSeq == (0 until 8).map(_.toByte))
+          source.readFully(8, bytes, 0, 8)
+          verify(regions.head._1, times(1)).getDataHostBuffer()
+          // One read crosses the boundary; only one materialization stays live.
+          source.readFully(12, bytes, 0, 8)
+          assert(bytes.toSeq == (12 until 20).map(_.toByte))
+          verify(regions(1)._1, times(1)).getDataHostBuffer()
+          source.readFully(0, bytes, 0, 8)
+          verify(regions.head._1, times(2)).getDataHostBuffer()
+          assert(materialized.count(_.getRefCount > 0) == 1)
+          // Invalid reads also retire the cached reference.
+          intercept[IllegalArgumentException] {
+            source.readFully(32, bytes, 0, 1)
+          }
+          assert(materialized.forall(_.getRefCount == 0))
+        }
+      }
+      assert(SpillFramework.stores.hostStore.numHandles == handles)
+    }
+  }
+
   private val rows = 32768
   private val schema = new StructType().add("id", LongType).add("text", StringType)
 

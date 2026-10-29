@@ -42,7 +42,8 @@ private[rapids] object ParquetCachedBatchFiles {
   private val FramingBytes = 12L
 
   /** Borrowed encoded bytes; callers keep all backing storage alive through iteration. */
-  trait EncodedSource {
+  trait EncodedSource extends AutoCloseable {
+    override def close(): Unit = {}
     def length: Long
     def readFully(offset: Long, destination: Array[Byte], start: Int, count: Int): Unit
   }
@@ -62,7 +63,16 @@ private[rapids] object ParquetCachedBatchFiles {
     }
   }
 
-  /** Borrowed spillable regions; only the region being copied is materialized. */
+  /**
+   * Borrows spillable regions, but owns one cached materialization; the caller must close this
+   * source before closing the regions. Disk materializations are currently not retained by
+   * SpillableHostBufferHandle, so immediately releasing each read would reload a whole callback
+   * region for every column chunk (and footer read). Retain at most one whole callback region,
+   * not one cache record or byte range. Evict before loading another region, even for seeks.
+   *
+   * This keeps native memory live between reads and may pin a resident region against spilling.
+   * Revisit/remove this cache when spill handles support retained unspills or range-aware reads.
+   */
   def fromSpillableRegions(regions: Seq[(SpillableHostBuffer, Long)]): EncodedSource = {
     val entries = regions.filter(_._2 != 0).map { case (buffer, used) =>
       require(used > 0 && used <= buffer.length, "Invalid spillable region used length")
@@ -72,8 +82,32 @@ private[rapids] object ParquetCachedBatchFiles {
       Math.addExact(offset, used)
     }
     new EncodedSource {
+      private var cached: Option[HostMemoryBuffer] = None
+      private var cachedIndex = -1
+      private var closed = false
+
+      private def releaseCached(): Unit = {
+        val previous = cached
+        cached = None
+        cachedIndex = -1
+        previous.foreach(buffer => withResource(buffer)(_ => ()))
+      }
+
+      override def close(): Unit = {
+        closed = true
+        releaseCached()
+      }
+
       override val length: Long = starts.last
       override def readFully(offset: Long, destination: Array[Byte], start: Int,
+          count: Int): Unit = {
+        require(!closed, "Reading a closed encoded source")
+        closeOnExcept(this) { _ =>
+          copyRange(offset, destination, start, count)
+        }
+      }
+
+      private def copyRange(offset: Long, destination: Array[Byte], start: Int,
           count: Int): Unit = {
         checkRange(offset, count, length)
         checkRange(start, count, destination.length)
@@ -87,11 +121,14 @@ private[rapids] object ParquetCachedBatchFiles {
           }
           val withinRegion = sourceOffset - starts(index)
           val amount = math.min(remaining.toLong, entries(index)._2 - withinRegion).toInt
-          withRetryNoSplit {
-            withResource(entries(index)._1.getDataHostBuffer()) { buffer =>
-              buffer.getBytes(destination, destinationOffset, withinRegion, amount)
-            }
+          if (cachedIndex != index) {
+            releaseCached()
+            cached = Some(withRetryNoSplit {
+              entries(index)._1.getDataHostBuffer()
+            })
+            cachedIndex = index
           }
+          cached.get.getBytes(destination, destinationOffset, withinRegion, amount)
           sourceOffset += amount
           destinationOffset += amount
           remaining -= amount
