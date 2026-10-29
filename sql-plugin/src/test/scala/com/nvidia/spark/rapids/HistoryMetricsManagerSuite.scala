@@ -129,7 +129,7 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
       withResource(new URLClassLoader(urls, apiClass.getClassLoader) {
         override def loadClass(name: String, resolve: Boolean): Class[_] = synchronized {
           if (name == providerClass.getName) {
-            val loaded = Option(findLoadedClass(name)).getOrElse(findClass(name))
+            val loaded: Class[_] = Option(findLoadedClass(name)).getOrElse(findClass(name))
             if (resolve) {
               resolveClass(loaded)
             }
