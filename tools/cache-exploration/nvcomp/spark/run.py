@@ -82,6 +82,13 @@ def verify(manifest, build):
         if guard.digest(Path(entry["path"])) != entry["sha256"]:
             raise RuntimeError("Changed host metadata dependency: " + entry["path"])
 
+    statistics = build / "statistics/statistics-build.json"
+    if guard.digest(statistics) != manifest["statistics_build_manifest"]:
+        raise RuntimeError("Changed GPU statistics build manifest")
+    for entry in json.loads(statistics.read_text())["files"]:
+        if guard.digest(Path(entry["path"])) != entry["sha256"]:
+            raise RuntimeError("Changed GPU statistics dependency: " + entry["path"])
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-dir", type=Path, required=True)
@@ -103,12 +110,14 @@ def main():
     parser.add_argument("--probe", action="store_true", help="Run bounded Scala GPU correctness probe")
     parser.add_argument("--cpu-probe", action="store_true",
                         help="Run CPU/GPU table interoperability correctness checks")
+    parser.add_argument("--predicate-probe", action="store_true",
+                        help="Check conservative predicate pruning across CPU/GPU cache paths")
     parser.add_argument("--cpu-profile", action="store_true",
                         help="Profile host CPU/wall samples and JVM CPU counters; does not select CPU execution")
     parser.add_argument("--profile", action="store_true",
                         help="Separate diagnostic run with Nsight CUDA/NVTX tracing; timings are perturbed")
     args = parser.parse_args()
-    if args.cpu_probe and args.probe:
+    if sum([args.cpu_probe, args.probe, args.predicate_probe]) > 1:
         parser.error("Choose one correctness probe")
     if args.cpu_probe and args.format not in ["uncompressed", "lz4", "snappy", "zstd"]:
         parser.error("CPU probe requires a CPU-supported packed codec")
@@ -135,14 +144,15 @@ def main():
                     + [manifest["application"]["path"]])
     native_option = "-Dcacheexploration.cascaded.library=" + manifest["native_library"]
     native_option += " -Dcacheexploration.hostPacked.library=" + manifest["host_library"]
+    native_option += " -Dcacheexploration.statistics.library=" + manifest["statistics_library"]
     if args.cpu_profile:
-        if args.probe or args.cpu_probe:
+        if args.probe or args.cpu_probe or args.predicate_probe:
             parser.error("CPU profiling requires measured cache actions")
         native_option += " -Dap_loader_extraction_dir=" + str(output / "ap-native")
         native_option += (" -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints"
                           " -XX:+PreserveFramePointer")
     if args.profile:
-        if args.probe or args.cpu_probe:
+        if args.probe or args.cpu_probe or args.predicate_probe:
             parser.error("Profile measured cache actions rather than the correctness probe")
         native_option += " -Dai.rapids.cudf.nvtx.enabled=true"
     command = [str(Path(manifest["spark_home"]) / "bin/spark-submit"),
@@ -175,13 +185,14 @@ def main():
         command += ["--serializer-class", "org.apache.spark.sql.cacheexploration." + SERIALIZERS[args.format]]
     if args.task_mib:
         command += ["--task-size-mib", str(args.task_mib)]
-    if args.probe or args.cpu_probe:
-        if args.format not in SERIALIZERS:
+    if args.probe or args.cpu_probe or args.predicate_probe:
+        if args.format not in SERIALIZERS and not args.predicate_probe:
             parser.error("Correctness probe requires an nvCOMP prototype format")
         code = {"cascaded": "cascaded-typed", "cascaded-byte": "cascaded8"}.get(args.format, args.format)
         command = command[:command.index(str(snapshot))] + [
             "--class", "org.apache.spark.sql.cacheexploration." +
-            ("SparkCpuCacheProbe" if args.cpu_probe else "SparkNvcompProbe"),
+            ("SparkPredicateProbe" if args.predicate_probe else
+             "SparkCpuCacheProbe" if args.cpu_probe else "SparkNvcompProbe"),
             manifest["application"]["path"], code]
     if args.profile:
         command = ["nsys", "profile", "--trace=cuda,nvtx", "--sample=none",

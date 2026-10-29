@@ -2676,3 +2676,52 @@ comment, consistent with existing repository usage; no compiler check was disabl
 Independent production semantic review found no actionable correctness issue.
 Upstream fetch failed: configured origin gitlab-master.nvidia.com does not resolve.
 Current-main/advisory evidence remains INCOMPLETE, not a clean compatibility claim.
+
+### Predicate pruning checkpoint — implementation verification in progress
+
+Production runtime sourcee8491e4f5684f2b338445b155533cf676e3eed44 built cleanly
+with the pinned JNI/private pair and Spark355, fatal warnings/scalastyle active.
+Proof /data/tmp/cache-predicate-pruning/production-build-02/source-build.json;
+Maven verify exit0,296.46s, sourceclean true.
+Root compiled the new PCBS suite with fatal warnings and ran all8CPUtests PASS.
+Updated fixtures use nondeprecated Statistics builders and genuinely unknown
+nullcounts (the original default-constructor fixture did not establish unknown).
+Logs /data/tmp/cache-predicate-pruning/pcbs-unit-01.
+
+Root inspected all delegated CPU/GPU stats/native changes and ran independent
+verification. Nativehost and rawCUDA+CUB libraries compile. A CUDA-disabled Java
+host probe passed signed extrema/dirty mask tails/UTF8/nullcount and malformedoffset
+rejection. Experimentalbuild44 compiles all JVM sources and verifies pinned source
+artifacts/dependencies. Wirev3 stores exact percolumn min/max/nulls, deduplicating
+equal stringbounds; stats framing is accounted before heapframe allocation.
+CPU retains SparkArrowWriter and iterator-owned reusable codecs.
+GPU stats use two groupwide reductions plus optional parallelstringbound gather;
+source/scratch owners survive async drains and retry addresses are rematerialized.
+
+ActualSparkPredicateProbe passed Snappy and PCBS, each with CPU/GPU writers and
+CPU/GPU readers. For the20005row/fourpartition fixture a high-ID range retains
+oneof4records; impossible ranges and allnull IsNotNull retain0. Selected/residual
+query results equal pruning-disabled reads. Snappy also passed signed extrema,
+multi-tile tail, Unicode/NUL/prefix/null/empty/equalbound cases including actual
+131072/131073byte extrema, defaultPTDS stream2 and an explicit createdstream.
+The probe exercises InSet normalization and unknownstatistics between knownruns.
+Artifacts /data/tmp/cache-predicate-pruning/probe-{snappy,pcbs}-44.
+A second focused peer review found no actionable resource/correctness issue;
+its longbound/InSet test gaps were added before these runs.
+
+Shim finalhead offlinecoverage PASS32profiles/3839requirements/0findings,
+19unmodelledwildcards. This is HEAD-only static evidence:
+both review/advisory commands returnINCOMPLETE because gh is absent; originfetch
+failed DNS. Localmain1b5576adb95941f57bfd2ab22b96435d7057ecf8 is not an ancestor,
+and read-only merge-tree reports preexisting conflicts in GpuRangeBoundaryPlan
+and ProjectExprSuite. No conflicts were resolved or branch merged silently.
+Full proposed-with-currentmain validation/allprofilecompilation remains unverified.
+
+New runtime finding: Sparkdist corejar contains enabled CompLogging compression
+tracing (spark.test.compression_logging.enabled defaulttrue). The build42 and44
+Sparkdependency hashes are IDENTICAL, so this is not a new runtime substitution.
+Earlier cohorts used this instrumentedruntime; its timing perturbation is not
+quantified. It is not evidence that the cache codec itself is spending the logged
+Spark task-result transport time. Future timing cohort will disable this existing
+diagnostic switch, record the change, and not call historical data clean stockSpark.
+No old result is silently relabeled or discarded.

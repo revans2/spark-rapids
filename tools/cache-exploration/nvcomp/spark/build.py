@@ -138,6 +138,8 @@ def main():
     subprocess.run(["python3.9", str(HERE.parent / "native/host_build.py"),
                     "--output", str(output / "host"), "--cudf-jar", str(dependencies[0])],
                    check=True)
+    subprocess.run(["python3.9", str(HERE.parent / "native/statistics_build.py"),
+                    "--output", str(output / "statistics")], check=True)
     spark_jars = sorted(p for p in (SPARK / "jars").glob("*.jar") if p.is_file())
     if not spark_jars:
         raise RuntimeError("Need built Spark3.5.5 distribution")
@@ -177,6 +179,8 @@ def main():
         "sources": {str(p): digest(p) for p in sources},
         "native_library": str(output / "libcascaded_exploration.so"),
         "host_library": str(output / "host/libhost_packed.so"),
+        "statistics_library": str(output / "statistics/libpacked_statistics.so"),
+        "statistics_build_manifest": digest(output / "statistics/statistics-build.json"),
         "host_build_manifest": digest(output / "host/host-build.json"),
         "native_build_manifest": digest(output / "build-provenance.json"),
     }

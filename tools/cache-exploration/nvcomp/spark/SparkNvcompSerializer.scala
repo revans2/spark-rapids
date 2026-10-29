@@ -56,7 +56,8 @@ abstract class SparkNvcompSerializer extends ParquetCachedBatchSerializer {
   override def supportsColumnarOutput(schema: StructType): Boolean = false
   override def vectorTypes(attributes: Seq[Attribute], conf: SQLConf): Option[Seq[String]] = None
   override def buildFilter(predicates: Seq[Expression], cachedAttributes: Seq[Attribute]):
-      (Int, Iterator[CachedBatch]) => Iterator[CachedBatch] = (_, input) => input
+      (Int, Iterator[CachedBatch]) => Iterator[CachedBatch] =
+    NvcompBatchFilter.build(predicates, cachedAttributes, codec)
 
   override def convertInternalRowToCachedBatch(input: RDD[InternalRow], schema: Seq[Attribute],
       storageLevel: StorageLevel, conf: SQLConf): RDD[CachedBatch] = {
@@ -210,7 +211,7 @@ object SparkNvcompSerializer {
   }
 
   private[cacheexploration] final case class ParsedColumn(metadata: Array[Byte],
-      packedBytes: Long, offsets: Array[Long], lengths: Array[Long], bits: Array[Int],
+      statistics: PackedColumnStatistics, packedBytes: Long, offsets: Array[Long], lengths: Array[Long], bits: Array[Int],
       payloadOffsets: Array[Int], payloadLengths: Array[Int])
 
   private[cacheexploration] final case class Parsed(rows: Int, columns: Array[ParsedColumn],
@@ -245,7 +246,7 @@ object SparkNvcompSerializer {
     require(record.bytes.length >= HeaderBytes && record.bytes.length.toLong <= GroupBytes,
       "Invalid nvCOMP cache record byte length")
     val in = ByteBuffer.wrap(record.bytes).order(ByteOrder.LITTLE_ENDIAN)
-    require(in.getInt() == Magic && in.getInt() == 2 && in.getInt() == codecId(codec),
+    require(in.getInt() == Magic && in.getInt() == 3 && in.getInt() == codecId(codec),
       "nvCOMP cache format/codec mismatch")
     val rows = in.getInt()
     require(rows >= 0 && rows == record.numRows && in.getLong() == ChunkBytes,
@@ -261,6 +262,7 @@ object SparkNvcompSerializer {
       val rawBytes = in.getLong()
       val metadataLength = in.getInt()
       val segments = in.getInt()
+      val statistics = readStatistics(in, rows)
       require(rawBytes > 0 && rawBytes <= RecordBytes && metadataLength > 0 && segments > 0 &&
         metadataLength.toLong + segments.toLong * DescriptorBytes <= in.remaining(),
         "Invalid nvCOMP column lengths")
@@ -286,7 +288,7 @@ object SparkNvcompSerializer {
       }
       require(covered == rawBytes, "Incomplete decoded column")
       totalRaw = Math.addExact(totalRaw, rawBytes)
-      ParsedColumn(metadata, rawBytes, offsets, lengths, bits, new Array[Int](segments), sizes)
+      ParsedColumn(metadata, statistics, rawBytes, offsets, lengths, bits, new Array[Int](segments), sizes)
     }
     require(totalRaw == packed && in.position().toLong + totalPayload == record.bytes.length,
       "Incomplete nvCOMP cache payload")
@@ -301,13 +303,55 @@ object SparkNvcompSerializer {
   }
 
   private final case class WireColumn(metadata: Array[Byte], packedBytes: Long,
-      layout: Array[PackedSegments.Segment], payloadLengths: Array[Long])
+      statistics: PackedColumnStatistics, layout: Array[PackedSegments.Segment], payloadLengths: Array[Long])
 
   private final case class Frame(record: NvcompCacheRecord, payloadOffsets: Array[Int])
 
+  private def statisticsBytes(stats: PackedColumnStatistics): Long =
+    36L + Option(stats.minimumUtf8).map(_.length.toLong).getOrElse(0L) +
+      (if (stats.maximumUtf8 eq stats.minimumUtf8) 0L
+        else Option(stats.maximumUtf8).map(_.length.toLong).getOrElse(0L))
+
+  private def writeStatistics(out: ByteBuffer, stats: PackedColumnStatistics, rows: Int): Unit = {
+    require(stats.rowCount == rows && stats.nullCount >= 0 && stats.nullCount <= rows,
+      "Invalid cached column statistics")
+    out.putInt(stats.typeId).putInt(stats.nullCount).putLong(stats.minimum).putLong(stats.maximum)
+    val lower = stats.minimumUtf8
+    val upper = stats.maximumUtf8
+    out.putInt(if (lower == null) -1 else lower.length)
+      .putInt(if (upper == null) -1 else if (upper eq lower) -2 else upper.length).putInt(0)
+    if (lower != null) out.put(lower)
+    if (upper != null && !(upper eq lower)) out.put(upper)
+  }
+
+  private def readStatistics(in: ByteBuffer, rows: Int): PackedColumnStatistics = {
+    require(in.remaining() >= 36, "Truncated cached statistics")
+    val kind = in.getInt()
+    val nulls = in.getInt()
+    val minimum = in.getLong()
+    val maximum = in.getLong()
+    val lowerLength = in.getInt()
+    val upperLength = in.getInt()
+    require(in.getInt() == 0 && Set(3, 4, 23).contains(kind) &&
+      nulls >= 0 && nulls <= rows && lowerLength >= -1 && upperLength >= -2 &&
+      (upperLength != -2 || lowerLength >= 0) &&
+      math.max(0L, lowerLength.toLong) + math.max(0L, upperLength.toLong) <= in.remaining(),
+      "Invalid cached statistics")
+    def bound(length: Int): Array[Byte] = if (length < 0) null else {
+      val bytes = new Array[Byte](length)
+      in.get(bytes)
+      bytes
+    }
+    val lower = bound(lowerLength)
+    val upper = if (upperLength == -2) lower else bound(upperLength)
+    require(if (kind == 23) (lower != null && upper != null) == (nulls < rows)
+      else lower == null && upper == null, "Invalid cached string bounds")
+    new PackedColumnStatistics(kind, rows, nulls, minimum, maximum, lower, upper)
+  }
+
   private def frameSize(columns: Array[WireColumn]): Long =
     HeaderBytes.toLong + columns.map { column =>
-      16L + column.metadata.length + column.layout.length.toLong * DescriptorBytes +
+      16L + statisticsBytes(column.statistics) + column.metadata.length + column.layout.length.toLong * DescriptorBytes +
         column.payloadLengths.sum
     }.sum
 
@@ -316,11 +360,12 @@ object SparkNvcompSerializer {
     require(size <= GroupBytes && size <= Int.MaxValue, "Encoded cache record exceeds heap bound")
     val bytes = new Array[Byte](size.toInt)
     val out = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-    out.putInt(Magic).putInt(2).putInt(codecId(codec)).putInt(rows).putLong(ChunkBytes)
+    out.putInt(Magic).putInt(3).putInt(codecId(codec)).putInt(rows).putLong(ChunkBytes)
       .putLong(columns.map(_.packedBytes).sum).putInt(columns.length).putInt(0)
     columns.foreach { column =>
       require(column.layout.length == column.payloadLengths.length, "Column segment count")
       out.putLong(column.packedBytes).putInt(column.metadata.length).putInt(column.layout.length)
+      writeStatistics(out, column.statistics, rows)
       out.put(column.metadata)
       column.layout.indices.foreach { i =>
         val segment = column.layout(i)
@@ -350,8 +395,8 @@ object SparkNvcompSerializer {
       require(columns.length == table.metadata.length, "Encoded column count")
       next += columns.length
       payloadGroups += columns.flatMap(_.payloads)
-      columns.map { column =>
-        WireColumn(column.metadata, column.packedBytes, column.segments,
+      columns.zip(table.statistics).map { case (column, statistics) =>
+        WireColumn(column.metadata, column.packedBytes, statistics, column.segments,
           column.payloads.map(_.getLength))
       }
     }
@@ -385,12 +430,12 @@ object SparkNvcompSerializer {
   }
 
   private[cacheexploration] final case class CpuColumn(metadata: Array[Byte],
-      packedBytes: Long, payload: Array[Byte])
+      packedBytes: Long, statistics: PackedColumnStatistics, payload: Array[Byte])
 
   private[cacheexploration] def cpuWire(rows: Int, columns: Array[CpuColumn],
       codec: String): NvcompCacheRecord = {
     val result = frame(rows, columns.map { column =>
-      WireColumn(column.metadata, column.packedBytes,
+      WireColumn(column.metadata, column.packedBytes, column.statistics,
         PackedTableCodec.layout(Array(0L), Array(column.packedBytes), Array(8)),
         Array(column.payload.length.toLong))
     }, codec)
@@ -403,6 +448,7 @@ object SparkNvcompSerializer {
   private final case class PackedRecord(rows: Int, metadata: Array[Array[Byte]],
       spans: Array[Long], layout: Array[Array[PackedSegments.Segment]],
       buffer: SpillableBuffer) extends AutoCloseable {
+    var statistics: Array[PackedColumnStatistics] = null
     override def close(): Unit = withResource(buffer) { _ => () }
   }
 
@@ -512,6 +558,45 @@ object SparkNvcompSerializer {
       !packedRecords.isEmpty
     }
 
+    private def collectStatistics(tables: Seq[PackedRecord]): Unit = {
+      val missing = tables.filter(_.statistics == null)
+      if (missing.nonEmpty) {
+        val result = withRetryNoSplit {
+          withResource(new ArrayBuffer[DeviceMemoryBuffer]()) { owners =>
+            withResource(new ArrayBuffer[DeviceMemoryBuffer]()) { columns =>
+              val descriptors = missing.flatMap { table =>
+                val parentBuffer = table.buffer.getDeviceBuffer()
+                owners += parentBuffer
+                val description = HostPackedBridge.describeColumns(table.metadata,
+                  table.metadata.indices.map(i => table.spans(i * 2 + 1)).toArray)
+                require(description.length == table.metadata.length * 8, "GPU statistics descriptors")
+                table.metadata.indices.foreach { i =>
+                  val column = parentBuffer.slice(table.spans(i * 2), table.spans(i * 2 + 1))
+                  columns += column
+                  description(i * 8 + 7) = column.getAddress
+                }
+                description
+              }.toArray
+              GpuPackedStatistics.compute(columns.toArray, descriptors, Cuda.DEFAULT_STREAM)
+            }
+          }
+        }
+        var index = 0
+        missing.foreach { table =>
+          table.statistics = result.slice(index, index + table.metadata.length)
+          require(table.statistics.length == table.metadata.length, "GPU statistics count")
+          index += table.metadata.length
+        }
+        require(index == result.length, "Unexpected GPU statistics count")
+      }
+    }
+
+    private def framingUpperBound(table: PackedRecord): Long =
+      HeaderBytes.toLong + table.metadata.indices.map { i =>
+        16L + statisticsBytes(table.statistics(i)) + table.metadata(i).length +
+          table.layout(i).length.toLong * DescriptorBytes + table.spans(i * 2 + 1)
+      }.sum
+
     private def fill(): Unit = {
       GpuSemaphore.acquireIfNecessary(TaskContext.get())
       withResource(new ArrayBuffer[PackedRecord]()) { tables =>
@@ -522,6 +607,16 @@ object SparkNvcompSerializer {
           bytes += table.buffer.sizeInBytes
         }
         if (tables.nonEmpty) {
+          collectStatistics(tables.toSeq)
+          // Exact string extrema can be large. Budget their actual framed bytes, rather than
+          // truncating bounds or allocating the entire group's heap frames before checking.
+          var projected = tables.map(framingUpperBound).sum
+          while (tables.length > 1 && projected > RawGroupBytes) {
+            val last = tables.remove(tables.length - 1)
+            projected -= framingUpperBound(last)
+            packedRecords.addFirst(last)
+          }
+          require(projected <= RawGroupBytes, "One packed record and statistics exceed heap bound")
           val records = withRetryNoSplit {
             withResource(new ArrayBuffer[DeviceMemoryBuffer]()) { owners =>
               withResource(new ArrayBuffer[DeviceMemoryBuffer]()) { inputs =>

@@ -40,6 +40,21 @@ public final class HostPackedBridge {
   public static native long[] parse(byte[] metadata, byte[] packed);
 
   /**
+   * Scans borrowed host packed values for exact null counts and signed int/long or unsigned UTF8
+   * bounds. Bounds exclude nulls; returned string arrays are newly owned and may share equal bounds.
+   * Malformed metadata, offsets or declared null counts are rejected. No CUDA context is required.
+   */
+  public static native PackedColumnStatistics[] collectStatistics(byte[] metadata, byte[] packed);
+
+  /**
+   * Returns eight longs per one-column span: type ID, rows, declared null count, data offset,
+   * validity offset, string-offsets offset, raw span length, reserved zero. Offsets are relative
+   * to that span and use -1 for missing buffers. Only host metadata is read, so both CPU and GPU
+   * packed buffer orders are accepted without accessing device data.
+   */
+  public static native long[] describeColumns(byte[][] columnMetadata, long[] rawLengths);
+
+  /**
    * Returns Object[]{long[] interleavedStartsAndLengths, byte[][] rebasedColumnMetadata}.
    * The address borrows an intact GPU packed allocation; no device bytes are read.
    */

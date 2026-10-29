@@ -45,26 +45,26 @@ class ParquetCachedBatchFilterSuite extends AnyFunSuite {
     "message cache { optional int64 _col0; optional binary _col1 (UTF8); optional int32 _col2; }")
 
   private def longStats(low: Long, high: Long, nulls: Long = 0): LongStatistics = {
-    val stats = new LongStatistics
+    val stats = Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
+      .withNumNulls(nulls).build().asInstanceOf[LongStatistics]
     stats.updateStats(low)
     stats.updateStats(high)
-    stats.setNumNulls(nulls)
     stats
   }
 
   private def stringStats(low: String, high: String): BinaryStatistics = {
-    val stats = new BinaryStatistics
+    val stats = Statistics.getBuilderForReading(schema.getType(1).asPrimitiveType())
+      .withNumNulls(0).build().asInstanceOf[BinaryStatistics]
     stats.updateStats(Binary.fromString(low))
     stats.updateStats(Binary.fromString(high))
-    stats.setNumNulls(0)
     stats
   }
 
   private def intStats(low: Int, high: Int): IntStatistics = {
-    val stats = new IntStatistics
+    val stats = Statistics.getBuilderForReading(schema.getType(2).asPrimitiveType())
+      .withNumNulls(0).build().asInstanceOf[IntStatistics]
     stats.updateStats(low)
     stats.updateStats(high)
-    stats.setNumNulls(0)
     stats
   }
 
@@ -121,8 +121,8 @@ class ParquetCachedBatchFilterSuite extends AnyFunSuite {
   }
 
   test("null-safe NULL in both orders and all-null statistics") {
-    val allNull = new LongStatistics
-    allNull.setNumNulls(4)
+    val allNull: Statistics[_] = Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
+      .withNumNulls(4).build()
     val nullRecord = record(block(Seq(allNull, stringStats("x", "x"), intStats(1, 4))))
     val nonNull = ordinary(0, 3)
     val nullLiteral = Literal.create(null, LongType)
@@ -136,11 +136,11 @@ class ParquetCachedBatchFilterSuite extends AnyFunSuite {
   }
 
   test("missing bounds and unknown null counts retain records") {
-    val missing = new LongStatistics
-    missing.setNumNulls(0)
+    val missing: Statistics[_] = Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
+      .withNumNulls(0).build()
     val batch = record(block(Seq(missing, stringStats("x", "x"), intStats(1, 4))))
     assert(selected(GreaterThan(attributes.head, Literal(100L)), Seq(batch)) == Seq(batch))
-    val unknown = new LongStatistics
+    val unknown: Statistics[_] = Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType()).build()
     val unknownRecord = record(block(Seq(unknown, stringStats("x", "x"), intStats(1, 4))))
     assert(selected(IsNull(attributes.head), Seq(unknownRecord)) == Seq(unknownRecord))
   }
@@ -152,8 +152,8 @@ class ParquetCachedBatchFilterSuite extends AnyFunSuite {
     val predicate = GreaterThan(attributes.head, Literal(90L))
     assert(selected(predicate, Seq(batch)) == Seq(batch))
     assert(selected(predicate, Seq(record(outside))).isEmpty)
-    val missing = new LongStatistics
-    missing.setNumNulls(0)
+    val missing: Statistics[_] = Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
+      .withNumNulls(0).build()
     val unknown = block(Seq(missing, stringStats("x", "x"), intStats(1, 4)))
     assert(selected(predicate, Seq(record(outside, unknown))).nonEmpty)
   }

@@ -168,6 +168,8 @@ object CpuCachePath {
           Array.empty[SparkNvcompSerializer.CpuColumn]
         } else {
           val packed = pack(writer.root, types)
+          val statistics = HostPackedBridge.collectStatistics(packed.metadata, packed.bytes)
+          require(statistics.length == types.length, "CPU packed statistics count")
           val indexed = HostPackedBridge.indexHost(packed.metadata, packed.bytes)
           val ranges = indexed(0).asInstanceOf[Array[Long]]
           val metadata = indexed(1).asInstanceOf[Array[Array[Byte]]]
@@ -178,7 +180,7 @@ object CpuCachePath {
             val length = Math.toIntExact(ranges(i * 2 + 1))
             require(start >= 0 && length >= 0 && start <= packed.bytes.length - length,
               "CPU packed column index range")
-            SparkNvcompSerializer.CpuColumn(metadata(i), length.toLong,
+            SparkNvcompSerializer.CpuColumn(metadata(i), length.toLong, statistics(i),
               context.encode(packed.bytes, start, length))
           }.toArray
         }

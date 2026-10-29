@@ -276,6 +276,184 @@ jobjectArray index_array(JNIEnv* env, column_index const& index)
   return result;
 }
 
+struct column_description {
+  jint type;
+  jint rows;
+  jint declared_nulls;
+  jlong data;
+  jlong mask;
+  jlong offsets;
+  std::size_t raw_length;
+};
+
+std::vector<column_description> describe_table(std::vector<std::uint8_t> const& metadata,
+                                              std::size_t length)
+{
+  // No synthetic pointer is dereferenced. This is the same host unpack operation as project().
+  constexpr std::uintptr_t synthetic_base = 0x100000000ULL;
+  require(length > 0 && length <= std::numeric_limits<std::uintptr_t>::max() - synthetic_base,
+          "Invalid described packed length");
+  auto base = reinterpret_cast<std::uint8_t const*>(synthetic_base);
+  auto table = cudf::unpack(std::span<std::uint8_t const>(metadata), base);
+  require(table.num_columns() > 0 && table.num_rows() > 0, "Empty packed statistics metadata");
+  require(static_cast<std::uint64_t>(table.num_columns()) * 8 <=
+            std::numeric_limits<jsize>::max(), "Too many described columns");
+  std::vector<column_description> result;
+  result.reserve(table.num_columns());
+  for (auto const& col : table) {
+    // false permits both CPU offsets-before-chars and GPU chars-before-offsets layouts.
+    check_span(col, base, length, false);
+    auto type = static_cast<jint>(col.type().id());
+    result.push_back({type, col.size(), col.null_count(),
+                      pointer_offset(col.head<void>(), base, length),
+                      pointer_offset(col.null_mask(), base, length),
+                      type == 23 ? pointer_offset(col.child(0).head<void>(), base, length) : -1,
+                      length});
+  }
+  return result;
+}
+
+struct host_statistics {
+  column_description column;
+  jint nulls = 0;
+  jlong minimum = 0;
+  jlong maximum = 0;
+  bool has_value = false;
+  bool equal_bounds = false;
+  std::vector<std::uint8_t> minimum_utf8;
+  std::vector<std::uint8_t> maximum_utf8;
+
+  explicit host_statistics(column_description const& description) : column(description) {}
+};
+
+int compare_bytes(std::uint8_t const* left, std::size_t left_length,
+                  std::uint8_t const* right, std::size_t right_length)
+{
+  auto common = std::min(left_length, right_length);
+  auto compared = common == 0 ? 0 : std::memcmp(left, right, common);
+  if (compared != 0) return compared;
+  return left_length < right_length ? -1 : left_length > right_length ? 1 : 0;
+}
+
+host_statistics scan_statistics(column_description const& col, std::uint8_t const* base)
+{
+  host_statistics result{col};
+  if (col.type == 23) {
+    // Validate every offset, including null rows, before using a string in comparisons.
+    check_strings(base, col.raw_length, col.rows, col.data, col.offsets);
+  }
+  std::size_t minimum_start = 0;
+  std::size_t minimum_length = 0;
+  std::size_t maximum_start = 0;
+  std::size_t maximum_length = 0;
+  auto chars = col.type == 23 && col.data != -1 ? base + col.data : base;
+  for (jint row = 0; row < col.rows; ++row) {
+    bool valid = col.mask == -1 ||
+      (base[static_cast<std::size_t>(col.mask) + static_cast<std::size_t>(row) / 8] &
+       (1U << (row % 8))) != 0;
+    if (!valid) {
+      ++result.nulls;
+      continue;
+    }
+    if (col.type == 23) {
+      auto offsets = static_cast<std::size_t>(col.offsets);
+      auto start = static_cast<std::size_t>(
+        load_offset(base, offsets + static_cast<std::size_t>(row) * 4));
+      auto end = static_cast<std::size_t>(
+        load_offset(base, offsets + (static_cast<std::size_t>(row) + 1) * 4));
+      auto length = end - start;
+      if (!result.has_value ||
+          compare_bytes(chars + start, length, chars + minimum_start, minimum_length) < 0) {
+        minimum_start = start;
+        minimum_length = length;
+      }
+      if (!result.has_value ||
+          compare_bytes(chars + start, length, chars + maximum_start, maximum_length) > 0) {
+        maximum_start = start;
+        maximum_length = length;
+      }
+    } else {
+      jlong value;
+      auto at = base + col.data + static_cast<std::size_t>(row) * (col.type == 3 ? 4 : 8);
+      if (col.type == 3) {
+        std::int32_t integer;
+        std::memcpy(&integer, at, sizeof(integer));
+        value = integer;
+      } else {
+        std::int64_t integer;
+        std::memcpy(&integer, at, sizeof(integer));
+        value = integer;
+      }
+      if (!result.has_value || value < result.minimum) result.minimum = value;
+      if (!result.has_value || value > result.maximum) result.maximum = value;
+    }
+    result.has_value = true;
+  }
+  require(result.nulls == col.declared_nulls, "Declared null count differs from validity bitmap");
+  if (col.type == 23 && result.has_value) {
+    result.minimum_utf8.assign(chars + minimum_start, chars + minimum_start + minimum_length);
+    result.equal_bounds = compare_bytes(chars + minimum_start, minimum_length,
+                                        chars + maximum_start, maximum_length) == 0;
+    if (!result.equal_bounds) {
+      result.maximum_utf8.assign(chars + maximum_start, chars + maximum_start + maximum_length);
+    }
+  }
+  return result;
+}
+
+jbyteArray statistics_bytes(JNIEnv* env, std::vector<std::uint8_t> const& bytes)
+{
+  require(bytes.size() <= static_cast<std::size_t>(std::numeric_limits<jsize>::max()),
+          "String bound exceeds Java array length");
+  auto result = env->NewByteArray(static_cast<jsize>(bytes.size()));
+  if (result && !bytes.empty()) {
+    env->SetByteArrayRegion(result, 0, static_cast<jsize>(bytes.size()),
+                           reinterpret_cast<jbyte const*>(bytes.data()));
+  }
+  return result;
+}
+
+jobjectArray statistics_array(JNIEnv* env, std::vector<host_statistics> const& statistics)
+{
+  auto cls = env->FindClass("org/apache/spark/sql/cacheexploration/PackedColumnStatistics");
+  if (!cls) return nullptr;
+  auto constructor = env->GetMethodID(cls, "<init>", "(IIIJJ[B[B)V");
+  if (!constructor) return nullptr;
+  auto result = env->NewObjectArray(static_cast<jsize>(statistics.size()), cls, nullptr);
+  if (!result) return nullptr;
+  for (std::size_t i = 0; i < statistics.size(); ++i) {
+    auto const& stat = statistics[i];
+    jbyteArray minimum = nullptr;
+    jbyteArray maximum = nullptr;
+    if (stat.column.type == 23 && stat.has_value) {
+      minimum = statistics_bytes(env, stat.minimum_utf8);
+      if (!minimum || env->ExceptionCheck()) return nullptr;
+      maximum = stat.equal_bounds ? minimum : statistics_bytes(env, stat.maximum_utf8);
+      if (!maximum || env->ExceptionCheck()) {
+        env->DeleteLocalRef(minimum);
+        return nullptr;
+      }
+    }
+    auto value = env->NewObject(cls, constructor, stat.column.type, stat.column.rows, stat.nulls,
+                                stat.minimum, stat.maximum, minimum, maximum);
+    if (maximum && maximum != minimum) env->DeleteLocalRef(maximum);
+    if (minimum) env->DeleteLocalRef(minimum);
+    if (!value || env->ExceptionCheck()) return nullptr;
+    env->SetObjectArrayElement(result, static_cast<jsize>(i), value);
+    env->DeleteLocalRef(value);
+    if (env->ExceptionCheck()) return nullptr;
+  }
+  return result;
+}
+
+void throw_java_allocation(JNIEnv* env)
+{
+  if (!env->ExceptionCheck()) {
+    auto type = env->FindClass("java/lang/OutOfMemoryError");
+    if (type) env->ThrowNew(type, "Cannot allocate packed column statistics");
+  }
+}
+
 void throw_java(JNIEnv* env, std::exception const& failure)
 {
   if (!env->ExceptionCheck()) {
@@ -391,6 +569,77 @@ Java_org_apache_spark_sql_cacheexploration_HostPackedBridge_parse(
       env->SetLongArrayRegion(result, 0, static_cast<jsize>(descriptors.size()), descriptors.data());
     }
     return result;
+  } catch (std::exception const& failure) {
+    throw_java(env, failure);
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_org_apache_spark_sql_cacheexploration_HostPackedBridge_collectStatistics(
+  JNIEnv* env, jclass, jbyteArray java_metadata, jbyteArray java_packed)
+{
+  try {
+    auto metadata = read_metadata(env, java_metadata);
+    require(java_packed != nullptr, "Null packed byte array");
+    auto length = env->GetArrayLength(java_packed);
+    require(length > 0, "Empty packed statistics data");
+    auto descriptions = describe_table(metadata, static_cast<std::size_t>(length));
+    std::vector<host_statistics> statistics;
+    statistics.reserve(descriptions.size());
+    {
+      pinned_bytes packed(env, java_packed);
+      for (auto const& column : descriptions) {
+        statistics.push_back(scan_statistics(column, packed.data));
+      }
+    }
+    // No Java objects/arrays are allocated while the borrowed packed array is critical.
+    return statistics_array(env, statistics);
+  } catch (std::bad_alloc const&) {
+    throw_java_allocation(env);
+    return nullptr;
+  } catch (std::exception const& failure) {
+    throw_java(env, failure);
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_org_apache_spark_sql_cacheexploration_HostPackedBridge_describeColumns(
+  JNIEnv* env, jclass, jobjectArray java_metadata, jlongArray java_lengths)
+{
+  try {
+    require(java_metadata != nullptr, "Null column metadata array");
+    auto lengths = read_array<jlong>(env, java_lengths);
+    require(lengths.size() == static_cast<std::size_t>(env->GetArrayLength(java_metadata)),
+            "Column metadata/length counts differ");
+    require(lengths.size() <= static_cast<std::size_t>(std::numeric_limits<jsize>::max()) / 8,
+            "Too many described columns");
+    std::vector<jlong> descriptors;
+    descriptors.reserve(lengths.size() * 8);
+    for (std::size_t i = 0; i < lengths.size(); ++i) {
+      require(lengths[i] > 0, "Invalid described column length");
+      auto length = static_cast<std::size_t>(lengths[i]);
+      require(static_cast<jlong>(length) == lengths[i], "Described length exceeds host size range");
+      auto array = static_cast<jbyteArray>(
+        env->GetObjectArrayElement(java_metadata, static_cast<jsize>(i)));
+      if (env->ExceptionCheck()) return nullptr;
+      auto metadata = read_metadata(env, array);
+      env->DeleteLocalRef(array);
+      auto columns = describe_table(metadata, length);
+      require(columns.size() == 1, "Statistics descriptors expect one-column metadata");
+      auto const& col = columns.front();
+      descriptors.insert(descriptors.end(),
+        {col.type, col.rows, col.declared_nulls, col.data, col.mask, col.offsets, lengths[i], 0});
+    }
+    auto result = env->NewLongArray(static_cast<jsize>(descriptors.size()));
+    if (result && !descriptors.empty()) {
+      env->SetLongArrayRegion(result, 0, static_cast<jsize>(descriptors.size()), descriptors.data());
+    }
+    return result;
+  } catch (std::bad_alloc const&) {
+    throw_java_allocation(env);
+    return nullptr;
   } catch (std::exception const& failure) {
     throw_java(env, failure);
     return nullptr;
