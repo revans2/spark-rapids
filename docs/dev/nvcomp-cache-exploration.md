@@ -3133,4 +3133,11 @@ are pending; broader compatibility remains incomplete. No push/issues filed.
 First upmergebuild stopped at RAT: results.json and three generated SVGs lacked
 license headers. Added JSON license metadata and generated Apache XML comments;
 all measurement values and PNG bytes are unchanged. SVGs differ only by comments,
-verified by root. No license exclusions or check suppression added; rerun pending.
+verified by root. No license exclusions or check suppression added.
+
+Source-clean C094 upmerge verify355 PASS:71Scala+13Java, including12footer tests.
+Rebuilt experimental JVM/native libraries with current JNI31/private25 artifacts;
+eight supported predicate probes, byte-Cascaded GPU roundtrip and Snappy CPU/GPU
+interop PASS. Original extra byte-predicate invocation failed before SparkSession
+because its harness mapping was absent. Added only that mapping and GPU-only
+mode gates; byte-predicate check is pending. Plugin/runtime code unchanged.

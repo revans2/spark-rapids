@@ -32,21 +32,21 @@ and matching cuDF/RMM headers.
 
 | Dependency | Pinned version / variant |
 | --- | --- |
-| cudf-spark-jni | `26.12.0-20261023.150441-28`, `cuda12` |
-| cudf-spark-private | `26.12.0-20261023.142435-23`, `spark355` |
+| cudf-spark-jni | `26.12.0-20261028.150055-31`, `cuda12` |
+| cudf-spark-private_2.12 | `26.12.0-20261028.142847-25`, `spark355` |
 
 The host bridge uses headers and `rmm/src/cuda_stream_view.cpp` from a populated
 spark-rapids-jni build tree, linking `libcudf.so` from the pinned artifact. Its
 bounds-checked `cudf::unpack` overload is exported by that runtime but absent
 from the mounted public header: a pinned POC dependency, not a portable ABI.
 
-Historical build46 commands (`rapids-plugin-mvn` is the sandbox Maven wrapper):
+Plugin package (`rapids-plugin-mvn` selects the sandbox Java/Maven toolchain):
 
 ```text
-rapids-plugin-mvn -o -nsu -Dbuildver=355 \
-  -Dcudf-spark-jni.version=26.12.0-20261023.150441-28 \
-  -Dcudf-spark-private.version=26.12.0-20261023.142435-23 \
-  -DsecondaryCacheDir=/data/tmp/cache-predicate-pruning/production-build-01/zinc \
+rapids-plugin-mvn -nsu -Dbuildver=355 \
+  -Dcudf-spark-jni.version=26.12.0-20261028.150055-31 \
+  -Dcudf-spark-private.version=26.12.0-20261028.142847-25 \
+  -DsecondaryCacheDir=/data/tmp/pcbs-upmerge-validation/zinc \
   -pl aggregator -am verify -DskipTests
 ```
 
@@ -54,12 +54,13 @@ The experimental builder compiles native libraries and a separate JVM jar:
 
 ```text
 python3.9 tools/cache-exploration/nvcomp/spark/build.py \
-  --output /data/tmp/nvcomp-spark-probe/build-review-new \
-  --source-build /data/tmp/cache-predicate-pruning/production-final/source-build.json \
-  --source-head 91a86cdc3c7a7e5a55dcfc965dbe8abb01edcb23
+  --output /data/tmp/poc-review-new \
+  --source-build /data/tmp/poc-production-upmerge-validation/source-build.json \
+  --source-head c0941b6bf211ecd002ea92d180bade3fc9882166
 ```
 
-Use a new output directory. The proof requires an unchanged clean source checkout,
+Use a new output directory. The upmerge proof retains the exact command and jar hashes. It requires an
+unchanged clean source checkout,
 `source_root`, `source_head`, `source_clean`, `returncode`, build `command`, and
 `{path,sha256}` entries for `build_log`, `aggregator`, `jni`, `private`. A portable
 proof generator is not yet committed. Probe/benchmark options are in

@@ -36,6 +36,7 @@ object SparkPredicateProbe {
     case "zstd" => classOf[SparkNvcompZstdSerializer].getName
     case "ans" => classOf[SparkNvcompAnsSerializer].getName
     case "cascaded-typed" => classOf[SparkNvcompCascadedSerializer].getName
+    case "cascaded8" => classOf[SparkNvcompCascadedByteSerializer].getName
     case other => throw new IllegalArgumentException(other)
   }
 
@@ -239,9 +240,9 @@ object SparkPredicateProbe {
       .config("spark.sql.adaptive.enabled", false).getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
     try {
-      val writes = if (Set("ans", "cascaded-typed").contains(codec)) Seq(true)
+      val writes = if (Set("ans", "cascaded-typed", "cascaded8").contains(codec)) Seq(true)
         else Seq(false, true)
-      val reads = if (Set("ans", "cascaded-typed").contains(codec)) Seq(true)
+      val reads = if (Set("ans", "cascaded-typed", "cascaded8").contains(codec)) Seq(true)
         else Seq(false, true)
       for (writeGpu <- writes) {
         spark.conf.set("spark.rapids.sql.enabled", writeGpu)
