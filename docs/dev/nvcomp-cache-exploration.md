@@ -1729,3 +1729,62 @@ Encodedtotal covers4GiBlogicalinput across4tasks. Samecoldpopulation and
 2GiB/task remains IN PROGRESS. CurrentCPUrecordlayout differsfromoldGPU
 heapfailure; measuredsnapshots and regionarithmetic support proceeding with
 unchangedsettings, not a guaranteedfit.
+
+### 2GiB/task Snappy — verified partial checkpoint
+
+Snappy alone is READY FOR REVIEW in this partial checkpoint. The entire
+2GiB/task cohort is NOT complete: remaining LZ4, Zstd, uncompressed, default
+and PCBS formats remain IN PROGRESS for cohort acceptance. Root-owned serial
+jobs are ongoing; this checkpoint does not claim their outcomes or rerun them.
+
+Same frozen build39, fixed-wide fixture, CPU population, four tasks/local[2]/
+two waves, one warmup plus five measured full/ID reads per execution mode.
+Unchanged16GiBheap,32GiBmanagedhost including2GiBpinned,24GiBGPU and
+64GiBsampledRSS stop guard. Experimental tools remain UNRELEASED; frozen
+released production contracts unchanged. No code/configuration/acceptance
+change. Root and worker reconfirmed MCP docker_exec-only operations at resume
+and checkpoint; worker performed only read-only verification and this
+explicitly authorized documentation checkpoint, no GPU/build/benchmark jobs.
+
+|Format|CPU population s|CPU full s|CPU ID s|GPU-mode full s|GPU-mode ID s|Encoded MiB total|RSS GiB|
+|---|---:|---:|---:|---:|---:|---:|---:|
+|Snappy|17.540|19.811|7.061|0.828|0.509|4140.858|16.388|
+
+Population exact17.539624819s; audited encoded bytes4,342,003,825 across
+33,554,432rows/8GiBcanonical input. Peak sampled process-tree RSS
+17,596,362,752bytes. Completion exit0/no guard, resultPASS; all four
+partitions resident, disk0,1,028encoded records. Root independently verified
+the case after launch; worker independently reran scale verifier PASS:
+25phases/129taskattempts,60with RAPIDS metrics,13CPU phases explicitly
+unavailable. Observed Spark spill and available GPU spill/retry counters0;
+missing CPU RAPIDS counters are not interpreted as zero. Provenance,
+runtime class origins, unchanged budgets and exact aggregates all pass.
+Population remains a single cold sample; reads are warmed five-sample medians.
+GPU-mode reads use actual GPU cache scans of these CPU-written bytes.
+
+Observed decoder scaling is explained by stored-record granularity:
+- Full CPU record32752rows has8,380,480packedbytes.128records occupy
+  1,072,701,440bytes, leaving1,040,384bytes below the configured1GiB
+  decoded-group target.
+- At1GiB/task, the2048-row tail is524,032packedbytes and fits after128
+  full records: one output group/task.
+- At2GiB/task,256full records plus4096-row tail yield257records/task.
+  Tail size1,048,064bytes exceeds remaining space after128full records
+  by7,680bytes. The existing strict greedy grouping therefore emits three
+  groups/task:128full,128full,small tail. No algorithm change was made.
+- Saved per-GPU-read counter deltas confirm1GiB/task has4outputgroups/
+  batches and8native decode calls across4tasks;2GiB/task has12groups/
+  batches and12native calls. Concatenations increase4->8 because each
+  single-record tail needs no concatenation.
+- One1GiB output group still uses two native calls/task:64KiB-rounded
+  chunk workspace for128full records consumes16384blocks, and its tail
+  adds8more, exceeding the16384-block budget. At2GiB each128-record
+  group fits one call, plus one call for its tail. Native calls therefore
+  increase2->3/task, not1->3; output batches increase1->3/task.
+
+Source inspection and process counters establish this fixed-wide grouping
+effect; they do not establish an exclusive runtime cost attribution or a
+general hardware limit. No optimization, cap adjustment, pressure conclusion
+or architect DONE status is implied.
+Artifacts /data/tmp/nvcomp-spark-probe/cpu-scale-snappy-fixed-2048 and
+/data/tmp/nvcomp-pcbs-rebuild-01/verify-cpu-scale.py.
