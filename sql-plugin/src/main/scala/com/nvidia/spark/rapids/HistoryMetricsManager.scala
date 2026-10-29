@@ -209,8 +209,18 @@ private[rapids] object HistoryMetricsManager {
   val PROVIDER_SHUTDOWN_TIMEOUT: Duration = Duration.ofSeconds(10)
 
   def discover(): Seq[HistoryMetricsProvider] = {
-    val loader = getClass.getClassLoader
-    ServiceLoader.load(classOf[HistoryMetricsProvider], loader).iterator().asScala.toSeq
+    val apiClass = classOf[HistoryMetricsProvider]
+    val definingLoader = getClass.getClassLoader
+    val contextLoader = Thread.currentThread().getContextClassLoader
+    // Application providers may live below RAPIDS in the driver loader hierarchy. Only use
+    // that loader when it resolves the same API class as RAPIDS, including in parallel worlds.
+    val compatibleContext = contextLoader != null && (try {
+      Class.forName(apiClass.getName, false, contextLoader) eq apiClass
+    } catch {
+      case failure if isContained(failure) => false
+    })
+    val loader = if (compatibleContext) contextLoader else definingLoader
+    ServiceLoader.load(apiClass, loader).iterator().asScala.toVector
   }
 
   def isContained(failure: Throwable): Boolean = {

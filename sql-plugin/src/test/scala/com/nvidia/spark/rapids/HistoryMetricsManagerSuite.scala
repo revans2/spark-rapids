@@ -16,6 +16,9 @@
 
 package com.nvidia.spark.rapids
 
+import java.net.URLClassLoader
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import java.time.Duration
 import java.util
 
@@ -23,6 +26,7 @@ import com.nvidia.spark.history._
 import org.scalatest.funsuite.AnyFunSuite
 
 class HistoryMetricsManagerSuite extends AnyFunSuite {
+  import Arm.withResource
   private val configuration = util.Collections.singletonMap("spark.test.key", "value")
   private val applicationId = "application-1"
   private val applicationAttemptId = "attempt-2"
@@ -49,19 +53,22 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     val provider = new TestProvider("local", new DelegatingStore(initial))
     val manager = new HistoryMetricsManager(() => Seq(provider))
 
-    initialize(manager, "LOCAL")
+    try {
+      initialize(manager, "LOCAL")
 
-    assert(provider.openCalls == 1)
-    assert(provider.configuration ne configuration)
-    assert(provider.configuration.get("spark.test.key") == "value")
-    intercept[UnsupportedOperationException] {
-      provider.configuration.put("spark.test.key", "changed")
+      assert(provider.openCalls == 1)
+      assert(provider.configuration ne configuration)
+      assert(provider.configuration.get("spark.test.key") == "value")
+      intercept[UnsupportedOperationException] {
+        provider.configuration.put("spark.test.key", "changed")
+      }
+      assert(provider.applicationId == applicationId)
+      assert(provider.applicationAttemptId == applicationAttemptId)
+      assert(provider.producerVersion == producerVersion)
+      assert(MetricStores.current() eq provider.store)
+    } finally {
+      manager.shutdown()
     }
-    assert(provider.applicationId == applicationId)
-    assert(provider.applicationAttemptId == applicationAttemptId)
-    assert(provider.producerVersion == producerVersion)
-    assert(MetricStores.current() eq provider.store)
-    manager.shutdown()
     assert(provider.shutdownCalls == 1)
     assert(provider.shutdownTimeout == HistoryMetricsManager.PROVIDER_SHUTDOWN_TIMEOUT)
     assert(MetricStores.current() eq initial)
@@ -107,6 +114,72 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     assert(second.openCalls == 0)
     assert(MetricStores.current() eq initial)
     manager.shutdown()
+  }
+
+  test("discovery finds application providers in a child context loader") {
+    val apiClass = classOf[HistoryMetricsProvider]
+    val providerClass = classOf[HistoryMetricsDiscoveryTestProvider]
+    val directory = Files.createTempDirectory("history-metrics-services")
+    val services = Files.createDirectories(directory.resolve("META-INF/services"))
+    val serviceFile = services.resolve(apiClass.getName)
+    try {
+      Files.write(serviceFile, providerClass.getName.getBytes(StandardCharsets.UTF_8))
+      val urls = Array(directory.toUri.toURL,
+        providerClass.getProtectionDomain.getCodeSource.getLocation)
+      withResource(new URLClassLoader(urls, apiClass.getClassLoader) {
+        override def loadClass(name: String, resolve: Boolean): Class[_] = synchronized {
+          if (name == providerClass.getName) {
+            val loaded = Option(findLoadedClass(name)).getOrElse(findClass(name))
+            if (resolve) {
+              resolveClass(loaded)
+            }
+            loaded
+          } else {
+            super.loadClass(name, resolve)
+          }
+        }
+      }) { loader =>
+        withContextLoader(loader) {
+          val provider = HistoryMetricsManager.discover()
+            .find(_.getClass.getName == providerClass.getName).get
+          assert(provider.getClass.getClassLoader eq loader)
+          assert(apiClass.isInstance(provider))
+        }
+      }
+    } finally {
+      Files.deleteIfExists(serviceFile)
+      Files.deleteIfExists(services)
+      Files.deleteIfExists(directory.resolve("META-INF"))
+      Files.deleteIfExists(directory)
+    }
+  }
+
+  test("discovery falls back when the context loader is absent") {
+    withContextLoader(null) {
+      assert(HistoryMetricsManager.discover().exists(_.name() == "local"))
+    }
+  }
+
+  test("discovery falls back when the context loader has a separate history API") {
+    val apiClass = classOf[HistoryMetricsProvider]
+    val urls = Array(apiClass.getProtectionDomain.getCodeSource.getLocation)
+    withResource(new URLClassLoader(urls, null)) { loader =>
+      assert(loader.loadClass(apiClass.getName) ne apiClass)
+      withContextLoader(loader) {
+        assert(HistoryMetricsManager.discover().exists(_.name() == "local"))
+      }
+    }
+  }
+
+  private def withContextLoader[T](loader: ClassLoader)(body: => T): T = {
+    val thread = Thread.currentThread()
+    val previous = thread.getContextClassLoader
+    try {
+      thread.setContextClassLoader(loader)
+      body
+    } finally {
+      thread.setContextClassLoader(previous)
+    }
   }
 
   private class TestProvider(
@@ -160,4 +233,17 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
 
     override def info(): BackendInfo = delegate.info()
   }
+}
+
+// Public zero-argument service fixture, loaded by the application's child classloader.
+class HistoryMetricsDiscoveryTestProvider extends HistoryMetricsProvider {
+  override def name(): String = "test-child"
+
+  override def open(
+      configuration: util.Map[String, String],
+      applicationId: String,
+      applicationAttemptId: String,
+      producerVersion: String): MetricStore = MetricStores.current()
+
+  override def shutdown(timeout: Duration): Boolean = true
 }
