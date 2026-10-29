@@ -2877,6 +2877,13 @@ abstract class AbstractMultiFileCloudParquetPartitionReader(
     )
   }
 
+  /**
+   * Whether metadata-only entries with positive row counts need separate batches.
+   * Formats with file-specific post-processing can override this compatibility check.
+   */
+  protected def checkIfNeedToSplitEmpty(current: HostMemoryEmptyMetaData,
+      next: HostMemoryEmptyMetaData): Boolean = false
+
   override def canUseCombine: Boolean = {
     if (queryUsesInputFile) {
       logDebug("Query uses input file name, can't use combine mode")
@@ -2982,6 +2989,7 @@ abstract class AbstractMultiFileCloudParquetPartitionReader(
     val toCombine = ArrayBuffer[HostMemoryBuffersWithMetaDataBase]()
     val leftOvers = ArrayBuffer[HostMemoryBuffersWithMetaDataBase]()
     var firstNonEmpty: HostMemoryBuffersWithMetaData = null
+    var firstEmpty: HostMemoryEmptyMetaData = null
     var emptyNumRows = 0L
     var needsSplit = false
     var iterLoc = 0
@@ -2995,7 +3003,8 @@ abstract class AbstractMultiFileCloudParquetPartitionReader(
           if (emptyNumRows == 0) {
             validateEmptyRowCount(empty)
           }
-          firstNonEmpty == null && empty.numRows <= Int.MaxValue.toLong - emptyNumRows
+          firstNonEmpty == null && empty.numRows <= Int.MaxValue.toLong - emptyNumRows &&
+            (firstEmpty == null || !checkIfNeedToSplitEmpty(firstEmpty, empty))
         case data: HostMemoryBuffersWithMetaData =>
           emptyNumRows == 0 && (firstNonEmpty == null || !checkIfNeedToSplit(firstNonEmpty, data))
         case _ => throw new RuntimeException("Unknown HostMemoryBuffersWithMetaDataBase")
@@ -3005,6 +3014,9 @@ abstract class AbstractMultiFileCloudParquetPartitionReader(
         result match {
           case empty: HostMemoryEmptyMetaData =>
             emptyNumRows += empty.numRows
+            if (empty.numRows > 0 && firstEmpty == null) {
+              firstEmpty = empty
+            }
           case data: HostMemoryBuffersWithMetaData if firstNonEmpty == null =>
             firstNonEmpty = data
           case _ =>
@@ -3076,6 +3088,13 @@ abstract class AbstractMultiFileCloudParquetPartitionReader(
             doCombineHMBs(combinedMeta)
           }
           closeOnExcept(result) { combined =>
+            if (combinedEmptyMeta.allEmpty && combinedEmptyMeta.emptyNumRows > 0) {
+              val expected = combinedEmptyMeta.metaForEmpty.partitionedFile
+              val actual = combined.partitionedFile
+              require(actual.filePath == expected.filePath && actual.start == expected.start &&
+                actual.length == expected.length,
+                "Combined metadata must retain the representative file split")
+            }
             combined.setExecutionTime(selected.map(_.getFilterTime).sum,
               selected.map(_.getBufferTime).sum)
             combined.setScheduleTime(selected.map(_.getScheduleTime).sum)
@@ -3092,10 +3111,9 @@ abstract class AbstractMultiFileCloudParquetPartitionReader(
   protected case class CombinedEmptyMeta(emptyNumRows: Long, emptyBufferSize: Long,
       emptyTotalBytesRead: Long, allEmpty: Boolean, emptyMetas: Array[HostMemoryEmptyMetaData]) {
     def metaForEmpty: HostMemoryEmptyMetaData = {
-      // we might have multiple EmptyMetaData results. If some are due to ignoring
-      // missing files and others are row counts, we want to make sure we
-      // take the metadata information from the ones with row counts because
-      // the ones from ignoring missing files has less information with it.
+      // Select the first entry with rows, or the first entry if all row counts are zero.
+      // Ignored missing files have less metadata and must not represent positive-row groups.
+      // The first positive-row entry is also the reference for checkIfNeedToSplitEmpty.
       emptyMetas.find(_.numRows > 0).orElse(emptyMetas.headOption).orNull
     }
   }
@@ -3137,6 +3155,17 @@ abstract class AbstractMultiFileCloudParquetPartitionReader(
       blocks: collection.Seq[BlockMetaData]
   ): HostMemoryEmptyMetaData
 
+  /**
+   * Constructs metadata for a combined group of metadata-only results.
+   *
+   * The result must retain emptyMeta.metaForEmpty.partitionedFile.
+   * metaForEmpty selects the first metadata entry with a positive row count,
+   * or the first entry if all row counts are zero.
+   *
+   * For positive-row groups, checkIfNeedToSplitEmpty checks compatibility
+   * against this representative. Any file-specific processing selected
+   * through it must be valid for every row in the combined result.
+   */
   protected def newCombinedHMEmptyMetadata(emptyMeta: CombinedEmptyMeta,
       nonEmptyMeta: CombinedMeta): HostMemoryEmptyMetaData
 
@@ -3548,7 +3577,8 @@ class MultiFileCloudParquetPartitionReader(
   override protected def newCombinedHMEmptyMetadata(emptyMeta: CombinedEmptyMeta,
       nonEmptyMeta: CombinedMeta): HostMemoryEmptyMetaData = {
     val metaForEmpty = emptyMeta.metaForEmpty
-    ParquetHostMemoryEmptyMetaData(metaForEmpty.partitionedFile, // just pick one since not used
+    // Retain the compatible group's representative for file-specific post-processing.
+    ParquetHostMemoryEmptyMetaData(metaForEmpty.partitionedFile,
       emptyMeta.emptyBufferSize,
       emptyMeta.emptyTotalBytesRead,
       metaForEmpty.dateRebaseMode, // these shouldn't matter since data is empty
