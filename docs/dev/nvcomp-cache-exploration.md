@@ -3103,3 +3103,14 @@ Prior final355 correctness/build evidence remains unchanged. Broader compatibili
 current-main/advisory evidence, spill recovery and portable reproduction remain
 INCOMPLETE as described above; no production acceptance is claimed. Publication
 handoff is READY FOR REVIEW; only architect marks DONE.
+
+### Editorial pass — READY FOR REVIEW
+
+Shortened the two issue drafts and handoff from3376 to2072words (38.6%).
+All numeric table rows, figures and reuse crossovers are unchanged. Removed
+repeated caveats, obvious instructions and the supplementary unmatched8GiB
+paragraph; historical/current cohorts, regressions and material limits remain.
+Root checked table equality and local links; focused peer review found no issue.
+git diff --check PASS. Documentation only; no runtime changes or benchmark runs.
+Release classification is unchanged. All work/review used MCP docker_exec,
+confirmed by the worker. User review is next; nothing published.

@@ -1,34 +1,21 @@
-# Explore a shared CPU/GPU packed-column cache with general-purpose compression
+# Explore a shared CPU/GPU packed-column cache
 
-Draft performance issue; proof of concept, ready for human review. AI assistance
-was used for implementation, analysis and this draft. No issue has been filed.
+This Spark cache POC uses small packed records with independently compressed
+columns. CPU population reuses Spark ArrowWriter and task-owned codec contexts;
+GPU population uses cuDF contiguous packing and batched chunk compression. A
+column directory enables projection; readers group records toward the GPU batch
+target. Min/max/null statistics support predicate pruning.
 
-A cache format based on small packed column records and general-purpose
-compression offers a promising alternative to Parquet for CPU fallback. The
-experiment is an actual Spark cache serializer, including Spark row-to-columnar
-conversion, cache population, reuse reads, projection and statistics pruning.
-It is not just a compression microbenchmark.
+Uncompressed, Snappy, LZ4 and Zstd interoperate across CPU/GPU writers and readers.
+ANS and legacy Cascaded are GPU-only; their CPU paths throw. Redesigned Cascaded
+was not measured.
 
-CPU population reuses Spark ArrowWriter, packs the resulting columns and
-compresses independent chunks with reusable task-owned codec contexts. GPU
-population uses cuDF contiguous packing and batched compression; many independent
-chunks are submitted together. A record's directory identifies separately
-compressed columns so a projection can decode only selected columns. The cache
-uses one byte array with a column directory, not separate files per column.
-Small stored records are grouped toward the requested GPU output target.
+## CPU fallback
 
-CPU/GPU interoperability is verified for uncompressed, Snappy, LZ4 and Zstd.
-ANS and the installed legacy Cascaded codec are GPU-only; unsupported CPU paths
-throw. The upcoming redesigned Cascaded implementation was not measured.
-
-## CPU fallback: population and reads are different tradeoffs
-
-The current matched cohort uses 256 MiB logical data per task, four tasks/two
-waves (1 GiB total), 32 cached numeric fields, and local[2]. Times are seconds;
-reads are five-sample medians after one warmup. Population is one first cache
-action, including upstream generation and row conversion, not isolated encode.
-Encoded size is the whole cache's payload, including format framing/metadata;
-default Spark's separate statistics row is excluded.
+256 MiB/task, four tasks/two waves (1 GiB total), 32 numeric columns, local[2].
+Population includes upstream generation and row conversion. Reads are medians
+of five samples after one warmup. Encoded size includes framing/metadata, except
+default Spark's separate statistics row.
 
 | CPU writer / CPU reader | Population s | Full read s | ID-only read s | Encoded MiB |
 | --- | ---: | ---: | ---: | ---: |
@@ -39,43 +26,32 @@ default Spark's separate statistics row is excluded.
 | Packed LZ4 | 2.777 | 2.468 | 0.123 | 506.0 |
 | Packed Zstd | 4.301 | 2.406 | 0.130 | 393.4 |
 
-Snappy population is about 6.9× faster than default Spark and 4.6× faster than
-PCBS. Its CPU full read is about 2.1× faster than PCBS and projected read about
-28× faster. Default Spark remains the faster CPU reader. PCBS CPU-written pages
-use UNCOMPRESSED Parquet plus Parquet encoding; the GPU writer uses Snappy.
-These comparisons include conversion and format differences, not just codec speed.
+Snappy population is **6.9× faster than default** and **4.6× faster than PCBS**.
+Its full/projected CPU reads are **2.1×/28× faster than PCBS**. Default remains
+the faster CPU reader. CPU-written PCBS uses uncompressed Parquet pages with
+Parquet encoding; GPU-written PCBS uses Snappy.
 
-The decision depends on reuse. Model total time as:
+The reuse tradeoff is `total = population + N × read`, where N counts reads after
+population. The following crossovers are calculated from measured phases, not
+long-run benchmarks:
 
-`T(N) = population + N × read`
-
-N counts additional reuse reads after the population action; that initial action
-is already included in population. For formats A and B the crossing is
-`N = (P_B - P_A) / (R_A - R_B)` when positive. Full and projected workloads need
-separate curves. For mixed reads use the measured workload's weighted read cost.
-These are modeled totals from measured phases, not independently measured long
-runs; the decimal crossover is approximate and has no confidence interval.
-
-| Packed format vs default, CPU-written/CPU-read | Full-read crossover N | Default faster starting at reuse read | ID-only crossover N | Default faster starting at reuse read |
+| Packed format vs default | Full-read crossover N | Default wins from read | ID-only crossover N | Default wins from read |
 | --- | ---: | ---: | ---: | ---: |
 | Uncompressed | 43.87 | 44 | 522.48 | 523 |
 | Snappy | 16.24 | 17 | 252.99 | 253 |
 | LZ4 | 17.53 | 18 | 373.26 | 374 |
 | Zstd | 17.05 | 18 | 297.92 | 298 |
 
-Below each crossing, packed has lower modeled total time; above it, default wins.
-All four packed formats beat PCBS on both CPU population and these CPU reads,
-so there is no positive crossover against PCBS. Memory residency, compressed
-size, pruning and rebuild frequency can change the practical choice.
+Packed wins below each crossing, default above. Against PCBS, all four packed
+formats win both CPU phases, so there is no crossover in this cohort.
 
 ![CPU total time versus reuse](figures/cpu-reuse-cost.png)
 
-## GPU performance and size at task scale
+## GPU performance and size
 
-These are GPU-written caches and GPU-requested queries: four tasks/two waves,
-2 GiB logical input per task (8 GiB total), 1 GiB GPU output target. This supplement
-did not run CPU population or CPU-query reads. Default Spark's cache encoder
-and decoder remain CPU paths even when GPU execution is requested.
+2 GiB/task, four tasks/two waves (8 GiB total), 1 GiB GPU output target.
+GPU-written caches and GPU-requested queries only; CPU population/reads were not
+run in this supplement. Default Spark's cache encoder/decoder remain CPU paths.
 
 | Format | Population s | GPU-mode full read s | GPU-mode ID read s | Encoded MiB |
 | --- | ---: | ---: | ---: | ---: |
@@ -87,53 +63,44 @@ and decoder remain CPU paths even when GPU execution is requested.
 | Packed ANS | 4.138 | 1.575 | 0.228 | 4517.9 |
 | Packed Cascaded | 4.859 | 1.885 | 0.216 | 3138.7 |
 
-Snappy GPU population is within about 2% of PCBS in this cohort. PCBS is faster
-for full GPU reads; packed projection is substantially faster. Zstd retains about
-23% fewer payload bytes than PCBS, with about 18% slower full GPU reads. This
-supports exploring a common CPU/GPU format, rather than claiming every packed
-codec wins every operation. GPU-uncompressed at 2 GiB/task remains excluded after
-a previously reproduced Java heap allocation failure; no successful rerun is claimed.
+Snappy population is within 2% of PCBS. PCBS wins full reads; packed wins
+projection. Zstd stores 23% fewer bytes than PCBS with 18% slower full reads.
+GPU-uncompressed is excluded after a previously reproduced Java heap failure.
 
-For GPU full reads, PCBS beats Snappy/LZ4/Zstd/Cascaded on both population and
-reads in this supplement. ANS has lower population but slower full reads, so its
-advantage disappears before the first reuse read. For ID-only reuse, Snappy's
-small population penalty is recovered on the first read; LZ4/Cascaded by the
-second and Zstd by the fifth. Exact values can be recalculated from results.json.
+For full reads, PCBS wins both phases against Snappy/LZ4/Zstd/Cascaded; ANS's
+population advantage disappears before the first reuse read. For ID-only reads,
+Snappy recovers its population penalty on read one, LZ4/Cascaded on read two,
+and Zstd on read five.
 
-## Pruning and limits
+## Pruning
 
-The POC stores exact min/max/null statistics and reuses Spark's cache-statistics
-filter with conservative guards. Residual filters still run. The high-quarter
-predicate avoided 75% of selected nvCOMP decoded packed bytes; no-match avoided
-all selected payload decoding. Paired full-read medians at 2 GiB/task are:
+The high-quarter predicate avoided 75% of selected packed bytes decoded;
+no-match avoided all selected payload decoding. Same-predicate full-read medians
+at 2 GiB/task, pruning OFF → ON:
 
-| Format | High-quarter pruning OFF → ON s | No-match OFF → ON s |
+| Format | High-quarter s | No-match s |
 | --- | ---: | ---: |
 | PCBS | 0.958 → 0.581 | 0.973 → 0.211 |
 | Packed Snappy | 1.213 → 0.539 | 1.116 → 0.208 |
 | Packed LZ4 | 1.122 → 0.488 | 1.219 → 0.192 |
 | Packed Zstd | 1.066 → 0.480 | 0.996 → 0.169 |
 
-All-match controls and full precision are in results.json. Codec-call counters
-are not physical kernel counts, and byte counters are not independent PCIe traces.
+All-match controls and full precision are in [results.json](results.json).
 
-The supported POC types are flat int/long/default-binary strings; large strings,
-other types, CPU columnar input, spill recovery and production compatibility are
-not established. All successful runs kept four partitions resident, with no
-observed disk/recomputation and zero available spill/retry counters. Missing
-CPU counters mean unavailable, not zero. This was not a memory-exhaustion test.
+## Scope
 
-Settings: 16 GiB JVM heap, 32 GiB managed host including 2 GiB pinned, 24 GiB RMM
-limit, 64 GiB sampled process-tree RSS stop guard. The guard is not a hard OS
-memory limit. Largest whole-job sampled RSS was 19.830 GiB, tracked RMM highwater
-12.049 GiB; neither is a serializer-only working set.
+The POC supports flat int/long/default-binary strings. Numeric timings use an
+instrumented Spark 3.5.5 distribution with compression tracing disabled. Build45
+provided timings; build46 separately validated final invalid-UTF8 guards.
 
-The local Spark 3.5.5 distribution contains instrumentation. Compression stream
-tracing was disabled, but these are not claimed stock-Spark results. The numeric
-fixture is useful for controlled comparison, not sufficient for workload-wide
-codec selection. Timing build45 predates final invalid-UTF8 guards; final build46
-validated the corrected implementation separately. See [handoff](README.md).
+Settings: 16 GiB heap, 32 GiB managed host including 2 GiB pinned, 24 GiB RMM,
+64 GiB sampled RSS stop guard. All partitions stayed resident; available
+spill/retry counters were zero. Spill recovery was not exercised. Whole-job peaks
+were 19.830 GiB RSS and 12.049 GiB tracked RMM, not serializer-only working sets.
 
-Next work should broaden schemas and workloads, profile the remaining CPU
-read cost, and make the build portable before production integration. All required
-patches for this experiment are in the plugin repository; Vortex is outside this issue.
+Large-string performance, broader types, CPU columnar input and cross-version
+acceptance remain unverified. Next priorities are broader workloads, profiling
+CPU reads and portable builds. All patches are in the plugin repository;
+[build details and provenance](README.md).
+
+*Proof of concept; implementation, analysis and draft prepared with AI assistance.*

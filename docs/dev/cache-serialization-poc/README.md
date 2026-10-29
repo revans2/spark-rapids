@@ -1,95 +1,54 @@
 # Cache serialization proof of concept
 
-Local branch: `poc/cache-serialization`, created from `pcbs-rowgroup-production`
-at `77afe5a90f`. Status: **READY FOR REVIEW** for the local exploration and issue
-drafts. This is not production acceptance. Only the architect marks work DONE.
+Branch `poc/cache-serialization`, based on `pcbs-rowgroup-production` at
+`77afe5a90f`. **READY FOR REVIEW**; not pushed and no issues filed.
 
-## Issue drafts and figures
+- [PCBS improvements](issue-pcbs.md)
+- [Shared CPU/GPU packed cache](issue-packed-cache.md)
+- [Results](results.json) · [Detailed tracker](../nvcomp-cache-exploration.md)
 
-- [PCBS: smaller stored records, large GPU read batches, and heap pressure](issue-pcbs.md).
-- [Packed column cache: CPU fallback and shared CPU/GPU compression](issue-packed-cache.md).
-- [Machine-readable measurement summary](results.json).
-- [Detailed chronological tracker](../nvcomp-cache-exploration.md).
+Attach the `figures/*.png` files when posting; SVGs are also provided. Replace
+relative links with published branch links or issue attachments.
 
-The drafts disclose AI assistance. Review the complete branch scope and claims
-before publishing. No branch push, GitHub issue or pull request is created by
-this handoff. When filing, attach the PNGs under `figures/` and replace local
-Markdown links with links to the published branch/files or issue attachments.
-SVG versions are available for higher-resolution export.
+## Patch scope
 
-Vortex remains historical exploration elsewhere in this branch. It is excluded
-from both issues and from the patch/dependency assessment below. No Vortex
-cleanup or rerun is needed for this handoff.
+Only **`rapids-plugin-4-spark`** needs patches. PCBS changes are in `sql-plugin`
+and `tests`; the experimental serializer and native bridges are under
+`tools/cache-exploration/nvcomp`. No Spark/cuDF/JNI companion patch is required
+for the tested configuration. The stock Spark UTF-8-prefix pruning bug remains
+a separate follow-up, guarded locally.
 
-## Repository scope
+This continuation branch inherits metadata/Delta changes and historical Vortex
+work; its complete diff against main is not cache-only. Vortex is outside both
+issues. Released PCBS contracts are preserved; the packed wire format is unreleased.
 
-**One repository needs implementation patches: `rapids-plugin-4-spark`.**
+## Build
 
-PCBS production changes live in `sql-plugin` and `tests`. The experimental packed
-serializer, CPU conversion/codecs, native metadata bridge, codec adapters and
-CUDA statistics kernels all live under `tools/cache-exploration/nvcomp`.
-`tools/cache-exploration/spark_cache_bench.py` measures real Spark operations.
-No Spark, cuDF or spark-rapids-jni companion patch is required for the tested
-configuration. The existing Spark invalid-UTF8-prefix statistics bug is a
-separate follow-up; both POC serializers have conservative guards.
-
-This is a continuation branch, not a clean patch against current upstream main.
-Its inherited base includes unrelated metadata/Delta work, and its history
-includes Vortex. Review changes relative to the relevant cache base when
-considering production PRs; do not describe the complete main diff as cache-only.
-Existing branches/history and unrelated untracked files were preserved. No
-production source was restructured as part of the publication cleanup.
-
-Released PCBS record layout, Parquet bytes/reader contracts and existing controls
-must remain supported. The packed prototype and its wire format are unreleased;
-no compatibility with obsolete experimental formats is promised.
-
-## Building the experiment
-
-This is an evidence-preserving local harness, **not yet a portable checkout-and-run
-package**. It uses Java 17, Python 3.9+, Spark 3.5.5/Scala 2.12, CUDA toolkit,
-C++20 compiler, nvCOMP 5.0.0.6 SDK and matching cuDF/RMM headers. Existing scripts
-contain sandbox paths under `/home/roberte` and `/data/tmp`; adapt those paths for
-another environment. No special Java vendor or Rust/Vortex toolchain is required.
-
-The final plugin proof uses downloaded artifacts, not a modified local JNI build:
+The harness has local paths and is not yet portable. Requirements: Java 17,
+Python 3.9+, Spark 3.5.5/Scala 2.12, CUDA toolkit, C++20 compiler, nvCOMP 5.0.0.6
+and matching cuDF/RMM headers.
 
 | Dependency | Pinned version / variant |
 | --- | --- |
 | cudf-spark-jni | `26.12.0-20261023.150441-28`, `cuda12` |
 | cudf-spark-private | `26.12.0-20261023.142435-23`, `spark355` |
 
-The native host bridge consumes cuDF/RMM headers and `rmm/src/cuda_stream_view.cpp`
-from a populated spark-rapids-jni build tree. It links `libcudf.so` extracted from
-the pinned artifact. It declares a bounds-checked `cudf::unpack` overload exported
-by that runtime but absent from the mounted public header. That is a pinned POC
-dependency, not a claim of portable public ABI support. Matching headers/build
-inputs are needed, but no changes to their repository are proposed.
+The host bridge uses headers and `rmm/src/cuda_stream_view.cpp` from a populated
+spark-rapids-jni build tree, linking `libcudf.so` from the pinned artifact. Its
+bounds-checked `cudf::unpack` overload is exported by that runtime but absent
+from the mounted public header: a pinned POC dependency, not a portable ABI.
 
-The final clean plugin build ran `rapids-plugin-mvn` (the sandbox Maven wrapper)
-with these arguments; outside the sandbox use the corresponding Maven installation:
+Final plugin build (`rapids-plugin-mvn` is the sandbox Maven wrapper):
 
 ```text
--o -nsu -Dbuildver=355
--Dcudf-spark-jni.version=26.12.0-20261023.150441-28
--Dcudf-spark-private.version=26.12.0-20261023.142435-23
--DsecondaryCacheDir=/data/tmp/cache-predicate-pruning/production-build-01/zinc
--pl aggregator -am verify -DskipTests
+rapids-plugin-mvn -o -nsu -Dbuildver=355 \
+  -Dcudf-spark-jni.version=26.12.0-20261023.150441-28 \
+  -Dcudf-spark-private.version=26.12.0-20261023.142435-23 \
+  -DsecondaryCacheDir=/data/tmp/cache-predicate-pruning/production-build-01/zinc \
+  -pl aggregator -am verify -DskipTests
 ```
 
-Offline mode assumes dependencies are cached. This builds/packages the plugin;
-`-DskipTests` is not a claim that unit tests ran in that command. The twelve PCBS
-filter tests and real Spark probes ran separately, as recorded below.
-
-`nvcomp/spark/build.py` requires `--output`, `--source-build` and `--source-head`.
-The source-build proof JSON records `source_root`, `source_head`, `source_clean`,
-`returncode`, exact `command`, and `{path,sha256}` entries for `build_log`,
-`aggregator`, `jni`, `private`. Its clean source checkout and recorded files must
-remain available and unchanged. A portable proof-generation helper is not yet
-committed. Do not bypass this validation or substitute an unverified prebuilt jar.
-
-For this sandbox, the final corrected build can be reproduced into a NEW output
-directory while retaining its frozen source checkout:
+The experimental builder compiles native libraries and a separate JVM jar:
 
 ```text
 python3.9 tools/cache-exploration/nvcomp/spark/build.py \
@@ -98,18 +57,15 @@ python3.9 tools/cache-exploration/nvcomp/spark/build.py \
   --source-head 91a86cdc3c7a7e5a55dcfc965dbe8abb01edcb23
 ```
 
-The builder compiles the native libraries and experimental JVM jar separately
-from production Maven targets. `nvcomp/spark/run.py --help` describes probes and
-benchmark launch options. Use a fresh output directory per run, approved memory
-settings, serial GPU jobs and correctness prerequisites before larger timings.
-All project operations, worker handoffs and resumptions in this environment must
-continue to use MCP docker_exec tools; workers must confirm that at checkpoints.
+Use a new output directory. The proof requires an unchanged clean source checkout,
+`source_root`, `source_head`, `source_clean`, `returncode`, build `command`, and
+`{path,sha256}` entries for `build_log`, `aggregator`, `jni`, `private`. A portable
+proof generator is not yet committed. Probe/benchmark options are in
+`nvcomp/spark/run.py --help`; retain the approved budgets recorded in the tracker.
 
-## Reuse calculations and figures
+## Calculations and figures
 
-No Spark/GPU work is launched by either command below. The calculation uses full
-precision from the summary; display rounding must not decide the first winning
-integer reuse count.
+These commands use the committed summary without launching Spark:
 
 ```text
 python3.9 tools/cache-exploration/cache_reuse.py \
@@ -125,44 +81,34 @@ python3 tools/cache-exploration/plot_cache_results.py \
   --output docs/dev/cache-serialization-poc/figures
 ```
 
-Plotting additionally requires matplotlib and its dependencies. The CPU curves
-model `P + N × R`; they are not measurements of hundreds of reuse actions.
-The PCBS figure uses the historical final-policy report and shows both gains
-and the TLC regression.
+Plotting requires matplotlib. Reuse curves model `P + N × R` from measured phases;
+crossovers use full precision. PCBS charts use the historical final-policy report.
 
-## Evidence boundaries
+## Verification and provenance
 
-Numeric measurements use experimental build45: prototype sources
-`9fa1d78378cea17caf6f696a37250ed40c158ff6`, production plugin sources
-`e8491e4f5684f2b338445b155533cf676e3eed44`. Final invalid-string correctness fixes
-are separately validated in build46/source
-`91a86cdc3c7a7e5a55dcfc965dbe8abb01edcb23`. The numeric fixture does not exercise
-those string predicates; no final-build timing rerun is claimed.
+| Evidence | Source |
+| --- | --- |
+| Build45 numeric timings: prototype | `9fa1d78378cea17caf6f696a37250ed40c158ff6` |
+| Build45 numeric timings: plugin | `e8491e4f5684f2b338445b155533cf676e3eed44` |
+| Build46 final guard validation | `91a86cdc3c7a7e5a55dcfc965dbe8abb01edcb23` |
 
-Final source-clean Spark 3.5.5 Maven verify passed, twelve packaged-artifact PCBS
-filter tests passed, and final Snappy/PCBS predicate plus Snappy CPU/GPU
-interoperability probes passed. Earlier prerequisites cover the other codecs
-and stream/statistics edge cases. Full acceptance evidence is in the tracker.
+The numeric fixture does not exercise the later UTF-8 fixes. Final Spark 3.5.5
+Maven verify, twelve packaged-artifact PCBS filter tests, Snappy/PCBS predicate
+probes and Snappy CPU/GPU interoperability passed. Tests ran separately from the
+Maven command above. Other codecs and statistics/stream cases have earlier
+prerequisite coverage in the tracker.
 
-At publication cleanup, both immutable archive replays passed again: fourteen
-256 MiB/task cases and seven 2 GiB/task GPU-only cases, zero failed/invalid.
-The committed summary was extracted from those fresh verifier outputs. It
-includes all writer modes, available CPU/GPU full/projected read medians, payload
-sizes, paired predicate controls and whole-job memory peaks. It is a summary,
-not a replacement for raw logs, samples, manifests, hardware/runtime identities
-and source-bound artifacts retained under `/data/tmp/cache-predicate-pruning`.
-The JSON records hashes of the replay outputs; full replay still requires those
-external artifacts, frozen source checkouts and Git objects.
+All 21 current cases were replay-verified at handoff: fourteen 256 MiB/task cases
+and seven 2 GiB/task GPU-only cases, zero failed/invalid. `results.json` contains
+their summary and replay-output hashes. Full replay requires external logs,
+manifests, frozen sources and artifacts under `/data/tmp/cache-predicate-pruning`.
+The local Spark binary is instrumented; compression tracing was disabled.
 
-The earlier matched PCBS evidence is recovered from a Git report and clearly
-labeled historical; its raw archive is not currently mounted. Later CPU lazy
-writer/source cleanup has separate validation and is not retimed by that report.
-The local Spark binary has instrumentation absent from its clean source tree;
-stream tracing is disabled for build45 but it is not a stock-Spark benchmark.
+Historical PCBS results come from the Git report `91d748957d`; their original
+`/data/pcbs-oom` archive is unavailable. Later CPU lazy-writer cleanup was validated
+separately, not retimed in that report.
 
-Cross-version acceptance is INCOMPLETE: static HEAD coverage alone is not the
-required current-main combination/advisory; upstream fetch and GitHub tooling
-were unavailable. Spark 3.3 compile emitted missing join symbols in unchanged
-files, with no successful baseline rebuild. No 3.3/4.x/Databricks success is
-claimed. Successful bounded runs did not exercise spill recovery. No machine
-exhaustion or production-readiness claim follows from this exploration.
+Cross-version acceptance remains **INCOMPLETE**: upstream fetch/GitHub tooling
+were unavailable for current-main/advisory checks; Spark 3.3 compilation failed
+on join symbols in unchanged files without a successful baseline rebuild.
+No 3.3/4.x/Databricks success or spill-recovery validation is claimed.
