@@ -34,6 +34,7 @@ import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.columnar.CachedBatch
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{IntegerType, LongType, StringType}
+import org.apache.spark.unsafe.types.UTF8String
 
 /** Footer-only fixtures deliberately contain no pages: exclusion must precede any data decoding. */
 class ParquetCachedBatchFilterSuite extends AnyFunSuite {
@@ -118,6 +119,69 @@ class ParquetCachedBatchFilterSuite extends AnyFunSuite {
     assert(selected(EqualTo(attributes(1), Literal("東京")), Seq(a, b)) == Seq(b))
     assert(selected(StartsWith(attributes(1), Literal("é")), Seq(a, b)) == Seq(a))
     assert(selected(EqualTo(attributes(1), Literal("missing")), Seq(a, b)).isEmpty)
+  }
+
+  private def invalidUtf8Fixture(): (ParquetCachedBatch, Literal, UTF8String) = {
+    val bytes = Array(0xff.toByte)
+    val value = UTF8String.fromBytes(bytes)
+    assert(UTF8String.fromString(value.toString) != value)
+    val stats = Statistics.getBuilderForReading(schema.getType(1).asPrimitiveType())
+      .withNumNulls(0).build().asInstanceOf[BinaryStatistics]
+    stats.updateStats(Binary.fromConstantByteArray(bytes))
+    val batch = record(block(Seq(longStats(0, 3), stats, intStats(1, 4))))
+    val footer = ParquetCachedBatchFiles.readFooter(ParquetCachedBatchFiles.fromBytes(batch.buffer))
+    assert(footer.getBlocks.get(0).getColumns.get(1).getStatistics.getMinBytes.sameElements(bytes))
+    assert(footer.getBlocks.get(0).getColumns.get(1).getStatistics.getMaxBytes.sameElements(bytes))
+    (batch, Literal.create(value, StringType), value)
+  }
+
+  private def assertMatchingStringPredicatesRetain(batch: ParquetCachedBatch,
+      value: Literal, predicates: Seq[Expression]): Unit = {
+    predicates.foreach { predicate =>
+      withClue(predicate.toString + ": ") {
+        // Establish a real match under Catalyst's raw UTF8String semantics before testing pruning.
+        val constant = predicate.transform { case _: AttributeReference => value }
+        assert(constant.eval() == true)
+        assert(selected(predicate, Seq(batch)) == Seq(batch))
+      }
+    }
+  }
+
+  test("invalid UTF8 equality literals retain a matching raw-byte record") {
+    val (batch, value, _) = invalidUtf8Fixture()
+    assertMatchingStringPredicatesRetain(batch, value, Seq(
+      EqualTo(attributes(1), value), EqualTo(value, attributes(1)),
+      EqualNullSafe(attributes(1), value), EqualNullSafe(value, attributes(1))))
+  }
+
+  test("invalid UTF8 range and prefix literals retain a matching raw-byte record") {
+    val (batch, value, _) = invalidUtf8Fixture()
+    assertMatchingStringPredicatesRetain(batch, value, Seq(
+      LessThanOrEqual(attributes(1), value), GreaterThanOrEqual(value, attributes(1)),
+      GreaterThanOrEqual(attributes(1), value), LessThanOrEqual(value, attributes(1)),
+      StartsWith(attributes(1), value)))
+  }
+
+  test("invalid UTF8 IN and InSet literals retain a matching raw-byte record") {
+    val (batch, value, raw) = invalidUtf8Fixture()
+    assertMatchingStringPredicatesRetain(batch, value, Seq(
+      In(attributes(1), Seq(value)), InSet(attributes(1), Set[Any](raw)),
+      In(attributes(1), Seq(Literal("valid"), value)),
+      InSet(attributes(1), Set[Any](UTF8String.fromString("valid"), raw, null))))
+  }
+
+  test("invalid UTF8 leaves are conservative within AND and OR") {
+    val (batch, value, _) = invalidUtf8Fixture()
+    val matches = EqualTo(attributes(1), value)
+    val numericMatch = GreaterThanOrEqual(attributes.head, Literal(0L))
+    val numericExcludes = GreaterThan(attributes.head, Literal(100L))
+    val unsupported = Contains(attributes(1), value)
+    assert(selected(And(matches, numericMatch), Seq(batch)) == Seq(batch))
+    assert(selected(And(matches, unsupported), Seq(batch)) == Seq(batch))
+    assert(selected(Or(matches, numericExcludes), Seq(batch)) == Seq(batch))
+    assert(selected(Or(matches, unsupported), Seq(batch)) == Seq(batch))
+    // Discarding an unsafe string leaf must still allow an independent top-level conjunct.
+    assert(selected(And(matches, numericExcludes), Seq(batch)).isEmpty)
   }
 
   test("null-safe NULL in both orders and all-null statistics") {

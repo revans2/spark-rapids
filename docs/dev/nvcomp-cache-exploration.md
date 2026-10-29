@@ -2858,3 +2858,39 @@ read values five-sample medians after one warmup. Newstats framing is included.
 
 DefaultGPU-mode cachedecoding remainsCPU. Allpredicate pairedcontrols/results
 remain in verified-partial.json, not collapsed into these normal-read medians.
+
+### Invalid UTF8 correctness finding — PCBS guard verified, final build pending
+
+Root independently found DataSourceStrategy's UTF8String-to-JavaString conversion
+can change literalbytes. NewPCBSpruning incorrectly dropped matching rawFF records.
+Root reproduced4newregressionfailures againste849helper (8prior testsPASS);
+beforelog pcbs-unit-01/invalid-utf8-before.log. This was an error in the newPCBS
+filter's safe-literal assumption, not evidence that releasedPCBS previously pruned.
+
+Added lossless-roundtripguard BEFORE datasource translation, including InSetvalues
+outside expressionchildren. Unsafe leaves retain records, ORretainswholepredicate,
+independent top-level safeANDconjuncts still prune. No cachefile/decoder/config change.
+Root read the decisive diff, compiledcurrenthelper/bridge/suite withfatalwarnings
+into isolatedtestclasses and reran12CPUtests:ALLPASS, includingmatchingCatalyst
+semantics, rawfooterbytepreservation, reversedranges/nullsafe/StartsWith/IN/InSet/
+mixedsets andAND/OR. afterlog pcbs-unit-01/invalid-utf8-after.log.
+Independent guardreview found no concern. Final cleanproduction build/runtime
+proof still pending; do not misidentify frozen timingartefacte849 as this fix.
+
+Root also reproduced stockSpark3.5.5 SimpleMetrics StartsWith false-negative:
+actual/boundsC3A9(é), prefixC3, Catalystactualmatch=true butDefaulthelper retains0.
+Artifact invalid-prefix/{InvalidPrefix.scala,before.log}. Root ran the proof and
+independent source reviewer confirmed rawprefix vs character-substring mismatch.
+Nvcomp currentlyreuses thishelper, so its invalidStartsWith path also needs a
+conservative guard before final handoff. Equality/ranges use rawUTF8 directly
+and do not have PCBS's datasource-conversion issue. Numeric benchmark dataset
+does not exercise either edge; frozenbuild45 numeric measurements continue.
+An optional question asks whether stockSparkfix should be follow-up or included;
+currentSparkmounts read-only. Plugin fixes proceed independently.
+
+All14smalltimings now independentlyVERIFIED (verified-256.json),0failed/invalid.
+First2GiBGPU-writtenSnappy supplementarycase VERIFIED: population4.505s,
+GPUfull1.293/GPU-ID0.201s,4166.257MiB encodedtotal,9.760GiB sampledRSS.
+Samepredicatefull-read off->on: highquarter1.213->0.539s; no-match1.116->0.208s.
+CPUreadsNOT_RUN in thissupplement. Firstlargecase accepted after proof/log/
+counter/RSSchecks; remaining independentlargecases released withsamebudgets.

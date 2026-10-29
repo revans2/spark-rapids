@@ -27,6 +27,7 @@ import org.apache.spark.sql.columnar.CachedBatch
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.rapids.PCBSFilterHelper
 import org.apache.spark.sql.types.{IntegerType, LongType, StringType}
+import org.apache.spark.unsafe.types.UTF8String
 
 /** Conservative whole-record pruning; surviving records still require Spark's residual filter. */
 private[rapids] object ParquetCachedBatchFilter {
@@ -38,6 +39,21 @@ private[rapids] object ParquetCachedBatchFilter {
   private def safeAttribute(attribute: AttributeReference): Boolean =
     attribute.dataType == IntegerType || attribute.dataType == LongType ||
       attribute.dataType == StringType
+
+  private def losslessStringValue(value: Any): Boolean = value match {
+    case text: UTF8String => UTF8String.fromString(text.toString) == text
+    case _ => true
+  }
+
+  // Spark's datasource translation converts UTF8String literals to Java strings, replacing
+  // invalid UTF8 bytes. Such a changed bound can exclude real matches. InSet stores its values
+  // outside expression children, so inspect those explicitly too. Null literals remain safe.
+  private def losslessStringLiterals(expression: Expression): Boolean = expression match {
+    case literal: Literal => losslessStringValue(literal.value)
+    case InSet(child, values) =>
+      losslessStringLiterals(child) && values.forall(losslessStringValue)
+    case other => other.children.forall(losslessStringLiterals)
+  }
 
   // Keep the first implementation to exact flat types. In particular Parquet floating extrema
   // need not include NaNs, and binary bounds cannot represent nonbinary string collations.
@@ -97,7 +113,7 @@ private[rapids] object ParquetCachedBatchFilter {
             matches.size == 1 && matches.head._1.dataType == attribute.dataType
           }
         }
-        if (mapped && safeExpression(predicate)) {
+        if (mapped && safeExpression(predicate) && losslessStringLiterals(predicate)) {
           val renamed = predicate.transform {
             case a: AttributeReference =>
               a.withName(s"_col${attributesById(a.exprId).head._2}")
