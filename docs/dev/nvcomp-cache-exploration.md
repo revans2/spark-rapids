@@ -2292,3 +2292,68 @@ cases retain16GiB heap,32GiB host including2GiB pinned,24GiB GPU,64GiB sampled
 RSS stop guard,4tasks/local[2], one warmup/five measured reads. The supervisor
 parks on failure for root investigation. Timings and large-case acceptance are
 IN PROGRESS; no speedup claim yet. Predicate statistics/scan hook remain separate.
+
+### Pruning 256MiB/task cohort — READY FOR REVIEW; larger runs IN PROGRESS
+
+Commit93a44449bf contains the implementation/probes. Root independently ran
+/data/tmp/nvcomp-column-pruning-spark/verify_results.py against the frozen build42
+and re-extracted first-case JSON medians, payload totals and per-action counter
+deltas separately. The verifier hashes source/artifact dependencies, validates
+actual budgets/backend/class origins, exact aggregates, 1warmup+5reads, audited
+directory-inclusive sizes and task-level spill arithmetic. Its selected-byte
+checks remain instrumentation checks, not independent CUDA bus measurements.
+All14 cases in this cohort passed; full56-case matrix is still IN PROGRESS.
+The ten supervisor prerequisites plus separate GPU Snappy build42 probe passed.
+
+Population is one cold whole-action sample. Reads below are independent
+five-sample medians, NOT write+read times. Four tasks on two slots; total logical
+input1024MiB. Stored bytes include packed column directory and wire framing;
+default Spark excludes its separate statistics row. CPU and GPU population
+produce different bytes and remain separate cohorts. GPU-enabled default reads
+still use a CPU cache reader. PCBS CPU population uses uncompressed Parquet;
+GPU PCBS population uses its existing GPU writer encoding/compression.
+
+| Writer | Format | Population s | CPU full s | CPU ID s | GPU-mode full s | GPU-mode ID s | Encoded MiB total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | snappy | 2.838 | 2.577 | 0.148 | 0.252 | 0.126 | 516.8 |
+| cpu | lz4 | 2.898 | 2.434 | 0.157 | 0.247 | 0.109 | 505.9 |
+| cpu | zstd | 4.129 | 2.490 | 0.142 | 0.239 | 0.102 | 393.3 |
+| cpu | uncompressed | 2.920 | 2.259 | 0.146 | 0.294 | 0.090 | 1023.9 |
+| cpu | pcbs | 13.379 | 5.242 | 4.069 | 0.256 | 0.153 | 701.2 |
+| cpu | default | 20.309 | 1.468 | 0.088 | 0.578 | 0.110 | 415.7 |
+| gpu | snappy | 1.380 | 2.059 | 0.145 | 0.278 | 0.108 | 521.4 |
+| gpu | lz4 | 1.489 | 1.856 | 0.116 | 0.280 | 0.118 | 510.0 |
+| gpu | zstd | 1.436 | 1.989 | 0.122 | 0.268 | 0.103 | 382.7 |
+| gpu | uncompressed | 1.380 | 1.830 | 0.133 | 0.372 | 0.106 | 1024.8 |
+| gpu | pcbs | 1.478 | 5.117 | 3.875 | 0.253 | 0.136 | 489.7 |
+| gpu | default | 19.978 | 1.459 | 0.105 | 0.797 | 0.109 | 415.7 |
+| gpu | ans | 1.332 | unsupported | unsupported | 0.313 | 0.115 | 556.3 |
+| gpu | cascaded | 1.173 | unsupported | unsupported | 0.390 | 0.145 | 391.3 |
+
+All4 partitions stayed resident, no disk storage or recomputation observed.
+Available Spark/RAPIDS spill and retry values were0; unavailable per-phase
+CPU RAPIDS metrics remain unavailable. All cases retained approved budgets.
+No guard triggered. No active-pressure/spill recovery claim is made.
+
+For CPU-written Snappy, each full read observed4224 distinct column roots
+(132records*32); ID-only132. Full/ID encoded payloads541433959/17072370bytes,
+decoded1073225472/33554432bytes. CPU and GPU samples agree on these byte counts;
+inactive-mode counters are0. GPU full/ID reads emitted4outputs and4native decode
+calls each across the four tasks. Narrow reads therefore group by selected bytes.
+
+GPU-written Snappy/LZ4/Zstd population observes8compression groups and12native
+codec calls across four tasks. Column-boundary chunk rounding can require
+additional submissions; the small-proof unchanged-call result is not generalized.
+
+Fresh same-cohort GPU-written Zstd/PCBS compare382.7/489.7MiB payload,
+GPU full0.268/0.253s, CPU full1.989/5.117s and CPU ID0.122/3.875s.
+These support promising CPU/pruning tradeoffs; larger-size acceptance is pending.
+Small timing differences and cold-population differences are not asserted as
+statistically significant. Historical before-pruning CPU-ID comparisons use
+the prior verified cohort, not a fresh v1 control run.
+
+Stable checkpoint: /data/tmp/nvcomp-column-pruning-spark/verified-256.json.
+Supervisor/state: run_matrix.py / matrix-status.json in the same directory.
+MCP docker_exec-only operations and source freeze remain in effect. Root owns
+serial jobs; workers are idle. No new source edits during the frozen matrix.
+Verifier SHA256: d026852e4210c3ede24d1348988acd4c1c21d183f73b589ef1d559ebc7abf4e4.
