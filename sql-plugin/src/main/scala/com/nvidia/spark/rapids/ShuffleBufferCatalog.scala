@@ -16,6 +16,7 @@
 
 package com.nvidia.spark.rapids
 
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.function.{Consumer, IntUnaryOperator}
@@ -26,10 +27,11 @@ import ai.rapids.cudf.{ContiguousTable, Cuda, DeviceMemoryBuffer, Table}
 import com.nvidia.spark.rapids.Arm.{closeOnExcept, withResource}
 import com.nvidia.spark.rapids.RapidsPluginImplicits._
 import com.nvidia.spark.rapids.format.TableMeta
-import com.nvidia.spark.rapids.spill.{SpillableDeviceBufferHandle, SpillableHandle}
+import com.nvidia.spark.rapids.spill.SpillableDeviceBufferHandle
 
 import org.apache.spark.{SparkEnv, TaskContext}
 import org.apache.spark.internal.Logging
+import org.apache.spark.shuffle.rapids.ShuffleOutputGoneException
 import org.apache.spark.sql.rapids.execution.TrampolineUtil
 import org.apache.spark.sql.types.DataType
 import org.apache.spark.sql.vectorized.ColumnarBatch
@@ -261,16 +263,33 @@ class ShuffleBufferCatalog(val mapIdsCanRepeat: Boolean = false) extends Logging
     } else {
       val info = activeShuffles.get(blockId.shuffleId)
       if (info == null) {
-        throw new NoSuchElementException(s"unknown shuffle ${blockId.shuffleId}")
+        throw new ShuffleOutputGoneException(s"unknown shuffle ${blockId.shuffleId}")
       }
       val entries = info.get(blockId)
       if (entries == null) {
-        throw new NoSuchElementException(s"unknown shuffle block $blockId")
+        throw new ShuffleOutputGoneException(s"unknown shuffle block $blockId")
       }
       entries.synchronized {
         entries.toArray
       }
     }
+  }
+
+  /**
+   * Looks up a buffer's handle and metadata.
+   *
+   * @param bId a buffer id that `blockIdToBuffersIds` returned for the buffer's block
+   * @return the handle, `None` for a degenerate table, and the metadata
+   * @note throws `ShuffleOutputGoneException` if a removal dropped the buffer after that lookup
+   */
+  private def liveEntry(
+      bId: ShuffleBufferId): (Option[SpillableDeviceBufferHandle], TableMeta) = {
+    val entry = bufferIdToHandle.get(bId)
+    if (entry == null) {
+      throw new ShuffleOutputGoneException(
+        s"unknown table ID ${bId.tableId} of shuffle block ${bId.blockId}")
+    }
+    entry
   }
 
   def getColumnarBatchIterator(
@@ -279,9 +298,20 @@ class ShuffleBufferCatalog(val mapIdsCanRepeat: Boolean = false) extends Logging
     val bufferIDs = blockIdToBuffersIds(blockId)
     bufferIDs.iterator.map { bId =>
       GpuSemaphore.acquireIfNecessary(TaskContext.get)
-      val (maybeHandle, meta) = bufferIdToHandle.get(bId)
+      val (maybeHandle, meta) = liveEntry(bId)
       maybeHandle.map { handle =>
-        withResource(handle.materialize()) { buff =>
+        val materialized = try {
+          handle.materialize()
+        } catch {
+          // A closed handle throws IllegalStateException, and a spill file deleted before it
+          // opened IOException. Either means the output is gone only if the catalog let go of
+          // the buffer, as in BufferSendState.
+          case e @ (_: IllegalStateException | _: IOException)
+              if isShuffleBufferRemoved(bId.tableId, handle) =>
+            throw new ShuffleOutputGoneException(
+              s"shuffle output for table ${bId.tableId} of shuffle block ${bId.blockId} is gone", e)
+        }
+        withResource(materialized) { buff =>
           val bufferMeta = meta.bufferMeta()
           if (bufferMeta == null || bufferMeta.codecBufferDescrsLength == 0) {
             MetaUtils.getBatchFromMeta(buff, meta, sparkTypes)
@@ -310,27 +340,8 @@ class ShuffleBufferCatalog(val mapIdsCanRepeat: Boolean = false) extends Logging
   }
 
   /** Get all the buffer metadata that correspond to a shuffle block identifier. */
-  def blockIdToMetas(blockId: ShuffleBlockId): Seq[TableMeta] = {
-    if (mapIdsCanRepeat) {
-      committedBufferIds(blockId).map(bufferIdToHandle.get).map { case (_, meta) =>
-        meta
-      }.toSeq
-    } else {
-      val info = activeShuffles.get(blockId.shuffleId)
-      if (info == null) {
-        throw new NoSuchElementException(s"unknown shuffle ${blockId.shuffleId}")
-      }
-      val entries = info.get(blockId)
-      if (entries == null) {
-        throw new NoSuchElementException(s"unknown shuffle block $blockId")
-      }
-      entries.synchronized {
-        entries.map(bufferIdToHandle.get).map { case (_, meta) =>
-          meta
-        }
-      }.toSeq
-    }
-  }
+  def blockIdToMetas(blockId: ShuffleBlockId): Seq[TableMeta] =
+    blockIdToBuffersIds(blockId).map(liveEntry(_)._2).toSeq
 
   /**
    * Commits the output of one map attempt, when map ids can repeat. Every attempt of a map then
@@ -341,8 +352,8 @@ class ShuffleBufferCatalog(val mapIdsCanRepeat: Boolean = false) extends Logging
    *
    * @param bufferIds every buffer the attempt added, which the catalog owns once this returns
    * @param sizes the attempt's size of each partition, as its MapStatus reports them
-   * @throws IllegalStateException if the shuffle was unregistered before the commit looked it
-   *                               up, leaving the buffers with the caller
+   * @throws java.lang.IllegalStateException if the shuffle was unregistered before the commit
+   *                                         looked it up, leaving the buffers with the caller
    */
   def commitMapOutput(
       shuffleId: Int,
@@ -367,11 +378,11 @@ class ShuffleBufferCatalog(val mapIdsCanRepeat: Boolean = false) extends Logging
   private def committedBufferIds(blockId: ShuffleBlockId): Array[ShuffleBufferId] = {
     val outputs = committedOutputs.get(blockId.shuffleId)
     if (outputs == null) {
-      throw new NoSuchElementException(s"unknown shuffle ${blockId.shuffleId}")
+      throw new ShuffleOutputGoneException(s"unknown shuffle ${blockId.shuffleId}")
     }
     val output = outputs.get(blockId.mapId)
     val ids = if (output == null) None else output.bufferIds(blockId.reduceId)
-    ids.getOrElse(throw new NoSuchElementException(s"unknown shuffle block $blockId"))
+    ids.getOrElse(throw new ShuffleOutputGoneException(s"unknown shuffle block $blockId"))
   }
 
   /** Allocate a new shuffle buffer identifier and update the shuffle block mapping. */
@@ -404,19 +415,40 @@ class ShuffleBufferCatalog(val mapIdsCanRepeat: Boolean = false) extends Logging
   def getShuffleBufferHandle(tableId: Int): RapidsShuffleHandle = {
     val shuffleBufferId = tableMap.get(tableId)
     if (shuffleBufferId == null) {
-      throw new NoSuchElementException(s"unknown table ID $tableId")
+      throw new ShuffleOutputGoneException(s"unknown table ID $tableId")
     }
-    val (maybeHandle, meta) = bufferIdToHandle.get(shuffleBufferId)
-    maybeHandle match {
-      case Some(spillable) =>
+    // null if an unregister removed the buffer since the line above
+    val handleAndMeta = bufferIdToHandle.get(shuffleBufferId)
+    if (handleAndMeta == null) {
+      throw new ShuffleOutputGoneException(s"unknown table ID $tableId")
+    }
+    handleAndMeta match {
+      case (Some(spillable), meta) =>
         RapidsShuffleHandle(spillable, meta)
-      case None =>
+      case (None, _) =>
         throw new IllegalStateException(
           "a buffer handle could not be obtained for a degenerate buffer")
     }
   }
 
   /**
+   * Whether the catalog no longer holds a buffer that a lookup of `tableId` returned, through
+   * `getShuffleBufferHandle` or a local read. Every catalog close removes the entries before
+   * closing the buffer, so a buffer found closed after its lookup is gone if, and only if, this
+   * is true.
+   */
+  def isShuffleBufferRemoved(tableId: Int, spillable: SpillableDeviceBufferHandle): Boolean = {
+    val shuffleBufferId = tableMap.get(tableId)
+    if (shuffleBufferId == null) {
+      true
+    } else {
+      val handleAndMeta = bufferIdToHandle.get(shuffleBufferId)
+      // table ids wrap around, so the id may name another buffer by now
+      handleAndMeta == null || !handleAndMeta._1.exists(_ eq spillable)
+    }
+  }
+
+  /*
    * Update the spill priority of a shuffle buffer that soon will be read locally.
    * @param handle shuffle buffer handle of buffer to update
    */
@@ -424,16 +456,6 @@ class ShuffleBufferCatalog(val mapIdsCanRepeat: Boolean = false) extends Logging
   //def updateSpillPriorityForLocalRead(handle: RapidsBufferHandle): Unit = {
   //  handle.setSpillPriority(SpillPriorities.INPUT_FROM_SHUFFLE_PRIORITY)
   //}
-
-  /**
-   * Remove a buffer and table given a buffer handle
-   * NOTE: This function is not thread safe! The caller should only invoke if
-   * the handle being removed is not being utilized by another thread.
-   * @param handle buffer handle
-   */
-  def removeBuffer(handle: SpillableHandle): Unit = {
-    handle.close()
-  }
 }
 
 /** One attempt's whole output for a map id, immutable once built. */

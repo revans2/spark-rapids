@@ -38,6 +38,7 @@
 {"spark": "402"}
 {"spark": "403"}
 {"spark": "404"}
+{"spark": "410db183"}
 {"spark": "411"}
 {"spark": "412"}
 {"spark": "413"}
@@ -246,7 +247,7 @@ trait GpuFileFormatWriterBase extends Serializable with Logging {
       plan
     } else {
       val projectList = GpuV1WriteUtils.convertGpuEmptyToNull(plan.output, partitionSet)
-      if (projectList.nonEmpty) GpuProjectExec(projectList, plan) else plan
+      if (projectList.nonEmpty) GpuProjectExec(projectList, plan)() else plan
     }
 
     writeAndCommit(job, description, committer) {
@@ -371,7 +372,7 @@ trait GpuFileFormatWriterBase extends Serializable with Logging {
   }
 
   /**
-   * Write files using [[SparkPlan.executeWrite]]
+   * Write files using `SparkPlan.executeWrite`
    */
   def executeWrite(
       session: SparkSession,
