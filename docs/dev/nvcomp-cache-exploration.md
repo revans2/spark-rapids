@@ -3160,3 +3160,11 @@ MCP docker_exec used exclusively; workers confirmed. Productionref remainsf409,
 alloldPOC commits preserved. Static coverage32profiles/3839requirements/0findings
 PASS. Online review/advisory INCOMPLETE:gh unavailable; other runtimes/spill unverified.
 Only architect marksDONE. Nothing pushed or filed.
+
+### Issue opening — READY FOR REVIEW
+
+User clarified the issue is mostly fine; PR16633 is background, not the lead.
+Changed only its opening and baseline attribution: lead with the POC's PCBS
+pruning/compressed-batch exploration, move PR context into scope. Tables, chart
+and remaining issue text unchanged. Documentation only; local links and diff
+checked through MCP docker_exec. Release classification unchanged; no publish.

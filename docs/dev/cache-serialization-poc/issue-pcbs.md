@@ -1,9 +1,7 @@
 # Add predicate pruning to Parquet cached batches on CPU and GPU
 
-[PR #16633](https://github.com/NVIDIA/cudf-spark/pull/16633) provides small stored
-records and bundled GPU reads. This POC builds on that baseline, adding
-statistics-based cache pruning without changing the writer or cache format.
-Parquet already provides column pruning.
+This proof of concept explores faster Spark caching through PCBS predicate
+pruning and [compressed batches shared by CPU and GPU execution](issue-packed-cache.md).
 
 PCBS now implements Spark's cache `buildFilter` using Parquet footer statistics,
 Spark ParquetFilters and Parquet RowGroupFilter. GPU cache scans invoke the same
@@ -46,7 +44,9 @@ with multiple row groups are kept if any group can match.
 These are build45 measurements from before the upmerge, on an instrumented Spark
 runtime with compression tracing disabled. Final UTF-8 guard correctness was
 validated separately in build46; cross-version acceptance remains incomplete.
-The batching/OOM results belong to PR #16633, not this pruning comparison.
+The POC builds on small-record batching and bundled GPU reads from
+[PR #16633](https://github.com/NVIDIA/cudf-spark/pull/16633). The PCBS writer,
+cache format and existing Parquet column pruning are unchanged.
 [Build/provenance](README.md) · [Results](results.json).
 
 *Proof of concept; implementation, analysis and draft prepared with AI assistance.*
