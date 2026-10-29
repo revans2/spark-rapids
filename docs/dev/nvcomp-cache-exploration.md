@@ -2638,3 +2638,32 @@ CPU/GPU stats are available. Local shim baseline coverage passed32profiles/
 baseline static evidence, not compilation or future-change validation.
 Artifacts: /data/tmp/cache-predicate-pruning/shim-baseline.
 Now proceed to predicate implementation under the user authorization.
+
+### Predicate pruning implementation — IN PROGRESS
+
+Resumed after checkpoint04931d8e0d. All project work and worker handoffs remain
+MCP docker_exec-only; workers have reconfirmed. The frozen build42 source
+archive preserves the completed column-pruning results while current sources change.
+
+Release classification carries forward: PCBS record/API/configuration contracts
+and the plugin GPU cache scan are RELEASED (present on main); preserve constructors,
+serialized bytes, decoders, residual filters and existing pruning/pushdown controls.
+The local nvCOMP wire/native bridge is UNRELEASED; replace wirev2 with v3 statistics
+directly, with no obsolete-format adapter. Initial exact statistics support is flat
+int/long/default binary string, matching the prototype's existing types. Other PCBS
+types/predicates conservatively retain records.
+
+PCBS uses its existing ROWGROUP footer statistics via Spark's shimmed ParquetFilters
+and stats-only RowGroupFilter. Any surviving group retains the whole cache record.
+The GPU cache scan will invoke the serializer filter behind Spark's existing
+inMemoryPartitionPruning gate, matching the CPU scan. No extra column files or
+Parquet rewrite is introduced. Unsupported predicates keep data; residual row
+filtering remains necessary.
+
+This commit checkpoints production source for a clean source-bound build; it is
+NOT verified implementation or READY FOR REVIEW. New footer-only unit cases need
+compilation/execution plus actual CPU/GPU cache-query checks. Root has read the
+decisive helper, caller and test changes. A focused independent review is running.
+The shim preflight skill applies; final proposed-tree coverage/profile builds
+and advisory evidence must still be recorded. Current online advisory tooling
+is unavailable (gh absent); investigate base-fetch evidence before final status.

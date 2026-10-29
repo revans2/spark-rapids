@@ -147,8 +147,13 @@ case class GpuInMemoryTableScanExec(
   lazy val readBatches = sparkSession.sparkContext.longAccumulator
 
   private def filteredCachedBatches() = {
-    // Right now just return the batch without filtering
-    relation.cacheBuilder.cachedColumnBuffers
+    val buffers = relation.cacheBuilder.cachedColumnBuffers
+    if (conf.inMemoryPartitionPruning) {
+      buffers.mapPartitionsWithIndexInternal(
+        relation.cacheBuilder.serializer.buildFilter(predicates, relation.output))
+    } else {
+      buffers
+    }
   }
 
   protected override def doExecute(): RDD[InternalRow] = {

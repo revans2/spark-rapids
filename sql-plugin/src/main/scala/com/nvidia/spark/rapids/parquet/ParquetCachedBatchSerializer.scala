@@ -1468,8 +1468,7 @@ class ParquetCachedBatchSerializer extends GpuCachedBatchSerializer {
   override def buildFilter(
       predicates: Seq[Expression],
       cachedAttributes: Seq[Attribute]): (Int, Iterator[CachedBatch]) => Iterator[CachedBatch] = {
-    //essentially a noop
-    (_: Int, b: Iterator[CachedBatch]) => b
+    ParquetCachedBatchFilter.buildFilter(predicates, cachedAttributes, SQLConf.get)
   }
 }
 
