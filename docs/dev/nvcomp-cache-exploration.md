@@ -1788,3 +1788,72 @@ general hardware limit. No optimization, cap adjustment, pressure conclusion
 or architect DONE status is implied.
 Artifacts /data/tmp/nvcomp-spark-probe/cpu-scale-snappy-fixed-2048 and
 /data/tmp/nvcomp-pcbs-rebuild-01/verify-cpu-scale.py.
+
+### 2GiB/task five-case partial cohort — READY FOR REVIEW; PCBS IN PROGRESS
+
+Independent acceptance now covers default, Snappy, LZ4, Zstd and uncompressed,
+superseding the prior Snappy-only checkpoint's completed-case coverage.
+PCBS remains IN PROGRESS and the entire2GiB/task cohort is NOT complete.
+Root-owned serial benchmark jobs continue; no completed case was rerun for
+this mechanical checkpoint. No architect DONE status is implied.
+
+Same frozen build39 and fixed-wide fixture: CPU population, four tasks/local[2]/
+two waves, one warmup and five measured full/ID reads in CPU/GPU modes.
+Budgets unchanged:16GiBheap,32GiBmanagedhost including2GiBpinned,24GiBGPU,
+64GiBsampledRSS stop guard. Experimental tools UNRELEASED; frozen released
+production contracts unchanged. No source/configuration/acceptance change.
+Root and worker reconfirmed MCP docker_exec-only operations at resume and
+checkpoint; worker performed read-only verification plus this explicitly
+authorized tracker-only edit/commit, no GPU/build/benchmark jobs.
+
+|Format|CPU population s|CPU full s|CPU ID s|GPU-mode full s|GPU-mode ID s|Encoded MiB total|RSS GiB|
+|---|---:|---:|---:|---:|---:|---:|---:|
+|default|160.721|11.225|0.280|4.014|0.405|3325.575|19.266|
+|snappy|17.540|19.811|7.061|0.828|0.509|4140.858|16.388|
+|lz4|17.444|18.540|6.162|0.956|0.602|4047.899|13.106|
+|zstd|28.622|19.007|5.914|0.990|0.761|3149.886|16.138|
+|uncompressed|18.339|23.630|7.127|0.978|0.769|8189.402|13.353|
+
+GPU-mode reads use CPU-written cache bytes. Default's actual cache reader is
+CPU fallback; four packed codecs use actual GPU cache scans. Encoded totals
+cover8GiBcanonical logical input/33,554,432rows across four tasks; default
+payload excludes its separate statistics row as before. Population is one
+cold sample, reads are warmed five-sample medians. RSS is a sampled whole-job
+process-tree peak, not a CPU-population or retained-cache memory measurement.
+
+Root independently verified cases after launch. Worker independently reran the
+five-case verifier with cross-format aggregates equal:125phases/645taskattempts,
+300with RAPIDS metrics;65CPU phases explicitly unavailable. All four partitions
+resident, disk0, every source aggregate/read mode/provenance/budget check passes.
+Spark spill counters and available GPU spill/retry counters observed0; missing
+CPU RAPIDS counters are not assumed zero. Packed records1028each;default3356.
+Artifacts /data/tmp/nvcomp-spark-probe/cpu-scale-{format}-fixed-2048,
+verifier /data/tmp/nvcomp-pcbs-rebuild-01/verify-cpu-scale.py.
+
+Measured GPU working-set evidence at fixed1GiB decoded target:
+Snappy tracked high-water4.123079->4.121127GiB from1GiB->2GiB/task,
+LZ44.123079->4.121127GiB, Zstd9.105905->9.104490GiB. Maximum emitted
+GPU batch bytes1,073,217,536->1,072,693,504. These observations support
+target-bounded tracked GPU working memory for these codec/fixture/settings,
+not a universal4xT guarantee or hardware-independent peak claim. RMM high-water
+is cumulative across the JVM and excludes unused pool reservation and outside
+allocations. Process RSS grows with the larger retained host dataset; it is
+not evidence that the GPU working set doubled.
+
+All four packed formats emit three output groups/task at2GiB as derived in the
+Snappy checkpoint. Compressed Snappy/LZ4/Zstd use three native decode calls/task;
+uncompressed uses no codec calls, only its copy path. The small final group and
+chunk-rounded workspace budget remain measured behavior, not newly chosen caps.
+
+Uncompressed2GiB succeeds with payload8,587,210,080bytes, exactly matching
+the earlier CPU record-layout arithmetic; this is a different layout from the
+historical GPU uncompressed heap failure. Its CPU full-read median grows
+8.726->23.630s from1GiB->2GiB/task and ID read2.354->7.127s, more than linear.
+This degradation is observed but UNPROFILED. Do not attribute it to GC, live
+heap pressure, bandwidth or copying without further evidence. Heap-used
+snapshots are not live-set or peak measurements. No active-spill/pressure
+validation or total-memory-cap guarantee is established by these resident runs.
+
+PCBS's remaining result and the complete six-format largest cohort require
+independent verification and a later tracker update; do not present the whole
+scaling experiment as complete from this partial checkpoint.
