@@ -1681,7 +1681,7 @@ partitions resident/disk0. Full scale verifier/provenance crosscheck pending;
 do not present the entire size matrix as completed.
 Artifacts /data/tmp/nvcomp-spark-probe/cpu-scale-{format}-fixed-{512,1024,2048}.
 
-###512MiB/task cohort — READY FOR REVIEW
+### 512MiB/task cohort — READY FOR REVIEW
 
 All6formats complete and independently verified with unchangedbuild39/settings.
 Rootread scaleverifierdiff and reran fullcohort:150phases/774taskattempts,
@@ -1703,3 +1703,29 @@ GPU columns read CPU-populated bytes; default still usesCPUcache-reader fallback
 Payloadtotal covers2GiBlogicalinput across4tasks. Populationsinglecoldsample;
 reads5samplemediansafter1warmup. No active-spill/pressure conclusion.
 1GiB/task and2GiB/task cohorts remain IN PROGRESS; no source/cap changes.
+
+### 1GiB/task cohort — READY FOR REVIEW
+
+Recovered runningexec863 after modelcapacity interruptions; no completedcases
+rerun. All6formats complete and independently rootverified with unchangedbuild39
+and caps, crossformataggregates equal.150phases/774taskattempts,360RAPIDS
+metricattempts,78CPUphases explicitlyunavailable; allresident/disk0, observed
+Spark/GPUspills andGPUretries0. Workerindependentlyverifiedfirst5 and reviewed
+heap/RSS before2GiB; rootverifiedfinalPCBS and completecohort.
+MCPdocker_exec-only reconfirmed atresume/checkpoint, no workerjobs.
+
+|Format|CPU population s|CPU full s|CPU ID s|GPU-mode full s|GPU-mode ID s|Encoded MiB|RSS GiB|
+|---|---:|---:|---:|---:|---:|---:|---:|
+|default|77.226|5.300|0.153|2.119|0.319|1662.788|16.783|
+|pcbs|45.424|21.883|16.556|0.724|0.349|2804.713|10.922|
+|snappy|9.044|9.986|3.515|0.424|0.283|2070.394|10.555|
+|lz4|8.502|9.590|3.142|0.435|0.293|2023.840|6.755|
+|zstd|13.979|9.201|3.023|0.397|0.311|1575.045|7.349|
+|uncompressed|8.553|8.726|2.354|0.584|0.443|4094.703|10.228|
+
+GPU reads CPU-populated cache; default stillCPUcache-reader fallback.
+Encodedtotal covers4GiBlogicalinput across4tasks. Samecoldpopulation and
+5readsamplemedians. No pressureoractive-spillvalidation claim.
+2GiB/task remains IN PROGRESS. CurrentCPUrecordlayout differsfromoldGPU
+heapfailure; measuredsnapshots and regionarithmetic support proceeding with
+unchangedsettings, not a guaranteedfit.
