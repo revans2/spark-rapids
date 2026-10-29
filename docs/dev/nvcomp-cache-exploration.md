@@ -2833,3 +2833,28 @@ wraps CUDA_ASYNC in RmmLimitingResourceAdaptor(poolAllocation,512alignment).
 Thus24GiB is the configured RMMallocationlimit, not merely an initial reservation.
 No budget setting was changed. This does not cap all possible outsideRMM device
 allocations or make the separate sampledRSSguard a hard hostmemory limit.
+
+### CPU-written predicate cohort checkpoint — VERIFIED; GPU cohort ongoing
+
+All6CPU-written formats passed fullnormalandpredicate scans on bothreadmodes.
+Root independently reran the size-aware verifier:9verifiedcases,5pending,0invalid/
+failed. This completes CPU population coverage at256MiB/task; it is not a claim
+of CPUread coverage for the planned2GiB GPU-only supplement.
+Shared verifier now also reconciles completionRSS with rawsamplemaxima;
+20negative checks pass. Peer independently reviewed allfourSnappy/PCBScases,
+including missingCPUmetrics, exactrootquarterratios andPCBSseparatescanrowproof.
+
+Logical input1024MiB total,fourtasks/twowaves,32columns. Population one firstaction;
+read values five-sample medians after one warmup. Newstats framing is included.
+
+| CPU-written format | Population s | CPU full s | CPU ID s | GPU-mode full s | GPU-mode ID s | Encoded MiB total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default | 20.118 | 1.479 | 0.077 | 0.714 | 0.111 | 415.7 |
+| pcbs | 13.297 | 5.305 | 4.083 | 0.255 | 0.217 | 701.2 |
+| uncompressed | 2.754 | 1.874 | 0.110 | 0.317 | 0.103 | 1024.1 |
+| snappy | 2.912 | 2.538 | 0.145 | 0.263 | 0.095 | 516.9 |
+| lz4 | 2.777 | 2.468 | 0.123 | 0.226 | 0.105 | 506.0 |
+| zstd | 4.301 | 2.406 | 0.130 | 0.210 | 0.097 | 393.4 |
+
+DefaultGPU-mode cachedecoding remainsCPU. Allpredicate pairedcontrols/results
+remain in verified-partial.json, not collapsed into these normal-read medians.
