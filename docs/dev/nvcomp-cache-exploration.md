@@ -9,7 +9,7 @@ Configured-target batching and the 32-case size matrix are READY FOR REVIEW:
 Direct multi-boundary GPU packing and its host-CPU/kernel profiles are verified
 and READY FOR REVIEW below. CPU codec prerequisites are READY FOR REVIEW;
 CPU row/packed cache integration and first 256MiB/task comparison are
-READY FOR REVIEW below. CPU scaling at512/1024/2048MiB/task is IN PROGRESS.
+READY FOR REVIEW below. CPU scaling at512/1024/2048MiB/task is verified and READY FOR REVIEW.
 Large-string performance and active GPU spill/retry validation remain pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
@@ -1644,7 +1644,7 @@ matrix run yet. ANS/Cascaded CPU remain unsupported. Separate-column compression
 predicate pushdown, CPU columnar output, production integration and pressure
 testing are outside this completed bounded checkpoint. Architect alone marks DONE.
 
-## CPU scaling to512MiB/1GiB/2GiB per task — IN PROGRESS
+## CPU scaling to512MiB/1GiB/2GiB per task — READY FOR REVIEW
 
 User requested scaling the successful CPU cohort. Reuse finalbuild39 unchanged:
 same6formats,CPU population,CPU/GPU read modes,4tasks/local2/two waves,1warmup
@@ -1857,3 +1857,124 @@ validation or total-memory-cap guarantee is established by these resident runs.
 PCBS's remaining result and the complete six-format largest cohort require
 independent verification and a later tracker update; do not present the whole
 scaling experiment as complete from this partial checkpoint.
+
+### Complete CPU scaling matrix — READY FOR REVIEW
+
+All 18 new scaling cases passed. This final checkpoint supersedes the partial
+statuses above, including PCBS. Completed cases were not rerun after model
+capacity interruptions. Build39, implementation, concurrency and memory budgets
+remained unchanged throughout. These are unreleased experimental tools;
+released production contracts remain frozen and unchanged.
+
+Root inspected the worker's tracker commits1d9f53ffd0 and dd79a883ab and reran
+the full verifier with --require-complete:18 verified,0 failed/pending/invalid;
+450 phases,2322 Spark task attempts and1080 attempts with RAPIDS metrics.
+The234 CPU phases without RAPIDS metrics remain explicitly unavailable.
+Correctness, cross-format aggregates, runtime class origins, source/dependency
+hashes, execution modes, budgets and metric arithmetic all pass.
+The final focused evidence review independently reproduced these results.
+
+Root and workers confirmed MCP docker_exec-only operations at every resumption
+and checkpoint. Only root launched serial benchmarks. Worker changes were
+limited to the isolated verifier and explicitly authorized tracker checkpoints.
+No implementation, POM, shim, source-selection or production configuration
+changes were needed for scaling.
+
+Every cache below was populated on CPU. Four tasks on local[2] provide two waves;
+total logical input is four times the per-task size. The fixed-wide fixture has
+256 canonical bytes per row. GPU columns measure reads of CPU-written bytes.
+Default Spark's GPU-enabled queries still use a CPU cache reader; other formats
+use actual GPU cache scans. PCBS CPU uses uncompressed Parquet, including its
+encoding/dictionaries.
+
+Times are whole-action seconds: one cold population sample, then independent
+five-sample read medians after one warmup per mode/shape. Population and read-only
+times are separate. The256MiB rows are the previous baseline, not rerun here;
+root independently revalidated all24 saved cases.
+
+| Task MiB | Format | CPU population s | CPU full s | CPU ID s | GPU-mode full s | GPU-mode ID s | Encoded MiB total |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 256 | default | 19.076 | 1.465 | 0.075 | 0.727 | 0.109 | 415.7 |
+| 256 | pcbs | 13.339 | 5.580 | 4.141 | 0.309 | 0.151 | 701.2 |
+| 256 | snappy | 2.719 | 2.509 | 0.904 | 0.225 | 0.142 | 517.6 |
+| 256 | lz4 | 2.807 | 2.511 | 0.835 | 0.206 | 0.145 | 506.0 |
+| 256 | zstd | 3.963 | 2.402 | 0.802 | 0.246 | 0.147 | 393.8 |
+| 256 | uncompressed | 2.562 | 2.274 | 0.643 | 0.255 | 0.177 | 1023.7 |
+| 512 | default | 39.987 | 2.802 | 0.107 | 1.167 | 0.142 | 831.4 |
+| 512 | pcbs | 23.483 | 10.842 | 8.196 | 0.392 | 0.262 | 1402.4 |
+| 512 | snappy | 5.432 | 5.038 | 1.760 | 0.320 | 0.254 | 1035.3 |
+| 512 | lz4 | 4.886 | 4.810 | 1.559 | 0.290 | 0.202 | 1011.9 |
+| 512 | zstd | 7.598 | 4.808 | 1.563 | 0.291 | 0.209 | 787.6 |
+| 512 | uncompressed | 4.511 | 4.472 | 1.208 | 0.359 | 0.249 | 2047.4 |
+| 1024 | default | 77.226 | 5.300 | 0.153 | 2.119 | 0.319 | 1662.8 |
+| 1024 | pcbs | 45.424 | 21.883 | 16.556 | 0.724 | 0.349 | 2804.7 |
+| 1024 | snappy | 9.044 | 9.986 | 3.515 | 0.424 | 0.283 | 2070.4 |
+| 1024 | lz4 | 8.502 | 9.590 | 3.142 | 0.435 | 0.293 | 2023.8 |
+| 1024 | zstd | 13.979 | 9.201 | 3.023 | 0.397 | 0.311 | 1575.0 |
+| 1024 | uncompressed | 8.553 | 8.726 | 2.354 | 0.584 | 0.443 | 4094.7 |
+| 2048 | default | 160.721 | 11.225 | 0.280 | 4.014 | 0.405 | 3325.6 |
+| 2048 | pcbs | 89.353 | 41.663 | 32.262 | 1.154 | 0.655 | 5609.4 |
+| 2048 | snappy | 17.540 | 19.811 | 7.061 | 0.828 | 0.509 | 4140.9 |
+| 2048 | lz4 | 17.444 | 18.540 | 6.162 | 0.956 | 0.602 | 4047.9 |
+| 2048 | zstd | 28.622 | 19.007 | 5.914 | 0.990 | 0.761 | 3149.9 |
+| 2048 | uncompressed | 18.339 | 23.630 | 7.127 | 0.978 | 0.769 | 8189.4 |
+
+
+All four partitions remained resident, with no disk storage or recomputation
+observed. Spark spill and available GPU spill/retry counters were zero.
+The scale verifier permits positive spill/eviction observations; no passing
+criterion forced these values to zero. Actual spill/recovery behavior remains
+untested.
+
+Encoded size is the post-run payload audit total, not BlockManager's estimate
+or process memory. Default excludes its separate statistics row; other formats
+include framing/metadata. At2GiB/task, sampled whole-job RSS GiB was:
+default 19.266, pcbs 13.954, snappy 16.388, lz4 13.106, zstd 16.138, uncompressed 13.353.
+
+No timeout or RSS guard triggered. Settings stayed16GiB heap,32GiB managed host
+including2GiB pinned,24GiB GPU and64GiB sampled RSS stop guard; initialized pools
+were checked. RSS includes startup, CPU/GPU reads and GC, and is not retained
+live-cache memory. Arrow allocations are outside RAPIDS host accounting.
+No hard process-memory cap or complete native-memory peak is claimed.
+
+Root independently reconstructed the raw GPU counters. From1 to2GiB/task,
+tracked RMM high-water was4.123->4.121GiB for Snappy/LZ4/uncompressed and
+9.106->9.104GiB for Zstd. This supports a working set bounded by the fixed1GiB
+output target in these runs, not a universal4xT guarantee. RMM high-water is
+cumulative and excludes unused pool reservation and allocations outside RMM.
+
+Packed formats emitted one GPU output group/task at1GiB and three at2GiB:
+two near-target groups and a small tail. Native compressed decode calls rose
+two->three/task, not one->three, because chunk rounding already required two
+calls for the single1GiB output group. Root reproduced48->144 output groups
+and96->144 native calls across the12 GPU actions. Uncompressed has no codec calls.
+
+Findings for this fixture and fixed two-slot input-size scaling:
+
+- Compressed CPU full-read1->2GiB ratios were1.984 for Snappy,1.933 for LZ4
+  and2.066 for Zstd; CPU ID-read ratios were2.009,1.961 and1.956.
+  Read cost and encoded size therefore remain approximately linear.
+- At2GiB/task, Snappy was5.094x faster than PCBS for population,2.103x for
+  CPU full reads and4.569x for CPU ID reads. GPU full/ID reads were1.393x
+  and1.289x faster in these samples.
+- Default CPU full/ID reads remain faster than the packed CPU row scans,
+  with much slower population. Zstd has the smallest packed payload,
+ 3149.9MiB versus Snappy's4140.9MiB, but higher population cost and no
+  GPU-read speed advantage in the largest cohort.
+- Uncompressed CPU full/ID reads grew2.708x/3.027x from1 to2GiB despite
+  residency and no observed spill. The cause is unprofiled; do not attribute
+  it to GC, bandwidth or copying without new evidence.
+- CPU-written uncompressed2GiB succeeded with8,587,210,080 encoded bytes,
+  exactly matching the layout prediction. The historical GPU-writer heap
+  failure was not rerun or fixed.
+
+Artifacts: /data/tmp/nvcomp-spark-probe/cpu-scale-{format}-fixed-{512,1024,2048}.
+Verifier: /data/tmp/nvcomp-pcbs-rebuild-01/verify-cpu-scale.py.
+Combined verified24-case JSON:
+ /data/tmp/nvcomp-pcbs-rebuild-01/cpu-scaling-verified.json.
+
+Representative string performance, other datatypes, concurrency/hardware
+scaling, column-indexed compression, CPU columnar output and active spill
+pressure remain outside this completed task or unverified. There is no
+production rollout. Final task status is READY FOR REVIEW; architect alone
+marks DONE.
