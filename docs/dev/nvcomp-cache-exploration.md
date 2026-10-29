@@ -2807,3 +2807,29 @@ Artifact pcbs-scan-metrics-45/verified-scan-pruning.json references captured
 SQLexecutionIDs and rawRESTplans/metrics.89completedSQLexecutions captured;
 not every last execution was captured, but ALL8required comparisonpairs were.
 The diagnostic does not modify sources or enter headline timingresults.
+
+Supplementary scaling decision: after the14case256MiBcohort, run seven
+GPU-written/GPU-requested-read cases at2GiB/task under identical settings.
+CPU read performance is NOT measured in this supplement; it is labeled separately.
+Default Spark's requestedGPU mode still has CPUcachedecoding. GPU-uncompressed's
+known2GiBheapfailure is explicitly SKIPPED_NOT_RERUN, not a new success claim.
+This tests whether avoided decode bytes matter more atlargesize than in the
+latency-dominated smallcohort, without repeating the longCPUfull-read matrix.
+First large case pauses for independent root acceptance; anyfailureparksremaining
+cases as authorized. No arbitrary algorithm/memory limit was added or raised.
+
+External shared verifier derives dimensions locally percase; originalmain remains
+strict14cases256MiB. Largewrapper expects7cases2048MiB,12normal/72predicate
+observations each andCPUreadsNOT_RUN. Root inspected dimension changes/wrapper,
+independently ran20negative tests and verifiedinitial0/7pending. It is not verified
+large-result evidence. Artifacts run_large_timings.py,large-status.json,
+verify_large_gpu_results.py under /data/tmp/cache-predicate-pruning.
+Shared verifierSHA029207d0f1872e5e4a5f7bddb1a442270b336c69dcbd85e5dd74091a8ce59808;
+largewrapperSHAf7fae45aac12b3fcabd829d6eef9abde66e4f05ca6194fe2c9e19196314becaa.
+
+Root rechecked the actual GPU budget contract before scaling: GpuDeviceManager
+computeRmmPoolSize uses exactalloc24GiB; pinnedjarRmm.initializeUnderLock bytecode
+wraps CUDA_ASYNC in RmmLimitingResourceAdaptor(poolAllocation,512alignment).
+Thus24GiB is the configured RMMallocationlimit, not merely an initial reservation.
+No budget setting was changed. This does not cap all possible outsideRMM device
+allocations or make the separate sampledRSSguard a hard hostmemory limit.
