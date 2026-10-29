@@ -2739,3 +2739,21 @@ Historical build44 sources all match Git173be5bf8d:36files verified against the
 recorded main/native/host/statistics manifests; inventory in
 /data/tmp/cache-predicate-pruning/build44-git-source-match.json.
 Other codecs/default correctness plus new performance observations remain pending.
+
+Build45 freezes the optional predicate timing harness and disables only existing
+Spark compression diagnosticlogging. Validation supervisor executes17bounded
+CPU/GPU proof applications serially; timing supervisor waits for them, then
+pauses after the first256MiB/task result for independent root validation.
+All8predicate setups now PASS (Snappy/PCBSbuild44; default/uncompressed/LZ4/Zstd/
+ANS/typedCascadedbuild45). Remaining interoperability/cleanup probes are running.
+No new timing results or compatibility completion is claimed yet.
+Scripts/status: /data/tmp/cache-predicate-pruning/{validation,timing}-status.json.
+Worker verification handoff repeats MCP-only/no builds/no GPUjobs; confirmed.
+
+Additional whole-checkout scalastyle invocation exposed4long lines introduced
+by root's fixture-builder correction; fixed. Other48failures are under an
+unrelated preexisting .agent-worktrees tree and are not edited. A clean isolated
+sourcecheck will distinguish final owned changes from those unrelated files.
+The documented old scalastyle:check prefix is unavailable in this checkout;
+use the existing parent antrun execution scalastyle-all-modules with its
+spark.rapids.source.basedir property. No check is skipped or disabled.

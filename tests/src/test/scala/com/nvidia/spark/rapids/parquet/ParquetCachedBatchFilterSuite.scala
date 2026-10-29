@@ -121,7 +121,8 @@ class ParquetCachedBatchFilterSuite extends AnyFunSuite {
   }
 
   test("null-safe NULL in both orders and all-null statistics") {
-    val allNull: Statistics[_] = Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
+    val allNull: Statistics[_] =
+      Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
       .withNumNulls(4).build()
     val nullRecord = record(block(Seq(allNull, stringStats("x", "x"), intStats(1, 4))))
     val nonNull = ordinary(0, 3)
@@ -136,11 +137,13 @@ class ParquetCachedBatchFilterSuite extends AnyFunSuite {
   }
 
   test("missing bounds and unknown null counts retain records") {
-    val missing: Statistics[_] = Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
+    val missing: Statistics[_] =
+      Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
       .withNumNulls(0).build()
     val batch = record(block(Seq(missing, stringStats("x", "x"), intStats(1, 4))))
     assert(selected(GreaterThan(attributes.head, Literal(100L)), Seq(batch)) == Seq(batch))
-    val unknown: Statistics[_] = Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType()).build()
+    val unknown: Statistics[_] =
+      Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType()).build()
     val unknownRecord = record(block(Seq(unknown, stringStats("x", "x"), intStats(1, 4))))
     assert(selected(IsNull(attributes.head), Seq(unknownRecord)) == Seq(unknownRecord))
   }
@@ -152,7 +155,8 @@ class ParquetCachedBatchFilterSuite extends AnyFunSuite {
     val predicate = GreaterThan(attributes.head, Literal(90L))
     assert(selected(predicate, Seq(batch)) == Seq(batch))
     assert(selected(predicate, Seq(record(outside))).isEmpty)
-    val missing: Statistics[_] = Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
+    val missing: Statistics[_] =
+      Statistics.getBuilderForReading(schema.getType(0).asPrimitiveType())
       .withNumNulls(0).build()
     val unknown = block(Seq(missing, stringStats("x", "x"), intStats(1, 4)))
     assert(selected(predicate, Seq(record(outside, unknown))).nonEmpty)
