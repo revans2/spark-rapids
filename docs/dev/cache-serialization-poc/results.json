@@ -1,4 +1,9 @@
 {
+  "_license": {
+    "copyright": "Copyright (c) 2026, NVIDIA CORPORATION.",
+    "license": "Apache-2.0",
+    "url": "http://www.apache.org/licenses/LICENSE-2.0"
+  },
   "scope": "Committed summary of existing accepted measurements; not new benchmark runs.",
   "timing_source": {
     "prototype_sources": "9fa1d78378cea17caf6f696a37250ed40c158ff6",

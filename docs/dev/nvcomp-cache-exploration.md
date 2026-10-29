@@ -3129,3 +3129,8 @@ that improvedPCBS baseline. Timing data remains build45, not an upmerge rerun.
 Source/claim reviews and chart verification use MCP docker_exec exclusively;
 workers confirm this at checkpoints. Current355build/probes and shim checks
 are pending; broader compatibility remains incomplete. No push/issues filed.
+
+First upmergebuild stopped at RAT: results.json and three generated SVGs lacked
+license headers. Added JSON license metadata and generated Apache XML comments;
+all measurement values and PNG bytes are unchanged. SVGs differ only by comments,
+verified by root. No license exclusions or check suppression added; rerun pending.

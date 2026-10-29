@@ -39,9 +39,26 @@ def save_figure(fig, output, name, description):
         destination = output / (name + "." + extension)
         fig.savefig(destination, dpi=160, facecolor="white", metadata=metadata)
         if extension == "svg":
-            # Normalize generated path lines for repository whitespace checks.
-            destination.write_text("\n".join(
-                line.rstrip() for line in destination.read_text().splitlines()) + "\n")
+            license_header = """<!--
+Copyright (c) 2026, NVIDIA CORPORATION.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->"""
+            # Keep the XML declaration first and normalize generated path whitespace.
+            lines = [line.rstrip() for line in destination.read_text().splitlines()]
+            assert lines[0].startswith("<?xml ")
+            lines[1:1] = license_header.splitlines()
+            destination.write_text("\n".join(lines) + "\n")
     plt.close(fig)
 
 
