@@ -1,6 +1,6 @@
 # GPU contiguous packing and nvCOMP exploration
 
-Status: IN PROGRESS — column-pruning integration and actual Spark performance reruns authorized.
+Status: IN PROGRESS — predicate pruning authorized; column-pruning timing checkpoint parked at the permitted 2GiB heap blocker.
 Source/provenance repairs and the corrected 256MiB/task cohort are READY FOR REVIEW.
 Current-source CPU/GPU profiling is verified and READY FOR REVIEW below.
 User-approved decoded batching and its impact reruns are READY FOR REVIEW below.
@@ -2524,3 +2524,117 @@ effects. GPU-read population is not included in read-only medians.
 2GiB/task is now running. User explicitly allows parking at a genuine2GiB blocker
 after examining older2GiB evidence. No failure is present yet. Predicate research
 is read-only; source stays frozen until timing completion/park checkpoint.
+
+### Predicate implementation decisions from source research
+
+Root read Spark SimpleMetricsCachedBatchSerializer.buildFilter, the shimmed
+getParquetFilters constructor, existing DataSourceStrategy translation caller,
+GPU Parquet filtering, PCBS writer ROWGROUP options, and cuDF fused statistics
+and merge kernels. Bounded read-only workers independently traced CPU/Parquet
+and GPU statistics. No predicate implementation has started during timing.
+
+Plan after timing completion/park:
+- PCBS: reuse Spark's Catalyst-to-datasource translation in an org.apache.spark.sql
+  helper and existing SparkShimImpl.getParquetFilters. Rename attributes by exprId
+  to physical _colN ordinals first. Use Parquet RowGroupFilter's statistics-only
+  overload through FilterCompat. Reject a whole cached record only when no group
+  can match. Keep existing constructor, serialized shape and Parquet bytes.
+- Parse a footer only for supported predicates; initially allow duplicate parsing
+  on survivors instead of a global cache or retained lazy metadata. Measure an
+  all-match predicate's overhead. Preserve residual Spark row filtering.
+- Initial range eligibility is the currently exercised top-level int/long/binary
+  string semantics. Unsupported types, nonbinary collations, expressions or
+  untrusted/missing statistics retain records. Float/NaN support is not inferred
+  from reuse of Parquet filtering alone. Other released datatypes still decode.
+- GPU scan: mirror the CPU scan's existing partition-pruning gate and invoke
+  serializer.buildFilter with original Catalyst predicates and relation output.
+- nvCOMP: exact per-record statistics in its unreleased wire format, including
+  bounds/count storage in audited bytes. Reuse guarded Spark SimpleMetrics
+  filtering, normalize raw null-safe equality with NULL, preserve five-field
+  lower/upper/null/count/size ordering and actual encoded size accounting.
+- CPU stats: native scan of already packed int/long/string buffers, preserving
+  ArrowWriter and iterator codec reuse. GPU stats: extension-owned relative raw
+  descriptors resolved after spill materialization, tiled fused min/max/null
+  reduction and grouped merge, plus one batched bounds gather for strings.
+  Avoid importing private cuDF structs across the mismatched library ABI.
+- Exact string bounds require explicit source-owner lifetimes and checked,
+  data-derived allocation sizes. Equal bounds can share storage. Group framing
+  must account for actual statistics bytes before allocation; oversized bounds
+  must not silently remove supported string coverage or trigger a new arbitrary
+  memory policy. Add a large-bound functional case and retain accepted budgets.
+- Test results AND avoided work: direct helper filtering, scan output rows before
+  residual filtering, native decode/staging observations, and pruning-off controls.
+  Include all-null/empty/missing bounds, Unicode/prefixes, NULL-safe/reversed ops,
+  AND/OR with unsupported clauses, mixed/legacy groups, aliases and A-projection
+  with B-predicate. Validate existing default CPU and GPU-enabled fallback too.
+
+Resources: mounted Python3.13 can run the shim helper; python3.9 remains benchmark
+Python. nvcc12.9/CUB are available. gh CLI and a GitHub MCP connector are absent;
+origin is an internal GitLab mirror, not a GitHub upstream. Before production
+handoff, run applicable local/core preflight and investigate current-base/advisory
+access; report any unavailable evidence explicitly rather than claim a clean
+online advisory. No repository-local Git configuration changes are authorized.
+
+### Final pruning timing checkpoint — READY FOR REVIEW with explicit 2GiB limitation
+
+The serial matrix is STOPPED at the user-permitted2GiB blocker. Root compared
+old/current logs, source-bound settings and allocation stacks:
+gpu-uncompressed-fixed-2048-42 failed during population with Java heap space,
+exit52,31.03s elapsed and11.69GiB sampled process-tree RSS. The allocation is
+SparkNvcompSerializer.frame(new Array[Byte]); no read times or completed encoded
+size exist for that run. Historical target-final-uncompressed-fixed-2048 failed
+in wire/ByteBuffer allocation, exit52,32.84s,11.76GiB RSS, with EXACTLY the same
+16GiB heap/32GiB managed host/2GiB pinned/24GiB GPU/64GiB sampled guard settings.
+No budget was raised and no RSS guard triggered. The underlying heap-allocation
+cause remains unprofiled; do not call this GPU-memory exhaustion or a codec limit.
+
+Root independently reran both original and archived verifiers: byte-identical
+JSON,10supervisor prerequisites and51timing cases VERIFIED,1failed,4notrun,
+0invalid. The additional GPU Snappy final-build prerequisite also passed.
+No case after the failed uncompressed GPU writer was launched. Not run:
+GPU-written PCBS/default/ANS/typed Cascaded at2GiB/task. This is not a complete
+56-case success claim. CPU-written uncompressed2GiB and its CPU/GPU reads passed.
+
+Final dataset size8192MiB total,4tasks/two slots. Population is one cold action;
+reads are five-sample medians after one warmup. All other protocol/caveats from
+earlier checkpoints remain. No positive available spill/retry metric was
+observed in the nine successful2GiB cases; unobserved CPU metrics remain missing.
+
+| Writer | Format | Population s | CPU full s | CPU ID s | GPU-mode full s | GPU-mode ID s | Encoded MiB total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | snappy | 17.245 | 19.675 | 0.814 | 0.964 | 0.230 | 4134.1 |
+| cpu | lz4 | 15.946 | 18.698 | 0.660 | 1.043 | 0.114 | 4047.2 |
+| cpu | zstd | 26.997 | 18.906 | 0.636 | 0.928 | 0.139 | 3144.1 |
+| cpu | uncompressed | 16.510 | 17.532 | 0.648 | 2.075 | 0.243 | 8191.4 |
+| cpu | pcbs | 91.858 | 43.146 | 32.032 | 1.216 | 0.697 | 5609.4 |
+| cpu | default | 149.719 | 10.957 | 0.295 | 4.377 | 0.438 | 3325.6 |
+| gpu | snappy | 4.381 | 25.423 | 0.692 | 1.450 | 0.115 | 4165.4 |
+| gpu | lz4 | 4.638 | 13.995 | 0.486 | 1.355 | 0.235 | 4053.9 |
+| gpu | zstd | 6.095 | 15.790 | 0.596 | 1.217 | 0.220 | 3018.0 |
+
+GPU-written Snappy CPU full reads show a notable1->2GiB increase7.737->25.423s;
+cause is unprofiled. Retain samples rather than infer GC/bandwidth or silently
+discard this cohort. GPU uncompressed full-read overhead and chunk-metadata
+roundtrip candidates are recorded above; neither was changed during the matrix.
+
+Results: /data/tmp/nvcomp-column-pruning-spark/verified-final.json.
+Historical source snapshot: frozen-sources-42 under the same root,30referenced
+repository sources matching Git93a44449bf9e1b391265ccb2015c69d3bcd7438e.
+Source archive manifest SHA256:
+7e2d967ac504bc8113f5c2bc322735dda1d96878c660c040fa9475bc4e213b09.
+Original verifier SHA256 remains
+d026852e4210c3ede24d1348988acd4c1c21d183f73b589ef1d559ebc7abf4e4.
+Use verify_archived_results.py --json after current-source edits: it hash/Git
+validates source snapshots and maps ONLY those old source paths. All binary,
+external-header, production-proof and runtime-origin checks remain unchanged.
+Root inspected this wrapper and independently reproduced original/archive
+equality. Original launcher guards are NOT relaxed and cannot launch old
+manifests against edited source. Failed-case return1 remains expected; no
+success flag is synthesized. GPU idle confirmed after Spark JVM exit.
+
+Predicate design has no outstanding large user question yet. Resources for
+CPU/GPU stats are available. Local shim baseline coverage passed32profiles/
+3839explicit requirements with0findings,19unmodelled wildcard imports; this is
+baseline static evidence, not compilation or future-change validation.
+Artifacts: /data/tmp/cache-predicate-pruning/shim-baseline.
+Now proceed to predicate implementation under the user authorization.
