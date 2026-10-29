@@ -10,6 +10,8 @@ Direct multi-boundary GPU packing and its host-CPU/kernel profiles are verified
 and READY FOR REVIEW below. CPU codec prerequisites are READY FOR REVIEW;
 CPU row/packed cache integration and first 256MiB/task comparison are
 READY FOR REVIEW below. CPU scaling at512/1024/2048MiB/task is verified and READY FOR REVIEW.
+Column-pruning/predicate research and the isolated column-slice feasibility proof
+are READY FOR REVIEW. No Spark serializer pruning implementation has landed.
 Large-string performance and active GPU spill/retry validation remain pending.
 
 IMPORTANT BASELINE CORRECTION: PCBS numbers before the resumed current-source
@@ -1978,3 +1980,241 @@ scaling, column-indexed compression, CPU columnar output and active spill
 pressure remain outside this completed task or unverified. There is no
 production rollout. Final task status is READY FOR REVIEW; architect alone
 marks DONE.
+
+## Column pruning and predicate research — READY FOR REVIEW
+
+The user requested research before implementation, with autonomous work while
+away. Scope here is source investigation and an isolated executable feasibility
+proof. The Spark serializer, scan, wire format, configuration and main benchmark
+artifacts remain unchanged. This is not a new Spark performance cohort.
+
+Release classification carries forward: packing/nvCOMP public APIs and existing
+Spark/PCBS behavior are RELEASED and must retain their contracts. The experimental
+packed serializer, research bridge/probe and proposed column directory are
+UNRELEASED; no old experimental format adapter is required. A future production
+GPU scan change is a separate integration decision, with mandatory shim
+preflight and applicable profile validation. No such change is included here.
+The research pack-layout assumptions are narrower than the public cuDF contract.
+
+All project operations used MCP docker_exec. Root and bounded read-only workers
+confirmed MCP-only use at resumptions/checkpoints. Root read the decisive code,
+owned serial GPU jobs and independently reproduced the evidence. Workers
+researched column layout and predicate statistics and reviewed the proof.
+Future handoffs/resumptions/checkpoints must repeat the MCP-only requirement.
+
+### What the current implementation does
+
+- GPU encoding already packs all columns with one multi-boundary contiguousSplit
+  per parent attempt. The packed record is then compressed as a whole for byte
+  codecs. Typed Cascaded subdivides typed physical buffers, without a root-column
+  directory. Repacking each column separately would give up this batching gain.
+- The current GPU reader uploads/decompresses all columns before projection;
+  the CPU reader decompresses all columns and copies them into Arrow before
+  UnsafeProjection. Narrow reads therefore still pay most codec/movement costs.
+- CpuCachePath.pack already knows each column's start/end while constructing
+  the packed bytes. It writes mask then fixed data, or mask/offsets/chars for
+  strings; GPU packing writes mask/chars/offsets. Reuse Spark ArrowWriter for
+  row-to-column conversion and preserve per-iterator codec reuse. A future CPU
+  directory can record boundaries at write time; do not apply the GPU-layout
+  indexer to CPU-produced bytes.
+
+Root checked CpuCachePath.pack/encodeRows, PackedTableCodec encode/decode,
+SpillableColumnarBatch and SpillFramework ownership, GPU scan conversion/filter
+methods, PCBS readers/buildFilter, and Spark planning/statistics code. Specific
+cuDF implementation evidence is vendored
+cpp/src/copying/contiguous_split.cu: setup_src_buf_data, type-specific buffer
+setup, 64-byte padded split sizes, exclusive scan and output-column construction.
+Root-column subtrees are contiguous in that implementation, including string
+offset children. Public contiguous_split.hpp promises contiguous partitions,
+not this root-column ordering. Mounted cuDF sources and pinned binary revisions
+differ; the actual loaded binary is exercised below, not inferred to match
+every mounted implementation detail.
+
+### Recommended column layout and execution
+
+Keep existing small row records and one parent packed allocation. Store a
+directory by schema ordinal: per-column raw span, rebased opaque cuDF metadata,
+and compressed payload/segment locations. Compress each column independently,
+but flatten all columns across many records into the SAME batched nvCOMP
+submission. Codec chunks remain independent blocks within each column.
+
+The proof uses public pack_metadata with one-column table views to rebase opaque
+metadata without copying device data. DeviceMemoryBuffer.slice retains the same
+allocation. Native unpack reads host metadata with the real device base, so the
+indexer need not create Java ColumnVectors or fetch string-end GPU scalars.
+An initial trace exposed 36 D2H copies from lazy ContiguousTable.getTable()
+materialization; switching to the native host-metadata path removed those copies.
+Do not resurrect that Java materialization in the writer index path.
+
+The root-column ordering fast path is explicitly pinned and checked for the
+supported flat types. Reject unsupported layouts/types rather than silently
+guessing. It is not a general malformed-metadata validator: string extent is
+trusted from the packer to avoid GPU scalar reads. Zero-row/no-buffer and nested
+types need separate handling before expanding scope. The current encoder drops
+zero-row input, while count-only scans can use record row counts.
+
+Ownership: retain ONE spill owner per original packed record. Column slices are
+borrowed within an attempt and closed before releasing its materialized parent.
+Independent spill owners for aliased subranges could misleadingly report freed
+bytes while another slice pins the parent.
+
+Read only the unique selected columns and restore requested order/duplicates.
+Match schema ordinals/exprIds, not field names. Group by SELECTED decoded bytes
+toward the configured output target; do not leave narrow reads with tiny output
+batches because grouping still counts unselected bytes. Preserve spill/retry
+handling and close compressed/staging temporaries as soon as no longer needed.
+
+Transfers must also be batched: the current synchronous payload-copy helper
+must not become one synchronize per column. Enqueue grouped host transfers with
+a bounded staging owner and synchronize per group. Existing multiBufferCopyAsync
+is a loop of async copies, not a fused copy kernel. Measure copy/API overhead
+separately from codec kernel counts.
+
+The proof decodes one allocation per selected column, then combines column
+views without copying. A proposed integration refinement is one dense projected
+output allocation per row record: flatten selected segments into that owner,
+rebase the per-column metadata to the selected offsets, and assemble one projected
+table. Existing decompression supports segments into one owner; the additional
+metadata-combination path has NOT been implemented/tested. It is a design
+proposal, not an established result. Generic SpillableColumnarBatch materializes
+views without an immediate repack; its generic handle packs on actual spill.
+
+### Executable proof and independently checked evidence
+
+New isolated sources:
+tools/cache-exploration/nvcomp/research/{column_slice_jni.cpp,
+ColumnPruningProbe.java,run.py,analyze.py}.
+
+Final profiled artifacts:
+ /data/tmp/nvcomp-column-pruning-research/metadata-only-profile
+Includes source snapshots, hashes, compiler/commands, logs, completion,
+results.json, profile.nsys-rep and exported profile.sqlite. Earlier final-profile
+contains the negative lazy-Java-materialization result and is not final evidence.
+
+Prerequisite dependency guard:
+python3.9 imports spark/run.py and verify(build-39/spark-provenance.json, build-39);
+root reran it successfully. The research compiles against the hashed application
+jar and dependencies, not mutable main classes. C++ compiles with -Wall -Wextra
+-Werror. The native bounded unpack overload is forward-declared as in the
+existing bridge; binary/header ABI portability is not established.
+
+Reproduce the small proof (new output directory required):
+python3.9 tools/cache-exploration/nvcomp/research/run.py
+ --build-dir /data/tmp/nvcomp-spark-probe/build-39 --output NEW_DIR --profile
+nsys export --type sqlite --output NEW_DIR/profile.sqlite NEW_DIR/profile.nsys-rep
+python3.9 tools/cache-exploration/nvcomp/research/analyze.py NEW_DIR
+
+The final run exited 0 in 11.23 seconds with all 39 observations, exact
+packed-byte/value/null/order checks and zero tracked GPU allocations at phase
+boundaries. This elapsed time includes fixture/validation/profiling and is NOT
+a codec/Spark throughput number. The small proof uses Xmx1g/CUDA_DEFAULT and
+about 9.2MiB packed input, not the main 16GiB/32GiB/24GiB resource cohort.
+
+Fixture: 32769 rows, 38 columns, two packed row records; int/long, variable UTF8,
+nulls, all-null numeric/string columns, empty strings including the LAST root,
+and odd fixed-width tails. Selections: all, ID, string, reordered mixed columns
+with duplicate ID, and count-only. GPU read verifies all seven codecs; CPU read
+of GPU-compressed selected columns and CPU-encode/GPU-decode verify uncompressed,
+Snappy, LZ4 and Zstd with reused codec contexts. CPU encoding here consumes
+downloaded GPU-packed spans; CPU Arrow-produced column indexing is NOT tested.
+
+All numbers below are bytes for this SAME-input proof. Payload includes existing
+codec chunk framing, but excludes the new column directory and outer wire format.
+
+| Codec | Whole-record payload | Column payload | ID-only payload | Whole/column compression kernels |
+| --- | ---: | ---: | ---: | ---: |
+| uncompressed | 9664128 | 9664128 | 262208 | 0 / 0 |
+| snappy | 4805532 | 4804419 | 133347 | 1 / 1 |
+| lz4 | 4794913 | 4790948 | 133262 | 1 / 1 |
+| zstd | 3562425 | 3545109 | 42601 | 6 / 6 |
+| ans | 5598734 | 5517992 | 126804 | 5 / 5 |
+| cascaded8 | 7293208 | 7008308 | 193304 | 1 / 1 |
+| cascaded-typed | 4792360 | 4792788 | 3732 | 3 / 3 |
+
+Raw full/ID bytes are 9664128 / 262208. Snappy ID projection avoids 97.2% of
+encoded upload bytes and 97.3% of decoded bytes for this wide fixture.
+Whole cuDF metadata is 3392 bytes; separate-column metadata totals 4576 bytes,
+an increase of 1184 bytes before adding a directory. Do not assume this overhead
+or compression result generalizes to different record widths/types. Padding
+bytes are not canonical across independent pack runs.
+
+Root re-queried raw Nsight SQLite, filtering PID and interval overlap and checking
+kernel boundary crossings: 14 column-index ranges and 64 host view-assembly
+ranges have no observed kernels or memcpy activity. This says nothing about all
+possible CUDA API/memset activity or unpack outside those ranges. Compression
+kernel counts and native submission counts do not increase in this small proof:
+one submission for byte codecs, three for typed Cascaded. More blocks can force
+additional submissions at larger scale.
+
+Cost is not unchanged. Byte-codec blocks increase 148 to 219; typed blocks 255
+to 292. LZ4 D2D stitching copy events increase 150 to 295 and pointer metadata H2D
+bytes 3552 to 5256. The column-compress NVTX range also includes host retention
+D2H copies, whereas whole-record compression excludes them; do not compare their
+wall times or total copies as equivalent population timings. No full Spark
+pruning speedup, spill behavior or improved population throughput is claimed.
+
+Focused peer review found no blocker and independently checked source hashes,
+completion, observation count and activity summaries. Root's analyze.py verifies
+source/dependency hashes, raw log/results agreement, projection/count-only
+observations, range counts and raw SQLite kernel/copy evidence. Root ran it
+successfully on the final profiled artifact. Performance is REQUIRED for the
+eventual serializer integration; this is a feasibility result, not an exemption.
+
+### Predicate batch skipping
+
+PCBS buildFilter currently returns its input unchanged. Its GPU Parquet reader
+does include selected columns, but its CPU row path builds full column IO before
+projecting; the CPU columnar route has selected readers. These are code-path
+facts, not a complete profile attribution of the earlier timings.
+
+Spark's CPU cache scan already invokes serializer.buildFilter when partition
+pruning is enabled. DefaultCachedBatchSerializer's helper can be reused for
+records implementing SimpleMetricsCachedBatch, with encoded size overriding the
+statistics-size estimate. Actual per-column schema is lowerBound, upperBound,
+nullCount:Int, count:Int, sizeInBytes:Long. Preserve schema/order and Spark
+comparison semantics, including UTF8 string ordering and owned string bounds.
+
+The GPU scan currently returns cachedColumnBuffers without invoking buildFilter.
+Root checked InMemoryTableScanMeta.convertToGpu: it passes imts.predicates through,
+so these are original Catalyst predicates, not converted GPU expression nodes.
+A future host-statistics filter can therefore consume those predicates; it still
+requires an explicit scan integration, production review and shim preflight.
+
+Use conservative batch exclusion, never exact-row-filter claims. Spark retains
+the residual filter. A query projecting A with a predicate on B must decode both
+on surviving records under the current planner. Predicate-first selection-vector
+decoding is a separate later design, not part of this recommendation.
+
+Default helper supports selected literal comparisons, null checks, literal IN
+and StartsWith; unsupported predicates must retain batches. Unknown bounds must
+retain batches explicitly: setting bounds to null and blindly delegating can
+drop real matches. Direct unnormalized EqualNullSafe(NULL) also needs handling
+or normalization even though the normal optimizer rewrites it to IsNull.
+
+For GPU statistics, avoid per-column/per-record reductions and scalar downloads.
+cuDF Parquet already batches fragment statistics: gpu_calculate_group_statistics
+uses one block per column/range group in one launch for min/max/null statistics,
+then supports grouped merging. These are internal CUDA implementation routines,
+not public JNI APIs or exported standalone wrappers. Reuse/adaptation needs
+matching source/toolchain work and must keep string bounds alive through copying.
+Java segmentedReduce only batches ranges of ONE column and ONE aggregation.
+No statistics or GPU batch-filter implementation is included in this proof.
+
+### Proposed next bounded work and park conditions
+
+1. Review/accept the directory approach, implement CPU/GPU column-indexed records
+   using existing row conversion/packing/codec contexts, and verify full/narrow,
+   duplicate/reordered/count-only cross-mode reads. No old unreleased-format shim.
+2. Benchmark the actual serializer at the established task sizes/settings,
+   reporting population/full/narrow CPU and GPU times, encoded directory-inclusive
+   sizes, native calls/copy activity, output batching and observed spill.
+3. Add exact CPU statistics and conservative batch filtering first, then batched
+   GPU statistics plus the scan hook under separate production/shim review.
+
+Park if the pinned layout/ABI validation fails, source artifacts mismatch,
+unsupported types reach the proof, resource guard trips, or a production/shared
+scan change is needed before its integration scope is agreed. Do not alter
+hardware-derived targets, accepted budgets, filters or unsupported-type behavior
+to obtain a passing result. Large strings, nested/new types, Arrow-writer indexing,
+active spill recovery and full Spark pruning performance remain unverified.
+Research status: READY FOR REVIEW. Architect alone marks DONE.
