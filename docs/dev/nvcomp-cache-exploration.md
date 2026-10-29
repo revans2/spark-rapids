@@ -1,6 +1,14 @@
 # GPU contiguous packing and nvCOMP exploration
 
-Status: IN PROGRESS — predicate pruning authorized; column-pruning timing checkpoint parked at the permitted 2GiB heap blocker.
+Status: LOCAL PROOF OF CONCEPT READY FOR REVIEW. The current publication handoff,
+two issue drafts, figures and result summary are in
+[cache-serialization-poc/README.md](cache-serialization-poc/README.md).
+Only the architect marks DONE; production/cross-version acceptance is INCOMPLETE.
+
+The phase-status paragraphs below are historical checkpoints. The final local
+validation and publication sections at the end supersede their pending-state claims.
+
+Historical status: predicate pruning authorized; column-pruning timing checkpoint parked at the permitted 2GiB heap blocker.
 Source/provenance repairs and the corrected 256MiB/task cohort are READY FOR REVIEW.
 Current-source CPU/GPU profiling is verified and READY FOR REVIEW below.
 User-approved decoded batching and its impact reruns are READY FOR REVIEW below.
@@ -3044,3 +3052,54 @@ Raw results, CPU reference aggregates, full/ID predicate controls, storage,
 memory and spill observations remain in verified-256-archived.json and
 verified-large.json. No unresolved required local check remains; broader
 production compatibility and stock-Spark issue are explicitly separate.
+
+### Publication handoff — READY FOR REVIEW
+
+User authorized cleanup for a proof-of-concept branch and two GitHub performance
+issue overviews, excluding further Vortex work. Created local branch
+poc/cache-serialization from77afe5a90f, preserving pcbs-rowgroup-production,
+existing history and unrelated untracked files. No push/issue/PR was performed.
+Inherited metadata/Delta and historical Vortex changes are explicitly identified;
+this continuation branch is not represented as a cache-only diff against main.
+
+Added docs/dev/cache-serialization-poc: README, two issue drafts, results.json,
+and reproducible PNG/SVG figures. Added cache_reuse.py and plot_cache_results.py;
+updated the tools entry point and superseded stale top-level pending status.
+No runtime source, configuration, architecture or acceptance criteria changed.
+
+Dependency audit and root decisive-code reads establish one implementation repo:
+rapids-plugin-4-spark. Native codec/metadata/statistics extensions are committed
+under tools; downloaded pinned JNI/private artifacts and matching headers are
+external build inputs, not companion patches. No Spark/cuDF/JNI patch is required
+for this configuration. Bounds-checked unpack export/header mismatch, hardcoded
+local paths and missing portable build-proof generator are documented POC limits.
+Stock Spark UTF8-prefix bug remains a separate follow-up with local guards.
+Released PCBS contracts and unreleased packed-format classification are unchanged.
+
+Two issue narratives distinguish matched selected-policy historical PCBS results
+from earlier row-cap OOM evidence, current numeric results and final guard checks.
+Historical PCBS report is recovered from Git91d748957d; raw /data/pcbs-oom archive
+is not mounted, so no fresh historical replay is claimed. TLC regression remains
+visible. Vortex is left historical and excluded from the issues.
+
+User requested reuse-based comparisons and charts. CPU full/ID models use
+T(N)=population+N*read, counting additional reads after population. Full-precision
+Snappy/default crossings16.235063 and252.990151 yield first winning default reads
+17 and253. Curves are modeled totals, not measured repeated-action runs. CPU/GPU
+population/read/size remain separated, unsupported modes not fabricated.
+
+Root independently reran immutable verification:14small+7large cases VERIFIED,
+0failed/invalid; no Spark/GPU benchmark/build launched. Extracted21summary rows
+and compared each field back to verifier outputs. Independent Decimal arithmetic
+checked112pairwise comparisons plus4boundary cases; local Markdown links PASS.
+Root read both delegated scripts, reran plotting withPython3.13/matplotlib3.10.9
+using existing pip-vendored six (no install), and visually inspected both PNGs.
+Worker twice confirmed deterministic figure hashes. Focused peer review of root
+narratives, numbers/provenance and other worker's arithmetic found no substantive
+finding. git diff --check PASS before commit. All project operations and worker
+checkpoints used MCP docker_exec exclusively and workers confirmed compliance.
+
+Prior final355 correctness/build evidence remains unchanged. Broader compatibility,
+current-main/advisory evidence, spill recovery and portable reproduction remain
+INCOMPLETE as described above; no production acceptance is claimed. Publication
+handoff is READY FOR REVIEW; only architect marks DONE.

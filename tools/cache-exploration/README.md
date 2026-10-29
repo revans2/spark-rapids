@@ -1,4 +1,13 @@
-# Arrow / Vortex cache codec experiment
+# Cache serialization experiments
+
+For the current PCBS and shared CPU/GPU packed-cache proof of concept, start at
+[the publication handoff](../../docs/dev/cache-serialization-poc/README.md).
+It includes two performance issue drafts, measured results, reuse crossover
+calculations, figures, dependency requirements and verification limits.
+
+The Arrow/Vortex material below is historical and is outside those two issues.
+
+## Historical Arrow / Vortex cache codec experiment
 
 This standalone Java 17 harness checks Vortex cache-codec paths with CPU or GPU
 population and consumption. CPU population writes an Arrow Java host batch directly
