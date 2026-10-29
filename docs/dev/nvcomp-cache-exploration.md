@@ -2357,3 +2357,81 @@ Supervisor/state: run_matrix.py / matrix-status.json in the same directory.
 MCP docker_exec-only operations and source freeze remain in effect. Root owns
 serial jobs; workers are idle. No new source edits during the frozen matrix.
 Verifier SHA256: d026852e4210c3ede24d1348988acd4c1c21d183f73b589ef1d559ebc7abf4e4.
+
+### Comparison clarification from user
+
+PCBS ALREADY stores independently compressed column chunks and their directory
+inside Parquet files. This work adds equivalent column-addressable payloads to
+the custom nvCOMP format; it does not introduce that capability to PCBS or change
+PCBS to separate files. Root verified d88ebe87e1..HEAD contains no PCBS production
+file changes. New packed records still use one byte array with a column directory.
+
+Keep before/after nvCOMP comparisons separate from same-cohort nvCOMP/PCBS
+comparisons. Differences in unchanged PCBS timings between cohorts are
+unattributed run differences, not effects of this implementation. Independent
+column compression itself cannot explain an advantage over PCBS. Its row
+reader constructs full Parquet column IO before projection, while GPU and CPU
+columnar routes support selected columns; prove the actual benchmark call path
+before attributing timing differences to this source-path distinction. No PCBS
+format/runtime optimization or intrinsic format advantage is established here.
+
+### PCBS transfer follow-up — investigation complete, no code changes
+
+User asked whether GPU PCBS should remove unused Parquet chunks before decoding,
+or whether transfer time is too small. Root traced includeColumn -> managed
+host logical-file buffers -> cuDF selected input-column chunk reads and the
+native multi_host_buffer_source offset/size copies. Root independently queried
+existing profile-current-pcbs-256 raw SQLite and a read-only reviewer reproduced
+the numbers and verified exact production/JNI artifacts match build42.
+
+Four256MiB tasks, GPU-written cache, diagnostic profile:
+full samples H2D521860080bytes each, summedcopy27.239/27.395ms versus
+collect401.358/324.751ms; ID samples H2D17296932bytes each,
+summedcopy1.264/1.269ms versuscollect196.351/160.719ms. All event-boundary crossing
+counts0. PCBS ALREADY avoids full-file H2D for projection (~96.69% fewer bytes).
+Summed GPU durations overlap and are not critical-path percentages; these are
+older perturbed profiles of the same unchanged PCBS binary, not new headline
+pruning timings.
+
+Separate opportunity: Files.stage still copies whole encoded records from JVM
+heap into managed host, logicalFile creates all-column views/metadata, and
+group estimates count full schema. Host staging/selected-byte grouping may be
+worth measuring later; GPU transfer data does not quantify that CPU cost.
+No PCBS implementation/config/artifact changed. User agreed to continue the
+other experiments, so resume the frozen nvCOMP matrix rather than start a PCBS
+rewrite. Predicate/PCBS follow-ups remain separate.
+
+### Pruning 512MiB/task cohort — READY FOR REVIEW; 1/2GiB IN PROGRESS
+
+Root reran the verifier over all completed artifacts:28main cases plus ten
+supervisor probes verified,28main cases pending,0failed/invalid. The separate
+GPU Snappy final-build probe also remains verified. Full source/dependency
+hashes match build42; no source changes occurred during the matrix.
+
+Same measurement protocol, dimensions, modes, defaults and caveats as256MiB.
+Total logical input2048MiB across4tasks/two slots. All4partitions resident,
+no disk storage/recomputation, available Spark/RAPIDS spill/retry totals0.
+No guard fired. This does not establish active-pressure recovery.
+Stable artifact: /data/tmp/nvcomp-column-pruning-spark/verified-512.json.
+
+| Writer | Format | Population s | CPU full s | CPU ID s | GPU-mode full s | GPU-mode ID s | Encoded MiB total |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| cpu | snappy | 4.764 | 4.908 | 0.245 | 0.383 | 0.112 | 1033.5 |
+| cpu | lz4 | 5.027 | 4.893 | 0.209 | 0.354 | 0.111 | 1011.6 |
+| cpu | zstd | 7.572 | 4.908 | 0.227 | 0.322 | 0.114 | 786.2 |
+| cpu | uncompressed | 4.996 | 4.596 | 0.201 | 0.513 | 0.102 | 2047.9 |
+| cpu | pcbs | 22.716 | 10.765 | 8.039 | 0.449 | 0.267 | 1402.4 |
+| cpu | default | 39.616 | 2.954 | 0.107 | 0.941 | 0.237 | 831.4 |
+| gpu | snappy | 1.797 | 3.923 | 0.225 | 0.452 | 0.122 | 1047.1 |
+| gpu | lz4 | 1.818 | 3.657 | 0.172 | 0.460 | 0.142 | 1019.1 |
+| gpu | zstd | 2.133 | 5.341 | 0.219 | 0.381 | 0.110 | 760.5 |
+| gpu | uncompressed | 1.884 | 3.541 | 0.207 | 0.557 | 0.148 | 2049.6 |
+| gpu | pcbs | 1.956 | 9.913 | 7.778 | 0.355 | 0.190 | 979.3 |
+| gpu | default | 40.053 | 2.832 | 0.110 | 1.229 | 0.236 | 831.4 |
+| gpu | ans | 1.696 | unsupported | unsupported | 0.493 | 0.127 | 1126.7 |
+| gpu | cascaded | 1.743 | unsupported | unsupported | 0.562 | 0.142 | 777.3 |
+
+The1GiB/task cohort has started. The complete remaining matrix is still authorized
+and IN PROGRESS, with serial jobs under the original caps/protocol. Large CPU
+fallback scans dominate elapsed matrix time. Do not report the remaining1/2GiB
+numbers as measured until their completion and independent verification.
