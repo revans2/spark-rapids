@@ -605,50 +605,16 @@ self.log("... OK")
                 <executions>
                     <execution>
                         <id>unpack-history-metrics-at-root</id>
-                        <!-- The aggregator's per-shim shade excludes these Java-only artifacts. -->
+                        <!-- Resolve versions through the SQL plugin's transitive runtime dependencies. -->
                         <phase>generate-resources</phase>
                         <goals>
-                            <goal>unpack</goal>
+                            <goal>unpack-dependencies</goal>
                         </goals>
                         <configuration>
-                            <artifactItems>
-                                <artifactItem>
-                                    <groupId>com.nvidia</groupId>
-                                    <artifactId>cudf-spark-history-metrics-api</artifactId>
-                                    <version>${history-metrics.version}</version>
-                                    <includes>com/nvidia/spark/history/**</includes>
-                                    <outputDirectory>${project.build.directory}/parallel-world</outputDirectory>
-                                </artifactItem>
-                                <artifactItem>
-                                    <groupId>com.nvidia</groupId>
-                                    <artifactId>cudf-spark-history-metrics-backend-core</artifactId>
-                                    <version>${history-metrics.version}</version>
-                                    <includes>com/nvidia/spark/history/**</includes>
-                                    <outputDirectory>${project.build.directory}/parallel-world</outputDirectory>
-                                </artifactItem>
-                                <artifactItem>
-                                    <groupId>com.nvidia</groupId>
-                                    <artifactId>cudf-spark-history-metrics-relational-core</artifactId>
-                                    <version>${history-metrics.version}</version>
-                                    <includes>com/nvidia/spark/history/**</includes>
-                                    <outputDirectory>${project.build.directory}/parallel-world</outputDirectory>
-                                </artifactItem>
-                                <artifactItem>
-                                    <groupId>com.nvidia</groupId>
-                                    <artifactId>cudf-spark-history-metrics-local</artifactId>
-                                    <version>${history-metrics.version}</version>
-                                    <includes>com/nvidia/spark/history/**,META-INF/services/com.nvidia.spark.history.HistoryMetricsProvider</includes>
-                                    <outputDirectory>${project.build.directory}/parallel-world</outputDirectory>
-                                </artifactItem>
-                                <artifactItem>
-                                    <groupId>org.xerial</groupId>
-                                    <artifactId>sqlite-jdbc</artifactId>
-                                    <!-- Keep this in sync with cudf-spark-history-metrics-local's runtime dependency. -->
-                                    <version>3.53.4.0</version>
-                                    <includes>org/sqlite/**,META-INF/versions/*/org/sqlite/**,META-INF/native-image/org.xerial/sqlite-jdbc/**,META-INF/services/java.sql.Driver,META-INF/maven/org.xerial/sqlite-jdbc/**</includes>
-                                    <outputDirectory>${project.build.directory}/parallel-world</outputDirectory>
-                                </artifactItem>
-                            </artifactItems>
+                            <includeGroupIds>com.nvidia,org.xerial</includeGroupIds>
+                            <includeArtifactIds>cudf-spark-history-metrics-api,cudf-spark-history-metrics-backend-core,cudf-spark-history-metrics-relational-core,cudf-spark-history-metrics-local,sqlite-jdbc</includeArtifactIds>
+                            <includes>com/nvidia/spark/history/**,org/sqlite/**,META-INF/versions/*/org/sqlite/**,META-INF/native-image/org.xerial/sqlite-jdbc/**,META-INF/services/com.nvidia.spark.history.HistoryMetricsProvider,META-INF/services/java.sql.Driver,META-INF/maven/org.xerial/sqlite-jdbc/**</includes>
+                            <outputDirectory>${project.build.directory}/parallel-world</outputDirectory>
                         </configuration>
                     </execution>
                     <execution>
