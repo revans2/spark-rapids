@@ -22,6 +22,8 @@ import unittest
 SCRIPT = Path(__file__).resolve().parents[1] / "binary-dedupe.sh"
 VERSIONED_CLASS = "META-INF/versions/9/example/Feature.class"
 SERVICE = "META-INF/services/example.Provider"
+UNRELATED_VERSIONED_CLASS = (
+    "META-INF/versions/11/com/nvidia/shaded/spark/org/roaringbitmap/ArraysShim.class")
 
 
 def write_entry(root, entry, contents):
@@ -39,6 +41,7 @@ class BinaryDedupeTest(unittest.TestCase):
             write_entry(root / shim, VERSIONED_CLASS, contents)
             write_entry(root / shim, "example/Common.class", b"common class")
             write_entry(root / shim, SERVICE, b"example.Provider\n")
+            write_entry(root / shim, UNRELATED_VERSIONED_CLASS, b"unrelated versioned class")
         allowlist = directory / "promote.txt"
         allowlist.write_text("META-INF/versions/*/example/*.class\n")
         environment = os.environ.copy()
@@ -65,7 +68,11 @@ class BinaryDedupeTest(unittest.TestCase):
                         root = directory / "parallel-world"
                         self.assertEqual(b"same class", (root / VERSIONED_CLASS).read_bytes())
                         self.assertFalse((root / "spark-shared" / VERSIONED_CLASS).exists())
+                        self.assertFalse((root / UNRELATED_VERSIONED_CLASS).exists())
+                        self.assertFalse((root / "spark-shared" / UNRELATED_VERSIONED_CLASS).exists())
                         for shim in shims:
+                            self.assertEqual(b"unrelated versioned class",
+                                             (root / shim / UNRELATED_VERSIONED_CLASS).read_bytes())
                             self.assertFalse((root / shim / VERSIONED_CLASS).exists())
                             self.assertEqual(b"example.Provider\n",
                                              (root / shim / SERVICE).read_bytes())
