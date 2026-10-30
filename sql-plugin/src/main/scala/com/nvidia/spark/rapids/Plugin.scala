@@ -609,7 +609,6 @@ class RapidsDriverPlugin extends DriverPlugin with Logging {
           logError("History metrics activation failed; history-backed heuristics remain disabled",
             failure)
       } finally {
-        historyMetricsSparkContext = null
         historyMetricsConfiguration = null
         historyMetricsProviderName = null
       }
@@ -618,13 +617,19 @@ class RapidsDriverPlugin extends DriverPlugin with Logging {
   }
 
   override def shutdown(): Unit = {
+    val sc = historyMetricsSparkContext
     historyMetricsSparkContext = null
     historyMetricsConfiguration = null
     historyMetricsProviderName = null
     RapidsPluginUtils.safeShutdown(
-      Seq(() => historyMetricsManager.shutdown()) ++
-        extraDriverPlugins.map(plugin => () => plugin.shutdown()) ++
+      extraDriverPlugins.map(plugin => () => plugin.shutdown()) ++
         Seq(
+          () => historyMetricsManager.shutdown(() => {
+            // Spark 4 shuts plugins down before draining the listener bus. Allow pending
+            // callbacks to record observations before removing and closing the history store.
+            Option(sc).foreach(TrampolineUtil.waitForListenerEvents(_,
+              HistoryMetricsManager.LISTENER_SHUTDOWN_TIMEOUT.toMillis))
+          }),
           () => FileCacheLocalityManager.shutdown(),
           // Shutdown listener first to trigger cleanup for any remaining jobs
           () => Option(shuffleCleanupListener).foreach(_.shutdown()),

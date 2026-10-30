@@ -21,9 +21,15 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.time.Duration
 import java.util
+import java.util.concurrent.{CountDownLatch, Executors, TimeoutException, TimeUnit}
+import java.util.concurrent.atomic.AtomicBoolean
 
 import com.nvidia.spark.history._
 import org.scalatest.funsuite.AnyFunSuite
+
+import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.scheduler.{JobSucceeded, SparkListener, SparkListenerJobEnd}
+import org.apache.spark.sql.rapids.execution.TrampolineUtil
 
 class HistoryMetricsManagerSuite extends AnyFunSuite {
   import Arm.withResource
@@ -45,7 +51,7 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     initialize(manager, "none")
 
     assert(MetricStores.current() eq initial)
-    manager.shutdown()
+    manager.shutdown(() => throw new AssertionError("disabled history should not wait"))
   }
 
   test("selected provider is installed and shut down") {
@@ -72,6 +78,84 @@ class HistoryMetricsManagerSuite extends AnyFunSuite {
     assert(provider.shutdownCalls == 1)
     assert(provider.shutdownTimeout == HistoryMetricsManager.PROVIDER_SHUTDOWN_TIMEOUT)
     assert(MetricStores.current() eq initial)
+  }
+
+  test("shutdown waits for an in-flight Spark listener before removing the store") {
+    val initial = MetricStores.current()
+    val recorded = new AtomicBoolean()
+    val observation = new Observation(new MetricVersionId(1, 1),
+      util.Collections.emptyMap[String, DimValue](), 1.0, System.currentTimeMillis())
+    val store = new DelegatingStore(initial) {
+      override def record(observation: Observation): Unit = recorded.set(true)
+    }
+    val provider = new TestProvider("local", store)
+    val manager = new HistoryMetricsManager(() => Seq(provider))
+    val entered = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    val waiting = new CountDownLatch(1)
+    val executor = Executors.newSingleThreadExecutor()
+    val sc = new SparkContext(new SparkConf(false)
+      .setMaster("local[1]")
+      .setAppName("history-metrics-shutdown")
+      .set("spark.ui.enabled", "false")
+      .set("spark.driver.host", "127.0.0.1")
+      .set("spark.driver.bindAddress", "127.0.0.1"))
+    try {
+      initialize(manager, "local")
+      sc.addSparkListener(new SparkListener {
+        override def onJobEnd(event: SparkListenerJobEnd): Unit = {
+          entered.countDown()
+          if (release.await(10, TimeUnit.SECONDS)) {
+            MetricStores.current().record(observation)
+          }
+        }
+      })
+      TrampolineUtil.postEvent(sc, SparkListenerJobEnd(1, System.currentTimeMillis(), JobSucceeded))
+      assert(entered.await(10, TimeUnit.SECONDS))
+      val shutdown = executor.submit(new Runnable {
+        override def run(): Unit = manager.shutdown(() => {
+          waiting.countDown()
+          TrampolineUtil.waitForListenerEvents(sc,
+            HistoryMetricsManager.LISTENER_SHUTDOWN_TIMEOUT.toMillis)
+        })
+      })
+      assert(waiting.await(10, TimeUnit.SECONDS))
+      assert(!shutdown.isDone)
+      assert(MetricStores.current() eq store)
+      release.countDown()
+      shutdown.get(10, TimeUnit.SECONDS)
+      assert(recorded.get())
+      assert(provider.shutdownCalls == 1)
+      assert(MetricStores.current() eq initial)
+      manager.shutdown(() => throw new AssertionError("already shut down"))
+    } finally {
+      release.countDown()
+      executor.shutdown()
+      try {
+        assert(executor.awaitTermination(10, TimeUnit.SECONDS))
+      } finally {
+        manager.shutdown()
+        sc.stop()
+      }
+    }
+  }
+
+  test("listener timeout still removes the store and shuts down the provider") {
+    val initial = MetricStores.current()
+    val provider = new TestProvider("local", new DelegatingStore(initial))
+    val manager = new HistoryMetricsManager(() => Seq(provider))
+    try {
+      initialize(manager, "local")
+      manager.shutdown(() => {
+        assert(MetricStores.current() eq provider.store)
+        assert(provider.shutdownCalls == 0)
+        throw new TimeoutException("listener did not finish")
+      })
+      assert(provider.shutdownCalls == 1)
+      assert(MetricStores.current() eq initial)
+    } finally {
+      manager.shutdown()
+    }
   }
 
   test("missing provider keeps the no-op store") {

@@ -64,7 +64,20 @@ private[rapids] class HistoryMetricsManager(
     }
   }
 
-  def shutdown(): Unit = synchronized {
+  def shutdown(awaitListeners: () => Unit = () => ()): Unit = synchronized {
+    if (activeProvider != null) {
+      // Keep the store installed while Spark listeners finish producing observations.
+      try {
+        awaitListeners()
+      } catch {
+        case interrupted: InterruptedException =>
+          Thread.currentThread().interrupt()
+          logWarning("Interrupted while waiting for history metrics listeners", interrupted)
+        case failure if HistoryMetricsManager.isContained(failure) =>
+          logWarning("Could not finish waiting for history metrics listeners; " +
+            "continuing provider shutdown", failure)
+      }
+    }
     val currentRegistration = registration
     val currentProvider = activeProvider
     registration = null
@@ -206,6 +219,7 @@ private[rapids] class HistoryMetricsManager(
 
 private[rapids] object HistoryMetricsManager {
   val NO_PROVIDER: String = "none"
+  val LISTENER_SHUTDOWN_TIMEOUT: Duration = Duration.ofSeconds(10)
   val PROVIDER_SHUTDOWN_TIMEOUT: Duration = Duration.ofSeconds(10)
 
   def discover(): Seq[HistoryMetricsProvider] = {

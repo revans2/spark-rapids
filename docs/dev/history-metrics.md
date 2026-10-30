@@ -277,7 +277,11 @@ depend on a shutdown export. A later driver using the same file can read committ
 observations. Observation provenance retains the application and attempt identity supplied when the
 provider stamped that write.
 
-The embedding plugin removes the installed store and calls the provider's
+When a provider is active, the embedding plugin first waits up to ten seconds for pending Spark
+listener callbacks to finish recording observations. Empty listener queues return immediately. This
+best-effort wait handles Spark 4 shutting plugins down before draining listener events; timeout or
+listener-wait failure is logged and cleanup proceeds. Events posted by other plugins after this wait
+are not covered. The embedding plugin then removes the installed store and calls the provider's
 `shutdown(Duration)`. Repeated shutdown calls are harmless. Successful shutdown means admission is
 closed and every previously admitted observation reached an attempted terminal backend outcome:
 confirmed acceptance, validation rejection, or backend failure. It does not promise that every
