@@ -305,6 +305,8 @@
                             <target>
                                 <delete dir="${project.build.directory}/parallel-world"
                                         includeemptydirs="true"/>
+                                <delete dir="${project.build.directory}/history-metrics-unpack-markers"
+                                        includeemptydirs="true"/>
                                 <delete>
                                     <fileset dir="${project.build.directory}" includes="*.jar"/>
                                 </delete>
@@ -615,6 +617,7 @@ self.log("... OK")
                             <includeArtifactIds>cudf-spark-history-metrics-api,cudf-spark-history-metrics-backend-core,cudf-spark-history-metrics-relational-core,cudf-spark-history-metrics-local,sqlite-jdbc</includeArtifactIds>
                             <includes>com/nvidia/spark/history/**,org/sqlite/**,META-INF/versions/*/org/sqlite/**,META-INF/native-image/org.xerial/sqlite-jdbc/**,META-INF/services/com.nvidia.spark.history.HistoryMetricsProvider,META-INF/services/java.sql.Driver,META-INF/maven/org.xerial/sqlite-jdbc/**</includes>
                             <outputDirectory>${project.build.directory}/parallel-world</outputDirectory>
+                            <markersDirectory>${project.build.directory}/history-metrics-unpack-markers</markersDirectory>
                         </configuration>
                     </execution>
                     <execution>
