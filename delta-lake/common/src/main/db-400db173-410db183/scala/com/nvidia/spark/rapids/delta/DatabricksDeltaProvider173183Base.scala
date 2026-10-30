@@ -72,6 +72,7 @@ import org.apache.spark.sql.execution.datasources.v2.{
 }
 import org.apache.spark.sql.execution.datasources.v2.rapids.{
   GpuAtomicCreateTableAsSelectExec,
+  GpuAtomicDeltaWriteContext,
   GpuAtomicReplaceTableAsSelectExec
 }
 import org.apache.spark.sql.rapids.{GpuAnd, GpuEqualTo, GpuFileSourceScanExec, GpuNot}
@@ -80,6 +81,9 @@ import org.apache.spark.sql.sources.InsertableRelation
 import org.apache.spark.sql.types.StructType
 
 abstract class DatabricksDeltaProvider173183Base extends DatabricksDeltaProviderBase {
+
+  override protected def isNativeStagedDeltaWriteActive: Boolean =
+    GpuAtomicDeltaWriteContext.isActive
 
   override def getDataWritingCommandRules: Map[Class[_ <: DataWritingCommand],
       DataWritingCommandRule[_ <: DataWritingCommand]] = {
